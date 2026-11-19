@@ -1,0 +1,162 @@
+package dev.jkit.sources;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import dev.jkit.model.JkitException;
+import dev.jkit.model.Platform;
+import dev.jkit.model.Tool;
+import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
+import java.io.IOException;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeSet;
+
+/** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
+public final class FoojaySource {
+    public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
+
+    /** One JDK package for one platform. */
+    public record Pkg(String id, Vendor vendor, int major, Version version, String fileName,
+                      String archiveType, String termOfSupport) { }
+
+    /** A feature release and its support status. */
+    public record Major(int major, String termOfSupport, boolean maintained) {
+        public boolean isLts() { return termOfSupport.equalsIgnoreCase("LTS"); }
+    }
+
+    private final Http http;
+    private final URI base;
+
+    public FoojaySource(Http http, URI base) {
+        this.http = http;
+        this.base = base.toString().endsWith("/") ? base : URI.create(base + "/");
+    }
+
+    /** Newest build per vendor and major version for one platform: one request. */
+    public List<Pkg> newestPerVendorAndMajor(Platform platform, boolean fx) throws IOException {
+        return packages(platform, "latest=available&release_status=ga", fx);
+    }
+
+    /** Every build of one major from one vendor, newest first. */
+    public List<Pkg> builds(int major, Vendor vendor, Platform platform, boolean fx, boolean pre)
+            throws IOException {
+        String status = pre ? "release_status=ga&release_status=ea" : "release_status=ga";
+        List<Pkg> all = packages(platform,
+                "jdk_version=" + major + "&distribution=" + vendor.foojayName() + "&" + status, fx);
+        all.sort(Comparator.comparing(Pkg::version).reversed());
+        return all;
+    }
+
+    public List<Major> majors() throws IOException {
+        JsonNode root = Json.parse(http.get(base.resolve(
+                "major_versions?ea=false&ga=true&maintained=false&include_build=false&include_versions=false")));
+        List<Major> out = new ArrayList<>();
+        for (JsonNode n : root.path("result")) {
+            out.add(new Major(n.path("major_version").asInt(), Json.text(n, "term_of_support"),
+                    n.path("maintained").asBoolean()));
+        }
+        out.sort(Comparator.comparingInt(Major::major).reversed());
+        return out;
+    }
+
+    /**
+     * Resolves {@code versionSpec} (null = newest) for one vendor and platform to a downloadable
+     * artifact with its checksum.
+     */
+    public Artifact resolve(Tool tool, String versionSpec, Vendor vendor, Platform platform,
+                            boolean fx, boolean pre) throws IOException {
+        int major;
+        if (versionSpec == null) {
+            major = newestPerVendorAndMajor(platform, fx).stream()
+                    .filter(p -> p.vendor().equals(vendor))
+                    .mapToInt(Pkg::major).max()
+                    .orElseThrow(() -> new JkitException(vendor + " has no builds for " + platform));
+        } else {
+            major = Version.parse(versionSpec).part(0);
+        }
+        Pkg pkg = builds(major, vendor, platform, fx, pre).stream()
+                .filter(p -> p.version().matches(versionSpec))
+                .filter(p -> pre || !p.version().isPreRelease())
+                .findFirst()
+                .orElseThrow(() -> noMatch(tool, versionSpec, vendor, platform, fx, major));
+        JsonNode info = Json.parse(http.get(base.resolve("ids/" + pkg.id()))).path("result").path(0);
+        String url = Json.text(info, "direct_download_uri");
+        if (url.isEmpty()) {
+            throw new JkitException(pkg.vendor() + " " + pkg.version() + " has no direct download");
+        }
+        String checksum = Json.text(info, "checksum");
+        String algorithm = Json.text(info, "checksum_type");
+        String checksumUri = Json.text(info, "checksum_uri");
+        if (checksum.isEmpty() && !checksumUri.isEmpty()) {
+            checksum = firstToken(http.get(URI.create(checksumUri)));
+            algorithm = checksumUri.contains("sha512") ? "sha512" : "sha256";
+        }
+        return new Artifact(tool, pkg.version(), pkg.vendor(), URI.create(url), pkg.fileName(),
+                pkg.archiveType(), checksum.isEmpty() ? null : algorithm, checksum.isEmpty() ? null : checksum);
+    }
+
+    private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,
+                                  boolean fx, int major) {
+        String what = tool.id() + (spec == null ? "" : "@" + spec);
+        try {
+            TreeSet<String> others = new TreeSet<>();
+            for (Pkg p : newestPerVendorAndMajor(platform, fx)) {
+                if (p.major() == major && !p.vendor().equals(vendor)
+                        && (tool != Tool.GRAALVM || p.vendor().isGraalVmBased())) {
+                    others.add(p.vendor().name());
+                }
+            }
+            if (!others.isEmpty()) {
+                return new JkitException(vendor + " has no build matching " + what + " for " + platform,
+                        "available from: " + String.join(", ", others));
+            }
+        } catch (IOException ignored) {
+            // fall through to the plain message
+        }
+        return new JkitException(vendor + " has no build matching " + what + " for " + platform);
+    }
+
+    private List<Pkg> packages(Platform platform, String extra, boolean fx) throws IOException {
+        String query = "packages?operating_system=" + platform.os()
+                + "&architecture=" + platform.arch()
+                + "&archive_type=tar.gz&archive_type=zip&package_type=jdk"
+                + "&javafx_bundled=" + fx + "&" + extra;
+        JsonNode root = Json.parse(http.get(base.resolve(query)));
+        String preferred = platform.isWindows() ? "zip" : "tar.gz";
+        // one package per vendor + version, preferring the platform's usual archive type
+        Map<String, Pkg> byKey = new LinkedHashMap<>();
+        for (JsonNode n : root.path("result")) {
+            if (platform.isLinux() && !Json.text(n, "lib_c_type").equals("glibc")) {
+                continue;
+            }
+            if (n.path("feature").size() > 0) {
+                continue; // CRaC, Leyden and other variants are excluded by default
+            }
+            if (n.path("javafx_bundled").asBoolean() != fx) {
+                continue;
+            }
+            Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),
+                    n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
+                    Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"));
+            if (pkg.vendor().isRetired()) {
+                continue;
+            }
+            String key = pkg.vendor().foojayName() + "|" + pkg.version().raw();
+            Pkg existing = byKey.get(key);
+            if (existing == null || (!existing.archiveType().equals(preferred) && pkg.archiveType().equals(preferred))) {
+                byKey.put(key, pkg);
+            }
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    static String firstToken(String text) {
+        String trimmed = text.trim();
+        int space = trimmed.indexOf(' ');
+        return space < 0 ? trimmed : trimmed.substring(0, space);
+    }
+}

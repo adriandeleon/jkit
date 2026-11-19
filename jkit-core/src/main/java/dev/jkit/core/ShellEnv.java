@@ -1,0 +1,118 @@
+package dev.jkit.core;
+
+import dev.jkit.model.Tool;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Computes the variables a shell-level {@code jkit use} or {@code jkit reset} changes. The shell
+ * wrapper sources the result. jkit remembers each shell choice in {@code JKIT_SHELL_<TOOL>} and
+ * only ever removes PATH entries under tools/, so it never touches anything the user added.
+ */
+public final class ShellEnv {
+    static final String GRAALVM_FOLLOWS = "JKIT_GRAALVM_FOLLOWS_JDK";
+
+    private ShellEnv() { }
+
+    public static String stateVariable(Tool tool) {
+        return "JKIT_SHELL_" + tool.name();
+    }
+
+    /** Variables to set (value) or unset (null), in a stable order. */
+    public static Map<String, String> use(Map<String, String> env, JkitHome home, Tool tool, Path toolHome,
+                                          boolean jdkIsGraalVm) {
+        Map<Tool, String> active = active(env);
+        active.put(tool, toolHome.toString());
+        Map<String, String> out = new LinkedHashMap<>();
+        out.put(stateVariable(tool), toolHome.toString());
+        out.put(tool.homeVariable(), toolHome.toString());
+        if (tool == Tool.JDK && !active.containsKey(Tool.GRAALVM)) {
+            if (jdkIsGraalVm) {
+                out.put(Tool.GRAALVM.homeVariable(), toolHome.toString());
+                out.put(GRAALVM_FOLLOWS, "1");
+            } else if (env.containsKey(GRAALVM_FOLLOWS)) {
+                out.put(Tool.GRAALVM.homeVariable(), globalOrNull(home, Tool.GRAALVM));
+                out.put(GRAALVM_FOLLOWS, null);
+            }
+        }
+        if (tool == Tool.GRAALVM) {
+            out.put(GRAALVM_FOLLOWS, null);
+        }
+        out.put("PATH", path(env, home, active));
+        return out;
+    }
+
+    public static Map<String, String> reset(Map<String, String> env, JkitHome home, Tool tool) {
+        Map<Tool, String> active = active(env);
+        active.remove(tool);
+        Map<String, String> out = new LinkedHashMap<>();
+        out.put(stateVariable(tool), null);
+        out.put(tool.homeVariable(), globalOrNull(home, tool));
+        if (tool == Tool.JDK && env.containsKey(GRAALVM_FOLLOWS)) {
+            out.put(Tool.GRAALVM.homeVariable(), globalOrNull(home, Tool.GRAALVM));
+            out.put(GRAALVM_FOLLOWS, null);
+        }
+        out.put("PATH", path(env, home, active));
+        return out;
+    }
+
+    private static Map<Tool, String> active(Map<String, String> env) {
+        Map<Tool, String> active = new EnumMap<>(Tool.class);
+        for (Tool t : Tool.values()) {
+            String value = env.get(stateVariable(t));
+            if (value != null && !value.isBlank()) {
+                active.put(t, value);
+            }
+        }
+        return active;
+    }
+
+    private static String globalOrNull(JkitHome home, Tool tool) {
+        Path link = home.global(tool);
+        return Files.exists(link) ? link.toString() : null;
+    }
+
+    static String path(Map<String, String> env, JkitHome home, Map<Tool, String> active) {
+        String tools = home.toolsRoot().toString();
+        List<String> entries = new ArrayList<>();
+        for (Tool t : Tool.values()) {
+            if (t.onPath() && active.containsKey(t)) {
+                entries.add(Path.of(active.get(t), "bin").toString());
+            }
+        }
+        String current = env.getOrDefault("PATH", "");
+        for (String entry : current.split(File.pathSeparator)) {
+            if (!entry.isEmpty() && !entry.startsWith(tools)) {
+                entries.add(entry);
+            }
+        }
+        return String.join(File.pathSeparator, entries);
+    }
+
+    /** Renders changes for a shell: bash/zsh, fish or pwsh. */
+    public static String format(Map<String, String> changes, String shell) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : changes.entrySet()) {
+            String k = e.getKey();
+            String v = e.getValue();
+            switch (shell) {
+                case "fish" -> sb.append(v == null ? "set -e " + k : "set -gx " + k + " " + quote(v)).append('\n');
+                case "pwsh", "powershell" -> sb.append(v == null
+                        ? "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue"
+                        : "$env:" + k + " = " + quote(v)).append('\n');
+                default -> sb.append(v == null ? "unset " + k : "export " + k + "=" + quote(v)).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String quote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+}
