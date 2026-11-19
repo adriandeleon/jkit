@@ -15,6 +15,24 @@ GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative package -DskipTests
 
 Building needs JDK 25; the native binary itself needs no JDK.
 
+### Linux packages (.deb and .rpm)
+
+```bash
+GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTests
+# jkit-cli/target/jkit_<version>_amd64.deb
+# jkit-cli/target/jkit-<version>-<release>.x86_64.rpm
+```
+
+Both are built in pure Java (jdeb, rpm-builder), so no `dpkg-deb` or `rpmbuild` is needed.
+They install `/usr/bin/jkit` plus docs, and need glibc 2.34 or newer and zlib
+(Debian 12+, Ubuntu 22.04+, Fedora, RHEL/Rocky/Alma 9+). The architecture comes from the build
+machine: build on arm64 for arm64 packages.
+
+```bash
+sudo apt install ./jkit_*_amd64.deb      # Debian, Ubuntu
+sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
+```
+
 ## Try it
 
 ```bash
@@ -38,7 +56,7 @@ Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refre
 
 ## Not yet
 
-pin/sync and project files, status, env, doctor, init, prune, config command, self update,
+pin/sync and project files, signed packages and an apt/dnf repository, status, env, doctor, init, prune, config command, self update,
 Windows and macOS testing, CI and releases.
 
 ## Modules
@@ -50,3 +68,7 @@ Windows and macOS testing, CI and releases.
 | `jkit-core` | Store, Installer, Archives, Config, ShellEnv |
 | `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
 | `jkit-cli` | picocli commands and the native binary |
+
+## License
+
+MIT, see [LICENSE](LICENSE).
