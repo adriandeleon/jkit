@@ -1,0 +1,109 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish a release. Each Linux architecture builds the native binary,
+# runs the tests, and packages a .deb, an .rpm and a tar.gz; the release job attaches them all
+# with a SHA256SUMS file. A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the
+# Vitrina apt repository skips.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Ubuntu 22.04 runners: glibc 2.35, so the binary runs on glibc 2.34+ systems
+          # (checked below) such as RHEL 9 and Debian 12.
+          - runner: ubuntu-22.04
+            platform: linux-x64
+          - runner: ubuntu-22.04-arm
+            platform: linux-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@f70bc8032f90a104502824a54bcb94b6f01715bc # v1.6.8
+        with:
+          java-version: '25'
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+
+      - name: Set the version from the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
+            -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Test, build the native binary and the packages
+        run: ./mvnw -B -Pnative,linux-packages verify
+
+      - name: Check the glibc the binary needs
+        run: |
+          need=$(objdump -T jkit-cli/target/jkit | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
+          echo "highest glibc symbol: $need (packages declare GLIBC_2.34)"
+          if [ "$(printf '%s\n' GLIBC_2.34 "$need" | sort -V | tail -1)" != GLIBC_2.34 ]; then
+            echo "::error::the binary needs $need; raise the glibc dependency in the packages"
+            exit 1
+          fi
+
+      - name: Smoke test
+        env:
+          JKIT_HOME: ${{ runner.temp }}/jkit-home
+        run: |
+          jkit-cli/target/jkit --version | grep -Fx "jkit $VERSION"
+          jkit-cli/target/jkit search jdk --maintained | head -3
+
+      - name: Collect the files
+        run: |
+          mkdir dist
+          tar -C jkit-cli/target -czf "dist/jkit-$VERSION-${{ matrix.platform }}.tar.gz" jkit
+          cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+          ls -l dist
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jkit-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          flags=()
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" * \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "jkit ${GITHUB_REF_NAME#v}" "${flags[@]}"

@@ -6,7 +6,7 @@ import picocli.CommandLine.Command;
 
 @Command(name = "jkit",
         mixinStandardHelpOptions = true,
-        version = "jkit 0.1.0-prototype",
+        versionProvider = VersionProvider.class,
         description = "Installs and switches JDKs, Maven and Gradle.",
         subcommands = {
             SearchCommand.class,
