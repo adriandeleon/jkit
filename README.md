@@ -24,7 +24,7 @@ GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTe
 ```
 
 Both are built in pure Java (jdeb, rpm-builder), so no `dpkg-deb` or `rpmbuild` is needed.
-They install `/usr/bin/jkit` plus docs, and need glibc 2.34 or newer and zlib
+They install `/usr/bin/jkit`, its bash completion and docs, and need glibc 2.34 or newer and zlib
 (Debian 12+, Ubuntu 22.04+, Fedora, RHEL/Rocky/Alma 9+). The architecture comes from the build
 machine: build on arm64 for arm64 packages.
 
@@ -37,7 +37,7 @@ sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
 
 ```bash
 export JKIT_HOME=/tmp/jkit-home          # keep tests away from ~/.jkit
-eval "$(jkit hook bash)"                 # shell wrapper: lets `jkit use` change this shell
+eval "$(jkit hook bash)"                 # shell wrapper for `jkit use`, plus tab completion
 jkit search jdk
 jkit install jdk@21                      # default vendor (temurin)
 jkit install jdk@17 zulu
@@ -51,7 +51,8 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested).
+search, install, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested),
+and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet

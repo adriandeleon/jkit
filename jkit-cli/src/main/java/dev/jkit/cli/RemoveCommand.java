@@ -20,10 +20,10 @@ import picocli.CommandLine.Parameters;
 @Command(name = "remove", description = "Removes installed versions. Refuses anything in use without --force.")
 final class RemoveCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class)
+    @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]")
+    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--all", description = "Remove every match.")

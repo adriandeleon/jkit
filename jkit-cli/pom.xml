@@ -144,6 +144,29 @@
       <build>
         <plugins>
           <plugin>
+            <!-- the bash completion script, written by the binary that is being packaged -->
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <version>3.7.0</version>
+            <executions>
+              <execution>
+                <id>bash-completion</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${project.build.directory}/jkit</executable>
+                  <arguments>
+                    <argument>completion</argument>
+                    <argument>bash</argument>
+                  </arguments>
+                  <outputFile>${project.build.directory}/completion/jkit</outputFile>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
             <groupId>org.vafer</groupId>
             <artifactId>jdeb</artifactId>
             <version>${jdeb.version}</version>
@@ -166,6 +189,17 @@
                         <type>perm</type>
                         <prefix>/usr/bin</prefix>
                         <filemode>755</filemode>
+                        <user>root</user>
+                        <group>root</group>
+                      </mapper>
+                    </data>
+                    <data>
+                      <src>${project.build.directory}/completion/jkit</src>
+                      <type>file</type>
+                      <mapper>
+                        <type>perm</type>
+                        <prefix>/usr/share/bash-completion/completions</prefix>
+                        <filemode>644</filemode>
                         <user>root</user>
                         <group>root</group>
                       </mapper>
@@ -229,6 +263,13 @@
                       <name>/usr/bin/jkit</name>
                       <file>${project.build.directory}/jkit</file>
                       <mode>0755</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
+                    <entry>
+                      <name>/usr/share/bash-completion/completions/jkit</name>
+                      <file>${project.build.directory}/completion/jkit</file>
+                      <mode>0644</mode>
                       <user>root</user>
                       <group>root</group>
                     </entry>

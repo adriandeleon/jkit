@@ -12,7 +12,7 @@ import picocli.CommandLine.Parameters;
 @Command(name = "reset", description = "Clears a shell-level choice; the global version applies again.")
 final class ResetCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>")
+    @Parameters(index = "0", paramLabel = "<tool>", completionCandidates = Candidates.Tools.class)
     String toolText;
 
     @Override

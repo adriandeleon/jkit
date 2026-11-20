@@ -17,10 +17,10 @@ import picocli.CommandLine.Parameters;
 @Command(name = "use", description = "Activates an installed version for this shell, or globally with --global.")
 final class UseCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class)
+    @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]")
+    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--global", description = "Default for new shells and apps.")

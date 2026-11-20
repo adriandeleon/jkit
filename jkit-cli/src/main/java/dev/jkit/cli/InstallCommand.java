@@ -14,10 +14,10 @@ import picocli.CommandLine.Parameters;
 @Command(name = "install", description = "Resolves and installs a version. Never prompts.")
 final class InstallCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class)
+    @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]")
+    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--fx", description = "JavaFX build.")

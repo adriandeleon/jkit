@@ -16,6 +16,7 @@ import picocli.CommandLine.Command;
             ListCommand.class,
             RemoveCommand.class,
             HookCommand.class,
+            CompletionCommand.class,
             CommandLine.HelpCommand.class,
         })
 public final class Main implements Runnable {

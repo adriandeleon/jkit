@@ -1,0 +1,19 @@
+package dev.jkit.cli;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.junit.jupiter.api.Test;
+import picocli.CommandLine;
+
+class CompletionTest {
+
+    @Test
+    void scriptCoversCommandsToolsAndVendors() {
+        String script = CompletionCommand.script(new CommandLine(new Main()));
+        assertThat(script).contains("complete -F _complete_jkit -o default jkit")
+                .contains("search install use reset list remove hook completion help")
+                .contains("\"jdk\" \"maven\" \"gradle\" \"graalvm\"")
+                .contains("\"temurin\" \"corretto\" \"zulu\"")
+                .contains("--global");
+    }
+}

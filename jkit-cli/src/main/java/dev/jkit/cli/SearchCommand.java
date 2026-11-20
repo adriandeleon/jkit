@@ -24,11 +24,11 @@ import picocli.CommandLine.Parameters;
 final class SearchCommand implements Callable<Integer> {
     private static final String INSTALLED = " ●";
 
-    @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class,
+    @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class,
             description = "jdk, maven, gradle or graalvm, optionally with a version prefix.")
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", description = "JDK vendor, e.g. temurin.")
+    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class, description = "JDK vendor, e.g. temurin.")
     String vendorText;
 
     @Option(names = "--fx", description = "JavaFX builds.")
@@ -75,6 +75,8 @@ final class SearchCommand implements Callable<Integer> {
         }
     }
 
+    private record Row(int major, boolean lts, String own, TreeSet<String> others) {}
+
     private void majorTable(Context ctx, List<Major> majors, List<Pkg> index, Vendor vendor,
                             List<Installed> installed) {
         Map<Integer, Major> info = new TreeMap<>();
@@ -83,17 +85,11 @@ final class SearchCommand implements Callable<Integer> {
         for (Pkg p : index) {
             byMajor.computeIfAbsent(p.major(), k -> new ArrayList<>()).add(p);
         }
-        String head = "%-5s %-4s %-15s ";
-        ctx.out.println(String.format(head, "major", "", vendor + " *") + "also from");
-        int prefix = String.format(head, "", "", "").length();
+        List<Row> current = new ArrayList<>();
+        List<Row> ended = new ArrayList<>();
         for (Map.Entry<Integer, List<Pkg>> e : byMajor.entrySet()) {
             Major m = info.get(e.getKey());
-            boolean eol = m != null && !m.maintained();
-            if (maintained && eol) {
-                continue;
-            }
-            String tag = m != null && m.isLts() ? "LTS" : eol ? "eol" : "";
-            String own = "–";
+            String own = "";
             TreeSet<String> others = new TreeSet<>();
             for (Pkg p : e.getValue()) {
                 if (p.vendor().equals(vendor)) {
@@ -102,10 +98,50 @@ final class SearchCommand implements Callable<Integer> {
                     others.add(p.vendor().name());
                 }
             }
-            ctx.out.println(String.format(head, e.getKey(), tag, own) + fit(others, ctx.width() - prefix));
+            Row row = new Row(e.getKey(), m != null && m.isLts(), own, others);
+            (m != null && !m.maintained() ? ended : current).add(row);
         }
+        String vendorHead = vendor + " *";
+        int ownWidth = vendorHead.length();
+        for (Row r : current) {
+            ownWidth = Math.max(ownWidth, r.own().length());
+        }
+        if (!maintained) {
+            for (Row r : ended) {
+                ownWidth = Math.max(ownWidth, r.own().length());
+            }
+        }
+        String format = "  %3s  %-3s  %-" + ownWidth + "s  ";
+        int indent = String.format(format, "", "", "").length();
+        int width = Math.max(20, ctx.width() - indent - 1);
+
+        ctx.out.println(String.format(format, "jdk", "", vendorHead) + "other vendors");
+        section(ctx, "maintained", current, format, indent, width);
+        if (!maintained && !ended.isEmpty()) {
+            ctx.out.println();
+            section(ctx, "end of life", ended, format, indent, width);
+        }
+        ctx.out.println();
         ctx.out.println("* " + (vendorText == null ? "default vendor" : "chosen vendor")
-                + "   ● installed   eol = no longer maintained");
+                + "   ● installed   details: jkit search " + spec.tool().name().toLowerCase() + "@<major>");
+    }
+
+    private static void section(Context ctx, String title, List<Row> rows, String format, int indent, int width) {
+        ctx.out.println(title);
+        boolean previousWrapped = false;
+        for (Row r : rows) {
+            List<String> lines = wrap(r.others(), width);
+            boolean wrapped = lines.size() > 1;
+            if (previousWrapped || (wrapped && r != rows.get(0))) {
+                ctx.out.println();
+            }
+            previousWrapped = wrapped;
+            String first = lines.isEmpty() ? "" : lines.get(0);
+            ctx.out.println((String.format(format, r.major(), r.lts() ? "LTS" : "", r.own()) + first).stripTrailing());
+            for (int i = 1; i < lines.size(); i++) {
+                ctx.out.println(" ".repeat(indent) + lines.get(i));
+            }
+        }
     }
 
     private void vendorRows(Context ctx, List<Pkg> index, Vendor vendor, List<Installed> installed) {
@@ -156,21 +192,23 @@ final class SearchCommand implements Callable<Integer> {
         return "";
     }
 
-    static String fit(TreeSet<String> names, int width) {
+    /** Breaks names into lines of at most {@code width} characters, never dropping any. */
+    static List<String> wrap(TreeSet<String> names, int width) {
+        List<String> lines = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
-        int shown = 0;
         for (String n : names) {
-            int remaining = names.size() - shown - 1;
-            String suffix = remaining > 0 ? " +" + remaining : "";
-            if (sb.length() + n.length() + 1 + suffix.length() > width && shown > 0) {
-                return sb.append(" +").append(names.size() - shown).toString();
+            if (!sb.isEmpty() && sb.length() + 1 + n.length() > width) {
+                lines.add(sb.toString());
+                sb.setLength(0);
             }
             if (!sb.isEmpty()) {
                 sb.append(' ');
             }
             sb.append(n);
-            shown++;
         }
-        return sb.toString();
+        if (!sb.isEmpty()) {
+            lines.add(sb.toString());
+        }
+        return lines;
     }
 }
