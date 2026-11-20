@@ -29,6 +29,9 @@ final class UseCommand implements Callable<Integer> {
     @Option(names = "--fx", description = "Use a JavaFX build. Without it, plain builds win when both are installed.")
     boolean fx;
 
+    @picocli.CommandLine.Mixin
+    JsonOut.Flag json = new JsonOut.Flag();
+
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
@@ -37,7 +40,8 @@ final class UseCommand implements Callable<Integer> {
         Tool tool = spec.tool();
         if (global) {
             ctx.os.pointLink(ctx.home.global(tool), chosen.home());
-            ctx.out.println("global " + tool + " → " + chosen.label());
+            (json.json ? ctx.err : ctx.out).println("global " + tool + " → " + chosen.label());
+            printJson(ctx, "global", chosen);
             return 0;
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
@@ -49,7 +53,20 @@ final class UseCommand implements Callable<Integer> {
         boolean graalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
         Map<String, String> changes = ShellEnv.use(ctx.env, ctx.home, tool, chosen.home(), graalVm);
         Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
-        ctx.out.println("using " + tool + " " + chosen.label() + " in this shell");
+        (json.json ? ctx.err : ctx.out).println("using " + tool + " " + chosen.label() + " in this shell");
+        printJson(ctx, "shell", chosen);
         return 0;
+    }
+
+    /** {@code {schemaVersion, scope: global|shell, tool, installed: {…}}}. */
+    private void printJson(Context ctx, String scope, Installed chosen) throws Exception {
+        if (!json.json) {
+            return;
+        }
+        java.util.Map<String, Object> doc = JsonOut.document();
+        doc.put("scope", scope);
+        doc.put("tool", spec.tool().id());
+        doc.put("installed", JsonOut.installed(ctx, chosen));
+        ctx.out.println(JsonOut.write(doc));
     }
 }

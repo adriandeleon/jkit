@@ -35,6 +35,7 @@ public final class Main implements Runnable {
     }
 
     static int run(String... args) {
+        boolean json = java.util.Arrays.asList(args).contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
             if (System.getenv("JKIT_DEBUG") != null) {
@@ -42,15 +43,25 @@ public final class Main implements Runnable {
             }
             JkitException je = Errors.describe(ex);
             printError(je);
+            if (json) {
+                JsonOut.print(System.out, JsonOut.error(je, je.exitCode()));
+            }
             return je.exitCode();
         });
         cli.setParameterExceptionHandler((ex, a) -> {
             Throwable cause = ex.getCause();
             if (cause instanceof JkitException je) {
                 printError(je);
+                if (json) {
+                    JsonOut.print(System.out, JsonOut.error(je, CommandLine.ExitCode.USAGE));
+                }
                 return CommandLine.ExitCode.USAGE;
             }
             System.err.println("error: " + ex.getMessage());
+            if (json) {
+                JsonOut.print(System.out, JsonOut.error(new JkitException(ex.getMessage()), CommandLine.ExitCode.USAGE));
+                return CommandLine.ExitCode.USAGE; // a program reads the document, not the usage text
+            }
             ex.getCommandLine().usage(System.err);
             return CommandLine.ExitCode.USAGE;
         });

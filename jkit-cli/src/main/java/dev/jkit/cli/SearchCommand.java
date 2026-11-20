@@ -42,18 +42,100 @@ final class SearchCommand implements Callable<Integer> {
     @Option(names = "--maintained", description = "Hide JDK versions that are no longer maintained.")
     boolean maintained;
 
+    @picocli.CommandLine.Mixin
+    JsonOut.Flag jsonFlag = new JsonOut.Flag();
+
     @Mixin
     Options options;
 
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
+        if (jsonFlag.json) {
+            ctx.out.println(JsonOut.write(json(ctx)));
+            return 0;
+        }
         switch (spec.tool()) {
             case JDK, GRAALVM -> searchJdk(ctx);
             case MAVEN -> grouped(ctx, ctx.maven().versions(pre));
             case GRADLE -> grouped(ctx, ctx.gradle().versions(pre));
         }
         return 0;
+    }
+
+    /**
+     * {@code tool}, {@code defaultVendor} and {@code majors} (JDKs only: major, lts, maintained) and
+     * {@code available}: for a JDK with no version, the newest build per vendor and major; with a
+     * version and no vendor, the newest matching build per vendor; with a vendor, every matching
+     * build. For Maven and Gradle, every matching version. Newest first.
+     */
+    Map<String, Object> json(Context ctx) throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        doc.put("tool", spec.tool().id());
+        List<Object> available = new ArrayList<>();
+        List<Installed> installed = ctx.store.list(spec.tool());
+        if (spec.tool() == Tool.JDK || spec.tool() == Tool.GRAALVM) {
+            Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
+            doc.put("vendor", vendor.name());
+            doc.put("vendorChosen", vendorText != null);
+            FoojaySource foojay = ctx.foojay();
+            Map<Integer, Major> info = new TreeMap<>(java.util.Comparator.reverseOrder());
+            foojay.majors().forEach(m -> info.put(m.major(), m));
+            List<Pkg> pkgs;
+            if (spec.version() != null && vendorText != null) {
+                pkgs = new ArrayList<>(foojay.builds(spec.major(), vendor, ctx.platform, fx, pre));
+            } else {
+                pkgs = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx));
+                if (spec.version() != null) {
+                    pkgs.removeIf(p -> p.major() != spec.major());
+                }
+            }
+            pkgs.removeIf(p -> spec.version() != null && !p.version().matches(spec.version()));
+            if (spec.tool() == Tool.GRAALVM) {
+                pkgs.removeIf(p -> !p.vendor().isGraalVmBased());
+            }
+            if (maintained) {
+                pkgs.removeIf(p -> info.containsKey(p.major()) && !info.get(p.major()).maintained());
+            }
+            pkgs.sort(java.util.Comparator.comparing(Pkg::version).reversed()
+                    .thenComparing(p -> p.vendor().name()));
+            List<Object> majors = new ArrayList<>();
+            for (Major m : info.values()) {
+                if (!maintained || m.maintained()) {
+                    majors.add(JsonOut.fields("major", m.major(), "lts", m.isLts(), "maintained", m.maintained()));
+                }
+            }
+            doc.put("majors", majors);
+            for (Pkg p : pkgs) {
+                Major m = info.get(p.major());
+                available.add(JsonOut.fields(
+                        "tool", spec.tool().id(),
+                        "version", p.version().raw(),
+                        "major", p.major(),
+                        "vendor", p.vendor().name(),
+                        "graalvm", p.vendor().isGraalVmBased(),
+                        "fx", fx,
+                        "lts", m != null && m.isLts(),
+                        "maintained", m == null || m.maintained(),
+                        "preRelease", p.version().isPreRelease(),
+                        "installed", !mark(installed, p.version(), p.vendor()).isEmpty()));
+            }
+        } else {
+            doc.put("majors", List.of());
+            List<Version> versions = spec.tool() == Tool.MAVEN ? ctx.maven().versions(pre) : ctx.gradle().versions(pre);
+            for (Version v : versions) {
+                if (v.matches(spec.version())) {
+                    available.add(JsonOut.fields(
+                            "tool", spec.tool().id(),
+                            "version", v.raw(),
+                            "major", v.part(0),
+                            "preRelease", v.isPreRelease(),
+                            "installed", !mark(installed, v, null).isEmpty()));
+                }
+            }
+        }
+        doc.put("available", available);
+        return doc;
     }
 
     private void searchJdk(Context ctx) throws Exception {

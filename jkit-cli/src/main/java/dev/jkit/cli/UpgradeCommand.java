@@ -58,12 +58,18 @@ final class UpgradeCommand implements Callable<Integer> {
     boolean dryRun;
 
     @Mixin
+    JsonOut.Flag jsonFlag = new JsonOut.Flag();
+
+    @Mixin
     Options options;
 
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
         Map<Line, List<Installed>> lines = lines(ctx);
+        if (jsonFlag.json) {
+            return json(ctx, lines);
+        }
         if (lines.isEmpty()) {
             ctx.out.println(spec == null ? "nothing installed yet · try: jkit search jdk"
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");
@@ -99,13 +105,74 @@ final class UpgradeCommand implements Callable<Integer> {
             }
             ctx.out.println("upgraded " + line + ": " + newest.version() + " → " + artifact.version());
             upgraded++;
-            moveLinks(ctx, line, newest, result.installed().home());
+            moveLinks(ctx, ctx.out, line, newest, result.installed().home());
             ctx.out.println("  remove the old build: jkit remove " + line.userTool() + "@" + newest.version()
                     + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
         }
         if (dryRun && upgraded > 0) {
             ctx.out.println("run without --dry-run to install");
         }
+        return failures == 0 ? 0 : 1;
+    }
+
+    /**
+     * {@code dryRun} and {@code lines}: one object per release line with {@code status} up-to-date,
+     * available (dry run), upgraded or failed, the installed {@code from} build, the newest {@code to}
+     * build, and on failure an {@code error}. Exit code 1 when any line failed.
+     */
+    private int json(Context ctx, Map<Line, List<Installed>> lines) throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        doc.put("dryRun", dryRun);
+        List<Object> out = new ArrayList<>();
+        int failures = 0;
+        for (Map.Entry<Line, List<Installed>> entry : lines.entrySet()) {
+            Line line = entry.getKey();
+            Installed newest = entry.getValue().getFirst();
+            Map<String, Object> row = JsonOut.fields(
+                    "tool", line.userTool().id(),
+                    "major", line.major(),
+                    "vendor", line.vendor() == null ? null : line.vendor().name(),
+                    "fx", line.fx(),
+                    "from", newest.version().raw(),
+                    "to", null,
+                    "status", null);
+            out.add(row);
+            Artifact artifact;
+            try {
+                artifact = resolve(ctx, line);
+            } catch (JkitException e) {
+                row.put("status", "failed");
+                row.put("error", JsonOut.fields("message", e.getMessage(), "hints", List.copyOf(e.hints())));
+                failures++;
+                continue;
+            }
+            row.put("to", artifact.version().raw());
+            if (artifact.version().compareTo(newest.version()) <= 0
+                    || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
+                row.put("to", newest.version().raw());
+                row.put("status", "up-to-date");
+                continue;
+            }
+            if (dryRun) {
+                row.put("status", "available");
+                continue;
+            }
+            ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
+            try {
+                Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
+                row.put("status", "upgraded");
+                row.put("verified", result.verified());
+                row.put("path", result.installed().home());
+                moveLinks(ctx, ctx.err, line, newest, result.installed().home());
+            } catch (Exception e) {
+                JkitException je = Errors.describe(e);
+                row.put("status", "failed");
+                row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
+                failures++;
+            }
+        }
+        doc.put("lines", out);
+        ctx.out.println(JsonOut.write(doc));
         return failures == 0 ? 0 : 1;
     }
 
@@ -145,7 +212,7 @@ final class UpgradeCommand implements Callable<Integer> {
     }
 
     /** Moves global links that pointed at the line's previous newest build; hints for this shell. */
-    private static void moveLinks(Context ctx, Line line, Installed previous, Path newHome) throws Exception {
+    private static void moveLinks(Context ctx, java.io.PrintStream out, Line line, Installed previous, Path newHome) throws Exception {
         for (Tool t : Tool.values()) {
             if (t.storeTool() != line.tool()) {
                 continue;
@@ -154,11 +221,11 @@ final class UpgradeCommand implements Callable<Integer> {
             Path target = ctx.os.readLink(link);
             if (target != null && target.equals(previous.home())) {
                 ctx.os.pointLink(link, newHome);
-                ctx.out.println("  global " + t + " → " + line.userTool() + " " + newHome.getFileName());
+                out.println("  global " + t + " → " + line.userTool() + " " + newHome.getFileName());
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
             if (shell != null && Path.of(shell).equals(previous.home())) {
-                ctx.out.println("  this shell still uses the old build: jkit use " + t + "@" + line.major()
+                out.println("  this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }
         }
