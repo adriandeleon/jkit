@@ -9,9 +9,11 @@ import dev.jkit.sources.FoojaySource;
 import dev.jkit.sources.FoojaySource.Major;
 import dev.jkit.sources.FoojaySource.Pkg;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
@@ -75,73 +77,106 @@ final class SearchCommand implements Callable<Integer> {
         }
     }
 
-    private record Row(int major, boolean lts, String own, TreeSet<String> others) {}
+    private static final String AVAILABLE = "✓";
+    private static final String GAP = "  ";
 
+    /** One column per major (maintained first, then end of life), one row per vendor. */
     private void majorTable(Context ctx, List<Major> majors, List<Pkg> index, Vendor vendor,
                             List<Installed> installed) {
         Map<Integer, Major> info = new TreeMap<>();
         majors.forEach(m -> info.put(m.major(), m));
-        TreeMap<Integer, List<Pkg>> byMajor = new TreeMap<>(java.util.Comparator.reverseOrder());
+        TreeSet<Integer> all = new TreeSet<>(java.util.Comparator.reverseOrder());
+        Map<String, Set<Integer>> byVendor = new TreeMap<>();
         for (Pkg p : index) {
-            byMajor.computeIfAbsent(p.major(), k -> new ArrayList<>()).add(p);
+            all.add(p.major());
+            byVendor.computeIfAbsent(p.vendor().name(), k -> new HashSet<>()).add(p.major());
         }
-        List<Row> current = new ArrayList<>();
-        List<Row> ended = new ArrayList<>();
-        for (Map.Entry<Integer, List<Pkg>> e : byMajor.entrySet()) {
-            Major m = info.get(e.getKey());
-            String own = "";
-            TreeSet<String> others = new TreeSet<>();
-            for (Pkg p : e.getValue()) {
-                if (p.vendor().equals(vendor)) {
-                    own = p.version() + mark(installed, p.version(), p.vendor());
-                } else {
-                    others.add(p.vendor().name());
-                }
-            }
-            Row row = new Row(e.getKey(), m != null && m.isLts(), own, others);
-            (m != null && !m.maintained() ? ended : current).add(row);
+        List<Integer> current = new ArrayList<>();
+        List<Integer> ended = new ArrayList<>();
+        for (int major : all) {
+            Major m = info.get(major);
+            (m != null && !m.maintained() ? ended : current).add(major);
         }
-        String vendorHead = vendor + " *";
-        int ownWidth = vendorHead.length();
-        for (Row r : current) {
-            ownWidth = Math.max(ownWidth, r.own().length());
+        if (maintained) {
+            ended.clear();
+            byVendor.values().removeIf(set -> set.stream().noneMatch(current::contains));
         }
-        if (!maintained) {
-            for (Row r : ended) {
-                ownWidth = Math.max(ownWidth, r.own().length());
-            }
-        }
-        String format = "  %3s  %-3s  %-" + ownWidth + "s  ";
-        int indent = String.format(format, "", "", "").length();
-        int width = Math.max(20, ctx.width() - indent - 1);
 
-        ctx.out.println(String.format(format, "jdk", "", vendorHead) + "other vendors");
-        section(ctx, "maintained", current, format, indent, width);
-        if (!maintained && !ended.isEmpty()) {
-            ctx.out.println();
-            section(ctx, "end of life", ended, format, indent, width);
+        String chosen = vendor.name();
+        List<String> vendors = new ArrayList<>();
+        if (byVendor.containsKey(chosen)) {
+            vendors.add(chosen);
+        }
+        byVendor.keySet().stream().filter(v -> !v.equals(chosen)).forEach(vendors::add);
+        int nameWidth = 0;
+        for (String v : vendors) {
+            nameWidth = Math.max(nameWidth, v.length() + 2);
+        }
+
+        StringBuilder groups = new StringBuilder(" ".repeat(nameWidth));
+        StringBuilder numbers = new StringBuilder(" ".repeat(nameWidth));
+        StringBuilder lts = new StringBuilder(" ".repeat(nameWidth));
+        header(groups, numbers, lts, current, info, "maintained");
+        if (!ended.isEmpty()) {
+            groups.append(GAP);
+            numbers.append(GAP);
+            lts.append(GAP);
+            header(groups, numbers, lts, ended, info, "end of life");
+        }
+        ctx.out.println(groups.toString().stripTrailing());
+        ctx.out.println(numbers.toString().stripTrailing());
+        ctx.out.println(lts.toString().stripTrailing());
+
+        for (String v : vendors) {
+            Set<Integer> has = byVendor.get(v);
+            String label = v.equals(chosen) ? v + " *" : v;
+            StringBuilder line = new StringBuilder(String.format("%-" + nameWidth + "s", label));
+            cells(line, current, has, v, installed);
+            if (!ended.isEmpty()) {
+                line.append(GAP);
+                cells(line, ended, has, v, installed);
+            }
+            ctx.out.println(line.toString().stripTrailing());
         }
         ctx.out.println();
-        ctx.out.println("* " + (vendorText == null ? "default vendor" : "chosen vendor")
-                + "   ● installed   details: jkit search " + spec.tool().name().toLowerCase() + "@<major>");
+        ctx.out.println("✓ available   ● installed   ‾‾ LTS   * " + (vendorText == null ? "default vendor" : "chosen vendor"));
+        ctx.out.println("versions per vendor: jkit search " + spec.tool().name().toLowerCase() + "@<major>");
     }
 
-    private static void section(Context ctx, String title, List<Row> rows, String format, int indent, int width) {
-        ctx.out.println(title);
-        boolean previousWrapped = false;
-        for (Row r : rows) {
-            List<String> lines = wrap(r.others(), width);
-            boolean wrapped = lines.size() > 1;
-            if (previousWrapped || (wrapped && r != rows.get(0))) {
-                ctx.out.println();
-            }
-            previousWrapped = wrapped;
-            String first = lines.isEmpty() ? "" : lines.get(0);
-            ctx.out.println((String.format(format, r.major(), r.lts() ? "LTS" : "", r.own()) + first).stripTrailing());
-            for (int i = 1; i < lines.size(); i++) {
-                ctx.out.println(" ".repeat(indent) + lines.get(i));
+    private static void header(StringBuilder groups, StringBuilder numbers, StringBuilder lts, List<Integer> majors,
+                               Map<Integer, Major> info, String title) {
+        int start = numbers.length();
+        for (int i = 0; i < majors.size(); i++) {
+            String n = String.valueOf(majors.get(i));
+            String sep = i == 0 ? "" : " ";
+            numbers.append(sep).append(n);
+            Major m = info.get(majors.get(i));
+            lts.append(sep).append((m != null && m.isLts() ? "‾" : " ").repeat(n.length()));
+        }
+        int span = numbers.length() - start;
+        String t = title.length() <= span ? title : title.substring(0, span);
+        groups.append(String.format("%-" + span + "s", t));
+    }
+
+    private static void cells(StringBuilder line, List<Integer> majors, Set<Integer> has, String vendor,
+                              List<Installed> installed) {
+        for (int i = 0; i < majors.size(); i++) {
+            int major = majors.get(i);
+            String n = String.valueOf(major);
+            String mark = !has.contains(major) ? " " : isInstalled(installed, major, vendor) ? "●" : AVAILABLE;
+            line.append(i == 0 ? "" : " ").append(" ".repeat(n.length() - 1)).append(mark);
+        }
+    }
+
+    private static boolean isInstalled(List<Installed> installed, int major, String vendor) {
+        for (Installed i : installed) {
+            Version v = i.version();
+            int m = v.part(0) == 1 ? v.part(1) : v.part(0);
+            if (m == major && i.vendor() != null && i.vendor().name().equals(vendor)) {
+                return true;
             }
         }
+        return false;
     }
 
     private void vendorRows(Context ctx, List<Pkg> index, Vendor vendor, List<Installed> installed) {
@@ -190,25 +225,5 @@ final class SearchCommand implements Callable<Integer> {
             }
         }
         return "";
-    }
-
-    /** Breaks names into lines of at most {@code width} characters, never dropping any. */
-    static List<String> wrap(TreeSet<String> names, int width) {
-        List<String> lines = new ArrayList<>();
-        StringBuilder sb = new StringBuilder();
-        for (String n : names) {
-            if (!sb.isEmpty() && sb.length() + 1 + n.length() > width) {
-                lines.add(sb.toString());
-                sb.setLength(0);
-            }
-            if (!sb.isEmpty()) {
-                sb.append(' ');
-            }
-            sb.append(n);
-        }
-        if (!sb.isEmpty()) {
-            lines.add(sb.toString());
-        }
-        return lines;
     }
 }
