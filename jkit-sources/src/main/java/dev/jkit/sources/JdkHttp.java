@@ -59,6 +59,10 @@ public final class JdkHttp implements Http {
             HttpResponse<String> response = client.send(request(uri), HttpResponse.BodyHandlers.ofString());
             check(uri, response.statusCode());
             return response.body();
+        } catch (HttpStatusException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new NetworkException(uri, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted", e);
@@ -82,6 +86,10 @@ public final class JdkHttp implements Http {
                     progress.update(done, total);
                 }
             }
+        } catch (HttpStatusException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new NetworkException(uri, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted", e);
@@ -90,7 +98,7 @@ public final class JdkHttp implements Http {
 
     private static void check(URI uri, int status) throws IOException {
         if (status / 100 != 2) {
-            throw new IOException("HTTP " + status + " from " + uri);
+            throw new HttpStatusException(status, uri);
         }
     }
 }

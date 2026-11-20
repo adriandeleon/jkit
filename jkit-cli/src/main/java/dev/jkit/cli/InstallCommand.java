@@ -32,7 +32,7 @@ final class InstallCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
-        Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
+        Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
         Artifact artifact = switch (spec.tool()) {
             case JDK, GRAALVM -> ctx.foojay().resolve(spec.tool(), spec.version(), vendor, ctx.platform, fx, pre);
             case MAVEN -> ctx.maven().resolve(spec.version(), pre);

@@ -13,7 +13,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
+import java.util.TreeMap;
 import java.util.TreeSet;
+import dev.jkit.model.Suggest;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
 public final class FoojaySource {
@@ -49,6 +52,54 @@ public final class FoojaySource {
                 "jdk_version=" + major + "&distribution=" + vendor.foojayName() + "&" + status, fx);
         all.sort(Comparator.comparing(Pkg::version).reversed());
         return all;
+    }
+
+    /**
+     * Checks a vendor against foojay's distribution list (names and their synonyms, so "SAP
+     * Machine" or "OpenJDK" work too) and returns it under foojay's name. An unknown name fails
+     * with the closest match, before any version request can come back as a bare HTTP 400.
+     *
+     * @param source how the name was given, for the message: "" when typed, else e.g. "your
+     *               default vendor (jdk.vendor)"
+     */
+    public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
+        JsonNode root = Json.parse(http.get(base.resolve(
+                "distributions?include_versions=false&include_synonyms=true")));
+        Map<String, String> bySynonym = new java.util.HashMap<>();
+        TreeSet<String> names = new TreeSet<>();
+        for (JsonNode d : root.path("result")) {
+            String param = Json.text(d, "api_parameter");
+            Vendor known = Vendor.fromFoojay(param);
+            if (known.isRetired()) {
+                continue;
+            }
+            names.add(known.name());
+            bySynonym.put(param, param);
+            bySynonym.put(known.name(), param);
+            for (JsonNode syn : d.path("synonyms")) {
+                bySynonym.put(syn.asText().toLowerCase(Locale.ROOT), param);
+            }
+        }
+        String match = bySynonym.get(vendor.foojayName());
+        if (match == null) {
+            match = bySynonym.get(typed.toLowerCase(Locale.ROOT).trim());
+        }
+        if (match != null) {
+            return Vendor.fromFoojay(match);
+        }
+        String guess = Suggest.closest(typed, names);
+        String what = source.isEmpty() ? "unknown JDK vendor '" + typed + "'"
+                : source + " '" + typed + "' is not a known JDK vendor";
+        List<String> hints = new ArrayList<>();
+        if (guess != null) {
+            hints.add("did you mean: " + guess + "?");
+        }
+        hints.add("vendors: " + String.join(", ", names));
+        return throwUnknown(what, hints);
+    }
+
+    private static Vendor throwUnknown(String message, List<String> hints) {
+        throw new JkitException(message, hints.toArray(String[]::new));
     }
 
     public List<Major> majors() throws IOException {

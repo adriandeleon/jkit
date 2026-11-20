@@ -73,6 +73,31 @@ class SourcesTest {
                 .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly("available from: zulu"));
     }
 
+    private static final String DISTRIBUTIONS = """
+            {"result":[
+              {"api_parameter":"corretto","synonyms":["corretto","Corretto"]},
+              {"api_parameter":"sap_machine","synonyms":["sap_machine","sapmachine","SAP Machine"]},
+              {"api_parameter":"aoj","synonyms":["aoj"]}]}""";
+
+    @Test
+    void knownVendorsAndSynonymsPass() throws IOException {
+        FoojaySource foojay = new FoojaySource(fake(Map.of("distributions", DISTRIBUTIONS)), FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.requireKnown(Vendor.of("corretto"), "corretto", "").foojayName()).isEqualTo("corretto");
+        assertThat(foojay.requireKnown(Vendor.of("SAP Machine"), "SAP Machine", "").name()).isEqualTo("sapmachine");
+    }
+
+    @Test
+    void typoGetsDidYouMeanAndRetiredVendorsAreHidden() {
+        FoojaySource foojay = new FoojaySource(fake(Map.of("distributions", DISTRIBUTIONS)), FoojaySource.DEFAULT_BASE);
+        assertThatThrownBy(() -> foojay.requireKnown(Vendor.of("correto"), "correto", ""))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("unknown JDK vendor 'correto'")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .containsExactly("did you mean: corretto?", "vendors: corretto, sapmachine"));
+        assertThatThrownBy(() -> foojay.requireKnown(Vendor.of("zuul"), "zuul", "your default JDK vendor (jdk.vendor)"))
+                .hasMessage("your default JDK vendor (jdk.vendor) 'zuul' is not a known JDK vendor");
+    }
+
     @Test
     void mavenSkipsPreReleasesAndPointsToThem() throws IOException {
         String metadata = "<metadata><versioning><versions><version>3.9.11</version>"

@@ -11,6 +11,7 @@ class VendorTest {
         assertThat(Vendor.of("sapmachine").foojayName()).isEqualTo("sap_machine");
         assertThat(Vendor.of("graalvm-ce").foojayName()).isEqualTo("graalvm_community");
         assertThat(Vendor.of("Temurin")).isEqualTo(new Vendor("temurin", "temurin"));
+        assertThat(Vendor.of("adoptium")).isEqualTo(new Vendor("temurin", "temurin"));
         assertThat(Vendor.fromFoojay("liberica_native").name()).isEqualTo("liberica-nik");
         assertThat(Vendor.fromFoojay("some_new_vendor").name()).isEqualTo("some-new-vendor");
     }

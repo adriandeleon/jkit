@@ -10,12 +10,15 @@ import java.util.stream.Collectors;
  * Unknown names pass through, so a vendor foojay adds works at once.
  */
 public record Vendor(String name, String foojayName) {
+    /** Typed name to foojay name. Only the first four are shown back to users as names. */
     private static final Map<String, String> ALIASES = Map.of(
             "sapmachine", "sap_machine",
             "graalvm-ce", "graalvm_community",
             "liberica-nik", "liberica_native",
-            "openjdk", "oracle_open_jdk");
+            "openjdk", "oracle_open_jdk",
+            "adoptium", "temurin");
     private static final Map<String, String> FRIENDLY = ALIASES.entrySet().stream()
+            .filter(e -> !e.getKey().equals("adoptium"))
             .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
     /** Retired distributions foojay still lists; hidden from search and resolution. */
     private static final Set<String> RETIRED = Set.of(

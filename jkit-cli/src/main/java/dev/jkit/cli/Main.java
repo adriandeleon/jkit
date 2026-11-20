@@ -35,15 +35,12 @@ public final class Main implements Runnable {
     static int run(String... args) {
         CommandLine cli = new CommandLine(new Main());
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
-            if (ex instanceof JkitException je) {
-                printError(je);
-                return je.exitCode();
-            }
-            System.err.println("error: " + (ex.getMessage() == null ? ex.toString() : ex.getMessage()));
             if (System.getenv("JKIT_DEBUG") != null) {
                 ex.printStackTrace();
             }
-            return JkitException.GENERAL;
+            JkitException je = Errors.describe(ex);
+            printError(je);
+            return je.exitCode();
         });
         cli.setParameterExceptionHandler((ex, a) -> {
             Throwable cause = ex.getCause();

@@ -30,6 +30,22 @@ final class Resolve {
         return vendor;
     }
 
+    /**
+     * Like {@link #vendor}, then checks the name against foojay's vendor list (cached), so a typo
+     * gets "did you mean" instead of a failed request. For commands that go online anyway.
+     */
+    static Vendor knownVendor(Context ctx, ToolSpec spec, String typed) throws IOException {
+        Vendor vendor = vendor(ctx, spec, typed);
+        if (vendor == null) {
+            return null;
+        }
+        String source = typed != null ? ""
+                : spec.tool() == Tool.GRAALVM ? "your default GraalVM vendor (graalvm.vendor)"
+                : "your default JDK vendor (jdk.vendor)";
+        Vendor known = ctx.foojay().requireKnown(vendor, typed != null ? typed : vendor.name(), source);
+        return vendor(ctx, spec, known.name());
+    }
+
     /** Installed matches, newest first; exit code 3 with the install command when none. */
     static List<Installed> installed(Context ctx, ToolSpec spec, Vendor vendor, String typedVendor, boolean fx)
             throws IOException {

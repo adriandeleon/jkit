@@ -44,7 +44,8 @@ public final class CachingHttp implements Http {
             }
         }
         if (offline) {
-            throw new IOException("offline and nothing cached for " + uri);
+            throw new dev.jkit.model.JkitException("--offline, but there is no cached version list from "
+                    + uri.getHost() + " yet", "run the command once without --offline");
         }
         String body = delegate.get(uri);
         Files.createDirectories(dir);
@@ -58,7 +59,8 @@ public final class CachingHttp implements Http {
     @Override
     public void download(URI uri, Path target, Progress progress) throws IOException {
         if (offline) {
-            throw new IOException("offline: cannot download " + uri);
+            throw new dev.jkit.model.JkitException("--offline, so nothing can be downloaded",
+                    "run the command without --offline");
         }
         delegate.download(uri, target, progress);
     }

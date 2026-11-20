@@ -55,7 +55,7 @@ final class SearchCommand implements Callable<Integer> {
     }
 
     private void searchJdk(Context ctx) throws Exception {
-        Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
+        Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
         FoojaySource foojay = ctx.foojay();
         List<Pkg> index = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx));
         if (spec.tool() == Tool.GRAALVM) {
