@@ -29,6 +29,9 @@ final class RemoveCommand implements Callable<Integer> {
     @Option(names = "--all", description = "Remove every match.")
     boolean all;
 
+    @Option(names = "--fx", description = "Remove JavaFX builds. Without it, plain builds are removed first.")
+    boolean fx;
+
     @Option(names = "--force", description = "Remove even if global or active in this shell.")
     boolean force;
 
@@ -36,8 +39,8 @@ final class RemoveCommand implements Callable<Integer> {
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
-        List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, false);
-        String vendorSuffix = vendor == null ? "" : " " + vendor;
+        List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx);
+        String vendorSuffix = (vendor == null ? "" : " " + vendor) + (fx ? " --fx" : "");
         if (matches.size() > 1 && !all) {
             List<String> hints = new ArrayList<>();
             for (Installed i : matches) {

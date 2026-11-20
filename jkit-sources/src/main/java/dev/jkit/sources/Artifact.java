@@ -10,6 +10,7 @@ import java.net.URI;
  *
  * @param vendor null for Maven and Gradle
  * @param checksumAlgorithm "sha256", "sha512", ... or null when the source publishes none
+ * @param fx true for a JDK build with JavaFX bundled
  */
 public record Artifact(
         Tool tool,
@@ -19,9 +20,10 @@ public record Artifact(
         String fileName,
         String archiveType,
         String checksumAlgorithm,
-        String checksum) {
+        String checksum,
+        boolean fx) {
 
     public String label() {
-        return tool.id() + " " + version + (vendor == null ? "" : " " + vendor.name());
+        return tool.id() + " " + version + (vendor == null ? "" : " " + vendor.name()) + (fx ? " fx" : "");
     }
 }

@@ -45,6 +45,11 @@ final class Context {
         return new Context(System.getenv(), refresh, offline);
     }
 
+    /** For tests: a context over an explicit environment, never online. */
+    static Context forEnv(Map<String, String> env) {
+        return new Context(env, false, true);
+    }
+
     FoojaySource foojay() {
         return new FoojaySource(http, url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
     }

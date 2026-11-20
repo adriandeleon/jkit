@@ -46,14 +46,16 @@ public final class Store {
                 }
                 String vendor = p.getProperty("vendor", "");
                 Installed installed = new Installed(tool.storeTool(), Version.parse(p.getProperty("version")),
-                        vendor.isEmpty() ? null : Vendor.fromFoojay(vendor), child);
+                        vendor.isEmpty() ? null : Vendor.fromFoojay(vendor), child,
+                        Boolean.parseBoolean(p.getProperty("fx", "false")));
                 if (tool == Tool.GRAALVM && (installed.vendor() == null || !installed.vendor().isGraalVmBased())) {
                     continue;
                 }
                 out.add(installed);
             }
         }
-        out.sort(Comparator.comparing(Installed::version).reversed());
+        // newest first; a plain build before a JavaFX build of the same version
+        out.sort(Comparator.comparing(Installed::version).reversed().thenComparing(Installed::fx));
         return out;
     }
 
@@ -65,8 +67,8 @@ public final class Store {
                 .toList();
     }
 
-    public boolean contains(Tool tool, Version version, Vendor vendor) throws IOException {
-        return Files.isDirectory(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor)));
+    public boolean contains(Tool tool, Version version, Vendor vendor, boolean fx) throws IOException {
+        return Files.isDirectory(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor, fx)));
     }
 
     static void writeMarker(Path dir, Installed installed, String url) throws IOException {
@@ -74,6 +76,7 @@ public final class Store {
         p.setProperty("tool", installed.tool().id());
         p.setProperty("version", installed.version().raw());
         p.setProperty("vendor", installed.vendor() == null ? "" : installed.vendor().foojayName());
+        p.setProperty("fx", Boolean.toString(installed.fx()));
         p.setProperty("url", url);
         try (var out = Files.newOutputStream(dir.resolve(MARKER))) {
             p.store(out, "written by jkit");

@@ -48,7 +48,7 @@ public final class MavenSource {
         String file = "apache-maven-" + v.raw() + "-bin.zip";
         URI url = base.resolve(PATH + v.raw() + "/" + file);
         String sha512 = FoojaySource.firstToken(http.get(URI.create(url + ".sha512")));
-        return new Artifact(Tool.MAVEN, v, null, url, file, "zip", "sha512", sha512);
+        return new Artifact(Tool.MAVEN, v, null, url, file, "zip", "sha512", sha512, false);
     }
 
     private JkitException noMatch(String spec, boolean pre) {

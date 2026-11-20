@@ -46,17 +46,24 @@ final class Resolve {
         return vendor(ctx, spec, known.name());
     }
 
-    /** Installed matches, newest first; exit code 3 with the install command when none. */
+    /**
+     * Installed matches, newest first; exit code 3 with the install command when none. With
+     * {@code fx} only JavaFX builds match; without it plain builds win, and JavaFX builds match
+     * only when no plain build does.
+     */
     static List<Installed> installed(Context ctx, ToolSpec spec, Vendor vendor, String typedVendor, boolean fx)
             throws IOException {
-        List<Installed> matches = ctx.store.find(spec.tool(), spec.version(), vendor);
+        List<Installed> all = ctx.store.find(spec.tool(), spec.version(), vendor);
+        List<Installed> plain = all.stream().filter(i -> !i.fx()).toList();
+        List<Installed> withFx = all.stream().filter(Installed::fx).toList();
+        List<Installed> matches = fx ? withFx : plain.isEmpty() ? withFx : plain;
         if (!matches.isEmpty()) {
             return matches;
         }
         String what = spec.tool() == Tool.JDK || spec.tool() == Tool.GRAALVM ? spec.tool().id().toUpperCase() : spec.tool().id();
         String versionText = spec.version() == null ? "any version" : spec.version();
-        String vendorText = vendor == null ? ""
-                : typedVendor == null ? " from " + vendor + " (default vendor)" : " " + vendor;
+        String vendorText = (fx ? " with JavaFX" : "") + (vendor == null ? ""
+                : typedVendor == null ? " from " + vendor + " (default vendor)" : " " + vendor);
         String install = "jkit install " + spec + (typedVendor == null ? "" : " " + typedVendor) + (fx ? " --fx" : "");
         List<String> hints = new java.util.ArrayList<>();
         hints.add("install it:          " + install);

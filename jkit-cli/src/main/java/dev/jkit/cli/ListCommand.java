@@ -22,7 +22,7 @@ final class ListCommand implements Callable<Integer> {
             for (Installed i : installed) {
                 List<String> notes = notes(ctx, i);
                 ctx.out.println(String.format("%-8s%-22s%-14s%s", label, i.version(),
-                        i.vendor() == null ? "" : i.vendor().name(), String.join(" · ", notes)).stripTrailing());
+                        i.vendor() == null ? "" : i.vendor().name() + (i.fx() ? " fx" : ""), String.join(" · ", notes)).stripTrailing());
                 label = "";
                 any = true;
             }

@@ -40,7 +40,7 @@ public final class GradleSource {
         String url = r.url();
         return new Artifact(Tool.GRADLE, r.version(), null, URI.create(url),
                 url.substring(url.lastIndexOf('/') + 1), "zip",
-                checksum.isEmpty() ? null : "sha256", checksum.isEmpty() ? null : checksum);
+                checksum.isEmpty() ? null : "sha256", checksum.isEmpty() ? null : checksum, false);
     }
 
     private List<Release> releases(boolean pre) throws IOException {

@@ -147,7 +147,7 @@ public final class FoojaySource {
             algorithm = checksumUri.contains("sha512") ? "sha512" : "sha256";
         }
         return new Artifact(tool, pkg.version(), pkg.vendor(), URI.create(url), pkg.fileName(),
-                pkg.archiveType(), checksum.isEmpty() ? null : algorithm, checksum.isEmpty() ? null : checksum);
+                pkg.archiveType(), checksum.isEmpty() ? null : algorithm, checksum.isEmpty() ? null : checksum, fx);
     }
 
     private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,

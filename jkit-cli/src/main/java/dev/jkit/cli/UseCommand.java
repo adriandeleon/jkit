@@ -26,7 +26,7 @@ final class UseCommand implements Callable<Integer> {
     @Option(names = "--global", description = "Default for new shells and apps.")
     boolean global;
 
-    @Option(names = "--fx", description = "JavaFX build (used in the install suggestion).")
+    @Option(names = "--fx", description = "Use a JavaFX build. Without it, plain builds win when both are installed.")
     boolean fx;
 
     @Override

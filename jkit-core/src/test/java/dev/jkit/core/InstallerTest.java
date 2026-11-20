@@ -45,8 +45,12 @@ class InstallerTest {
     }
 
     private Artifact artifact(String checksum) {
+        return artifact(checksum, false);
+    }
+
+    private Artifact artifact(String checksum, boolean fx) {
         return new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"),
-                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", checksum);
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", checksum, fx);
     }
 
     @Test
@@ -59,10 +63,41 @@ class InstallerTest {
         assertThat(result.verified()).isTrue();
         assertThat(result.installed().home()).isEqualTo(home.tools(Tool.JDK).resolve("21.0.13+9-temurin"));
         assertThat(result.installed().home().resolve("bin/java")).exists();
-        assertThat(new Store(home).find(Tool.JDK, "21", Vendor.of("temurin"))).hasSize(1);
+        assertThat(new Store(home).find(Tool.JDK, "21", Vendor.of("temurin"))).hasSize(1)
+                .allSatisfy(i -> assertThat(i.fx()).isFalse());
         assertThat(new Store(home).find(Tool.JDK, "21", Vendor.of("zulu"))).isEmpty();
         assertThat(new Store(home).list(Tool.GRAALVM)).isEmpty();
         assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void recordsJavaFxInTheMarker() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, serving(archive))
+                .install(artifact(sha256(archive), true), Http.Progress.NONE);
+
+        assertThat(result.installed().fx()).isTrue();
+        assertThat(result.installed().label()).isEqualTo("21.0.13+9 temurin fx");
+        assertThat(result.installed().home().resolve(Store.MARKER)).content().contains("fx=true");
+        assertThat(result.installed().home()).isEqualTo(home.tools(Tool.JDK).resolve("21.0.13+9-temurin-fx"));
+        assertThat(new Store(home).list(Tool.JDK)).singleElement().satisfies(i -> assertThat(i.fx()).isTrue());
+    }
+
+    @Test
+    void javaFxAndPlainBuildsOfOneVersionSitSideBySide() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer installer = new Installer(home, serving(archive));
+        Store store = new Store(home);
+        installer.install(artifact(sha256(archive), true), Http.Progress.NONE);
+
+        assertThat(store.contains(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), true)).isTrue();
+        assertThat(store.contains(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), false)).isFalse();
+
+        Installer.Result plain = installer.install(artifact(sha256(archive), false), Http.Progress.NONE);
+        assertThat(plain.fresh()).isTrue();
+        assertThat(store.list(Tool.JDK)).extracting(Installed::fx).containsExactly(false, true);
     }
 
     @Test

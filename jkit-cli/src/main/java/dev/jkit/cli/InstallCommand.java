@@ -38,7 +38,7 @@ final class InstallCommand implements Callable<Integer> {
             case MAVEN -> ctx.maven().resolve(spec.version(), pre);
             case GRADLE -> ctx.gradle().resolve(spec.version(), pre);
         };
-        if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor())) {
+        if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             ctx.out.println(artifact.label() + " is already installed");
             return 0;
         }

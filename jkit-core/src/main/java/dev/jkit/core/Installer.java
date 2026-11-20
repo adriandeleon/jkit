@@ -34,8 +34,8 @@ public final class Installer {
     @SuppressWarnings("try") // the lock is held for the whole block
     public Result install(Artifact artifact, Http.Progress progress) throws IOException {
         Tool storeTool = artifact.tool().storeTool();
-        Path dest = home.tools(storeTool).resolve(Installed.dirName(artifact.version(), artifact.vendor()));
-        Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest);
+        Path dest = home.tools(storeTool).resolve(Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx()));
+        Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         Files.createDirectories(home.root());
         try (FileChannel channel = FileChannel.open(home.lockFile(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
