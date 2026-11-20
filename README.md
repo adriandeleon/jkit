@@ -45,13 +45,15 @@ jkit use jdk@21 --global
 jkit use jdk@17 zulu                     # this shell only
 jkit install graalvm@25 && jkit use graalvm@25   # sets GRAALVM_HOME only
 jkit list
+jkit upgrade --dry-run                   # newest build within each installed major (21.0.5 → 21.0.9)
+jkit upgrade                             # installs them and moves --global along
 jkit reset jdk
 jkit remove jdk@17 zulu
 ```
 
 ## In the prototype
 
-search, install, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
 

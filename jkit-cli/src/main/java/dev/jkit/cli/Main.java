@@ -11,6 +11,7 @@ import picocli.CommandLine.Command;
         subcommands = {
             SearchCommand.class,
             InstallCommand.class,
+            UpgradeCommand.class,
             UseCommand.class,
             ResetCommand.class,
             ListCommand.class,
