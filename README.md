@@ -3,6 +3,8 @@
 Installs and switches JDKs from several vendors, Maven and Gradle. Single native binary,
 built with Java 25, picocli and GraalVM native-image. See the design spec for the full plan.
 
+Website: <https://jkit-project.dev>
+
 ## Build
 
 Maven, through the Maven Wrapper (Maven 3.9.16, checksum pinned in `.mvn/wrapper/maven-wrapper.properties`).

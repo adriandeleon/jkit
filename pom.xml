@@ -10,7 +10,7 @@
   <packaging>pom</packaging>
   <name>jkit</name>
   <description>Installs and switches JDKs, Maven and Gradle.</description>
-  <url>https://github.com/adriandeleon/jkit</url>
+  <url>https://jkit-project.dev</url>
 
   <licenses>
     <license>
