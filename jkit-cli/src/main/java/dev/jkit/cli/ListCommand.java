@@ -7,14 +7,23 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.Map;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 
 @Command(name = "list", description = "Shows what is installed. Never uses the network.")
 final class ListCommand implements Callable<Integer> {
 
+    @picocli.CommandLine.Mixin
+    JsonOut.Flag jsonFlag = new JsonOut.Flag();
+
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
+        if (jsonFlag.json) {
+            ctx.out.println(JsonOut.write(json(ctx)));
+            return 0;
+        }
         boolean any = false;
         for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
             List<Installed> installed = ctx.store.list(tool);
@@ -31,6 +40,28 @@ final class ListCommand implements Callable<Integer> {
             ctx.out.println("nothing installed yet · try: jkit search jdk");
         }
         return 0;
+    }
+
+    /**
+     * {@code home}, {@code global} (tool → install folder or null, for jdk, maven, gradle and graalvm)
+     * and {@code installed}: one object per install ({@link JsonOut#installed}), newest first within a tool.
+     */
+    static Map<String, Object> json(Context ctx) throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        doc.put("home", ctx.home.root());
+        Map<String, Object> global = JsonOut.fields();
+        for (Tool t : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.GRAALVM)) {
+            global.put(t.id(), ctx.os.readLink(ctx.home.global(t)));
+        }
+        doc.put("global", global);
+        List<Object> installed = new ArrayList<>();
+        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
+            for (Installed i : ctx.store.list(tool)) {
+                installed.add(JsonOut.installed(ctx, i));
+            }
+        }
+        doc.put("installed", installed);
+        return doc;
     }
 
     static List<String> notes(Context ctx, Installed i) throws Exception {

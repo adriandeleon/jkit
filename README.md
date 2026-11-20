@@ -57,6 +57,8 @@ jkit remove jdk@17 zulu
 
 search, install, upgrade, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
+`--json` on list, search, install, upgrade, use and remove prints one JSON document for editors and
+scripts: see [docs/json.md](docs/json.md).
 Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet

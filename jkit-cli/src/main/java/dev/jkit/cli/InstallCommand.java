@@ -29,6 +29,9 @@ final class InstallCommand implements Callable<Integer> {
     @Mixin
     Options options;
 
+    @Mixin
+    JsonOut.Flag json = new JsonOut.Flag();
+
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
@@ -38,8 +41,12 @@ final class InstallCommand implements Callable<Integer> {
             case MAVEN -> ctx.maven().resolve(spec.version(), pre);
             case GRADLE -> ctx.gradle().resolve(spec.version(), pre);
         };
+        java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
-            ctx.out.println(artifact.label() + " is already installed");
+            say.println(artifact.label() + " is already installed");
+            if (json.json) {
+                printJson(ctx, "already-installed", null, artifact.version(), artifact.vendor(), artifact.fx());
+            }
             return 0;
         }
         ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
@@ -47,11 +54,29 @@ final class InstallCommand implements Callable<Integer> {
         if (!result.verified()) {
             ctx.err.println("warning: the source publishes no checksum; the download was not verified");
         }
-        ctx.out.println("installed " + artifact.label() + " → " + result.installed().home());
+        say.println("installed " + artifact.label() + " → " + result.installed().home());
+        if (json.json) {
+            printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx());
+            return 0;
+        }
         if (!Files.exists(ctx.home.global(spec.tool()))) {
             ctx.out.println("make it the default: jkit use " + spec.tool() + "@" + artifact.version()
                     + (vendor == null ? "" : " " + vendor) + " --global");
         }
         return 0;
+    }
+
+    /** {@code {schemaVersion, status: installed|already-installed, verified, installed: {…}}}. */
+    private void printJson(Context ctx, String status, Boolean verified, dev.jkit.model.Version version,
+                           Vendor vendor, boolean fxBuild) throws Exception {
+        java.util.Map<String, Object> doc = JsonOut.document();
+        doc.put("status", status);
+        doc.put("verified", verified);
+        for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
+            if (i.version().equals(version) && java.util.Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
+                doc.put("installed", JsonOut.installed(ctx, i));
+            }
+        }
+        ctx.out.println(JsonOut.write(doc));
     }
 }
