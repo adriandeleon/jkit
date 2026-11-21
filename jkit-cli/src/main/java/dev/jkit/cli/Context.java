@@ -27,11 +27,12 @@ final class Context {
     final Store store;
     final OsServices os;
     final Http http;
-    final PrintStream out = System.out;
+    final PrintStream out;
     final PrintStream err = System.err;
 
-    private Context(Map<String, String> env, boolean refresh, boolean offline) {
+    private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
         this.env = env;
+        this.out = out;
         this.home = JkitHome.fromEnv(env);
         this.platform = Platform.current();
         this.config = Config.load(home, env);
@@ -42,12 +43,17 @@ final class Context {
     }
 
     static Context create(boolean refresh, boolean offline) {
-        return new Context(System.getenv(), refresh, offline);
+        return new Context(System.getenv(), refresh, offline, System.out);
     }
 
     /** For tests: a context over an explicit environment, never online. */
     static Context forEnv(Map<String, String> env) {
-        return new Context(env, false, true);
+        return forEnv(env, System.out);
+    }
+
+    /** For tests: like {@link #forEnv(Map)}, printing to {@code out}. */
+    static Context forEnv(Map<String, String> env, PrintStream out) {
+        return new Context(env, false, true, out);
     }
 
     FoojaySource foojay() {

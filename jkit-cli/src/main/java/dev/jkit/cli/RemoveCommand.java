@@ -35,6 +35,9 @@ final class RemoveCommand implements Callable<Integer> {
     @Option(names = "--force", description = "Remove even if global or active in this shell.")
     boolean force;
 
+    @picocli.CommandLine.Mixin
+    JsonOut.Flag json = new JsonOut.Flag();
+
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
@@ -52,18 +55,25 @@ final class RemoveCommand implements Callable<Integer> {
             throw new JkitException(spec + vendorSuffix + " matches " + matches.size() + " installed builds",
                     hints.toArray(String[]::new));
         }
+        List<Object> removed = new ArrayList<>();
         for (Installed i : matches) {
             List<String> notes = ListCommand.notes(ctx, i);
             if (!notes.isEmpty() && !force) {
                 throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)
                         + "; nothing removed", "remove it anyway: add --force");
             }
-            remove(ctx, i);
+            removed.add(JsonOut.installed(ctx, i));
+            remove(ctx, i, json.json ? ctx.err : ctx.out);
+        }
+        if (json.json) {
+            java.util.Map<String, Object> doc = JsonOut.document();
+            doc.put("removed", removed);
+            ctx.out.println(JsonOut.write(doc));
         }
         return 0;
     }
 
-    private static void remove(Context ctx, Installed i) throws IOException {
+    private static void remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
         Files.createDirectories(ctx.home.tmp());
         Path trash = Files.createTempDirectory(ctx.home.tmp(), "remove-").resolve(i.id());
         try {
@@ -82,6 +92,6 @@ final class RemoveCommand implements Callable<Integer> {
                 ctx.err.println("warning: there is no global " + t + " any more");
             }
         }
-        ctx.out.println("removed " + i.tool() + " " + i.label());
+        say.println("removed " + i.tool() + " " + i.label());
     }
 }
