@@ -35,6 +35,20 @@ sudo apt install ./jkit_*_amd64.deb      # Debian, Ubuntu
 sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
 ```
 
+### macOS
+
+Releases include `jkit-<version>-macos-aarch64.tar.gz` (Apple Silicon) and
+`jkit-<version>-macos-x64.tar.gz` (Intel): a single binary, signed with a Developer ID and
+notarized by Apple, so Gatekeeper lets it run even when downloaded with a browser.
+
+```bash
+tar -xzf jkit-*-macos-*.tar.gz
+sudo mv jkit /usr/local/bin/
+```
+
+Pre-releases may ship without a signature; for those, run `xattr -d com.apple.quarantine jkit`
+on a browser-downloaded copy.
+
 ## Try it
 
 ```bash
@@ -64,7 +78,7 @@ Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refre
 ## Not yet
 
 pin/sync and project files, signed packages and an apt/dnf repository, status, env, doctor, init, prune, config command, self update,
-Windows and macOS testing, CI and releases.
+Windows and Homebrew.
 
 ## Modules
 
