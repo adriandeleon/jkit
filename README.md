@@ -39,7 +39,8 @@ sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
 
 Releases include `jkit-<version>-macos-aarch64.tar.gz` (Apple Silicon) and
 `jkit-<version>-macos-x64.tar.gz` (Intel): a single binary, signed with a Developer ID and
-notarized by Apple, so Gatekeeper lets it run even when downloaded with a browser.
+notarized by Apple, so Gatekeeper lets it run even when downloaded with a browser. They need
+macOS 15 (Sequoia) or newer.
 
 ```bash
 tar -xzf jkit-*-macos-*.tar.gz
