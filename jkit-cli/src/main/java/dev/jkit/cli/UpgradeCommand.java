@@ -222,6 +222,7 @@ final class UpgradeCommand implements Callable<Integer> {
             if (target != null && target.equals(previous.home())) {
                 ctx.os.pointLink(link, newHome);
                 out.println("  global " + t + " → " + line.userTool() + " " + newHome.getFileName());
+                new Changes(ctx).link(link, newHome).print(out);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
             if (shell != null && Path.of(shell).equals(previous.home())) {

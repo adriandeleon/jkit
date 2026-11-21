@@ -6,6 +6,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -40,8 +41,11 @@ final class UseCommand implements Callable<Integer> {
         Tool tool = spec.tool();
         if (global) {
             ctx.os.pointLink(ctx.home.global(tool), chosen.home());
-            (json.json ? ctx.err : ctx.out).println("global " + tool + " → " + chosen.label());
-            printJson(ctx, "global", chosen);
+            Changes changes = new Changes(ctx).link(ctx.home.global(tool), chosen.home()).globalEffect(tool);
+            PrintStream say = json.json ? ctx.err : ctx.out;
+            say.println("global " + tool + " → " + chosen.label());
+            changes.print(say);
+            printJson(ctx, "global", chosen, changes);
             return 0;
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
@@ -53,13 +57,18 @@ final class UseCommand implements Callable<Integer> {
         boolean graalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
         Map<String, String> changes = ShellEnv.use(ctx.env, ctx.home, tool, chosen.home(), graalVm);
         Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
-        (json.json ? ctx.err : ctx.out).println("using " + tool + " " + chosen.label() + " in this shell");
-        printJson(ctx, "shell", chosen);
+        Changes report = new Changes(ctx).env(changes)
+                .note("only this shell; for new shells too: jkit use " + tool + "@" + chosen.version().raw()
+                        + (chosen.vendor() == null ? "" : " " + chosen.vendor().name()) + (chosen.fx() ? " --fx" : "") + " --global");
+        PrintStream say = json.json ? ctx.err : ctx.out;
+        say.println("using " + tool + " " + chosen.label() + " in this shell");
+        report.print(say);
+        printJson(ctx, "shell", chosen, report);
         return 0;
     }
 
-    /** {@code {schemaVersion, scope: global|shell, tool, installed: {…}}}. */
-    private void printJson(Context ctx, String scope, Installed chosen) throws Exception {
+    /** {@code {schemaVersion, scope: global|shell, tool, installed: {…}, changes: […], notes: […]}}. */
+    private void printJson(Context ctx, String scope, Installed chosen, Changes changes) throws Exception {
         if (!json.json) {
             return;
         }
@@ -67,6 +76,8 @@ final class UseCommand implements Callable<Integer> {
         doc.put("scope", scope);
         doc.put("tool", spec.tool().id());
         doc.put("installed", JsonOut.installed(ctx, chosen));
+        doc.put("changes", changes.json());
+        doc.put("notes", changes.notes());
         ctx.out.println(JsonOut.write(doc));
     }
 }

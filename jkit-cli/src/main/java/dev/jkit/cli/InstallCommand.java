@@ -59,6 +59,7 @@ final class InstallCommand implements Callable<Integer> {
             printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx());
             return 0;
         }
+        ctx.out.println("  no environment variables or config files changed");
         if (!Files.exists(ctx.home.global(spec.tool()))) {
             ctx.out.println("make it the default: jkit use " + spec.tool() + "@" + artifact.version()
                     + (vendor == null ? "" : " " + vendor) + " --global");

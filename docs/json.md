@@ -135,6 +135,22 @@ when any line failed.
 
 `scope` is `global` or `shell`. Without `--global` the shell hook must be active, as in text mode.
 
+The document also lists what changed outside the store, and notes on what that means (the same
+lines text mode prints, also on stderr):
+
+```json
+{
+  "changes": [
+    { "kind": "link", "name": "/home/me/.jkit/global/jdk", "action": "set", "value": "/home/me/.jkit/tools/jdk/25.0.1+8-temurin" }
+  ],
+  "notes": ["new shells with the jkit hook: JAVA_HOME=~/.jkit/global/jdk, PATH includes ~/.jkit/global/jdk/bin"]
+}
+```
+
+- `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
+- `kind: env`: a variable of the calling shell (`--global` changes none); `action` is `set` (with
+  `value`) or `unset`. `PATH` is reported per entry, with `action` `add` or `remove`.
+
 ## `jkit remove <tool>@<version> [vendor] --json`
 
 ```json

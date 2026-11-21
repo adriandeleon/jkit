@@ -23,9 +23,14 @@ final class ResetCommand implements Callable<Integer> {
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active", "add to ~/.bashrc:  eval \"$(jkit hook bash)\"");
         }
-        Files.writeString(Path.of(envFile), ShellEnv.format(ShellEnv.reset(ctx.env, ctx.home, tool),
-                ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        java.util.Map<String, String> changes = ShellEnv.reset(ctx.env, ctx.home, tool);
+        Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
         ctx.out.println("reset " + tool + " in this shell");
+        Changes report = new Changes(ctx).env(changes);
+        if (report.isEmpty()) {
+            report.note("nothing changed: this shell had no " + tool + " of its own");
+        }
+        report.print(ctx.out);
         return 0;
     }
 }
