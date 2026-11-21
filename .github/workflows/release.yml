@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v0.1.0 to publish a release. Each Linux architecture builds the native binary,
-# runs the tests, and packages a .deb, an .rpm and a tar.gz; the release job attaches them all
+# Push a tag like v0.1.0 to publish a release. Each platform builds the native binary and runs
+# the tests; Linux packages a .deb, an .rpm and a tar.gz, macOS (arm64 and x64) a signed,
+# notarized binary in a tar.gz. The release job attaches them all
 # with a SHA256SUMS file. A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the
 # Vitrina apt repository skips.
 
@@ -26,8 +27,19 @@ jobs:
           # (checked below) such as RHEL 9 and Debian 12.
           - runner: ubuntu-22.04
             platform: linux-x64
+            profiles: native,linux-packages
           - runner: ubuntu-22.04-arm
             platform: linux-aarch64
+            profiles: native,linux-packages
+          # macOS binaries are signed with the Developer ID and notarized (see "Sign and notarize").
+          - runner: macos-15
+            platform: macos-aarch64
+            arch: arm64
+            profiles: native
+          - runner: macos-15-intel
+            platform: macos-x64
+            arch: x86_64
+            profiles: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -50,9 +62,10 @@ jobs:
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
       - name: Test, build the native binary and the packages
-        run: ./mvnw -B -Pnative,linux-packages verify
+        run: ./mvnw -B -P${{ matrix.profiles }} verify
 
       - name: Check the glibc the binary needs
+        if: runner.os == 'Linux'
         run: |
           need=$(objdump -T jkit-cli/target/jkit | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
           echo "highest glibc symbol: $need (packages declare GLIBC_2.34)"
@@ -61,18 +74,96 @@ jobs:
             exit 1
           fi
 
+      # Needs these repository secrets (Settings → Secrets and variables → Actions):
+      #   MACOS_CERTIFICATE_P12       base64 of the "Developer ID Application" certificate + key (.p12)
+      #   MACOS_CERTIFICATE_PASSWORD  the .p12 export password
+      #   APPLE_API_KEY_P8            base64 of an App Store Connect API key (.p8, Developer role)
+      #   APPLE_API_KEY_ID            that key's ID
+      #   APPLE_API_ISSUER_ID         the issuer ID shown on the App Store Connect keys page
+      # A bare binary cannot carry a stapled ticket, so Gatekeeper looks the notarization up online
+      # the first time a downloaded copy runs. Without the secrets, a pre-release tag (with a hyphen)
+      # ships the linker's ad-hoc signature with a warning; a release tag fails.
+      - name: Sign and notarize
+        if: runner.os == 'macOS'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          bin=jkit-cli/target/jkit
+          if [ -z "$CERT_P12" ] || [ -z "$API_KEY_P8" ]; then
+            case "$GITHUB_REF_NAME" in
+              *-*) echo "::warning::signing secrets are not set; this pre-release ships unsigned for macOS"
+                   exit 0 ;;
+              *)   echo "::error::signing secrets are not set; a release needs a notarized macOS binary"
+                   exit 1 ;;
+            esac
+          fi
+
+          # a throwaway keychain holding only the Developer ID identity
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          kc_pass=$(openssl rand -hex 16)
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | grep -m1 'Developer ID Application' | awk '{print $2}')
+          [ -n "$identity" ] || { echo "::error::no Developer ID Application identity in the .p12"; exit 1; }
+
+          codesign --force --timestamp --options runtime --identifier dev.jkit.jkit \
+            --sign "$identity" --keychain "$keychain" "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
+
+          # notarytool takes a zip; the ticket it records covers the binary's code signature
+          echo "$API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k "$bin" "$RUNNER_TEMP/jkit.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/jkit.zip" --wait --timeout 20m \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID" \
+            --output-format json > "$RUNNER_TEMP/notary.json" || true   # status is checked below
+          cat "$RUNNER_TEMP/notary.json"
+          id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json")
+          status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json")
+          if [ "$status" != Accepted ]; then
+            xcrun notarytool log "$id" \
+              --key "$RUNNER_TEMP/notary.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
+            echo "::error::notarization finished with status $status"
+            exit 1
+          fi
+
+      - name: Remove the signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
+
       - name: Smoke test
         env:
           JKIT_HOME: ${{ runner.temp }}/jkit-home
         run: |
           jkit-cli/target/jkit --version | grep -Fx "jkit $VERSION"
           jkit-cli/target/jkit search jdk --maintained | head -3
+          file jkit-cli/target/jkit
+          if [ "$RUNNER_OS" = macOS ]; then
+            lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
+            otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
+            codesign -dv jkit-cli/target/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
+          fi
 
       - name: Collect the files
         run: |
           mkdir dist
           tar -C jkit-cli/target -czf "dist/jkit-$VERSION-${{ matrix.platform }}.tar.gz" jkit
-          cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+          if [ "$RUNNER_OS" = Linux ]; then
+            cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+          fi
           ls -l dist
 
       - name: Upload

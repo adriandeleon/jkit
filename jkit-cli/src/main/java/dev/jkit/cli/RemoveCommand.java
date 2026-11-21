@@ -74,6 +74,7 @@ final class RemoveCommand implements Callable<Integer> {
     }
 
     private static void remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
+        Changes removedLinks = new Changes(ctx);
         Files.createDirectories(ctx.home.tmp());
         Path trash = Files.createTempDirectory(ctx.home.tmp(), "remove-").resolve(i.id());
         try {
@@ -89,9 +90,15 @@ final class RemoveCommand implements Callable<Integer> {
             Path target = ctx.os.readLink(link);
             if (t.storeTool() == i.tool() && target != null && target.equals(i.home())) {
                 ctx.os.removeLink(link);
+                removedLinks.link(link, null);
                 ctx.err.println("warning: there is no global " + t + " any more");
+            }
+            String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
+            if (t.storeTool() == i.tool() && shell != null && Path.of(shell).equals(i.home())) {
+                removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
             }
         }
         say.println("removed " + i.tool() + " " + i.label());
+        removedLinks.print(say);
     }
 }

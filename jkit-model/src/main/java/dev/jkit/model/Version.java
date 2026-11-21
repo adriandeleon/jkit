@@ -46,6 +46,12 @@ public final class Version implements Comparable<Version> {
         return new Version(text, numbers(core), numbers(buildText), pre);
     }
 
+    /** True when {@code text} starts with a number, as every version jkit installs does. */
+    public static boolean looksLikeVersion(String text) {
+        String t = text.trim();
+        return !t.isEmpty() && Character.isDigit(t.charAt(0)) && parse(t).partCount() > 0;
+    }
+
     private static int[] numbers(String text) {
         List<Integer> out = new ArrayList<>();
         for (String piece : text.split("[.\\-+_]")) {
