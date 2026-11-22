@@ -4,7 +4,7 @@ Status: draft design, not implemented.
 
 ## Goal
 
-A repository records the JDK, GraalVM, Maven and Gradle it builds with, and every shell
+A repository records the JDK, GraalVM, Maven, Gradle and sbt it builds with, and every shell
 with the jkit hook switches to those versions on entering it. This matches what
 `.sdkmanrc` + `sdkman_auto_env` and `.nvmrc` do, and is the main gap with SDKMAN.
 
@@ -37,6 +37,8 @@ graalvm = { version = "25", vendor = "graalvm-ce" }
 ```
 
 - Keys are tool ids from `Tool.parse`, so the `java` and `mvn` aliases work too.
+- `sbt` picks the launcher only. The sbt version a build runs on still comes from its
+  `project/build.properties`, which the launcher reads and downloads itself.
 - `version` is matched as a prefix with `Version.matches`, the same rule `jkit use jdk@21`
   uses today. `"latest"` or a missing version means newest.
 - `vendor` (JDK and GraalVM only) goes through `Vendor.of`, so names and aliases match the CLI.
@@ -68,7 +70,7 @@ jkit only reads them and never writes them.
 
 | File | Example | Mapping |
 |---|---|---|
-| `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9`, `gradle=8.10` | `java` → jdk. The suffix maps to a vendor: `tem`→temurin, `zulu`, `amzn`→corretto, `librca`→liberica, `ms`→microsoft, `sapmchn`→sapmachine, `sem`→semeru, `graalce`→graalvm-ce, `graal`→graalvm, `nik`→liberica-nik, `mandrel`, `oracle`, `open`→openjdk, `kona`, `albba`→dragonwell, `jbr`→jetbrains. `.fx` before the suffix (`21.0.5.fx-zulu`) means `fx = true`. SDKMAN ids have no build number, so they match as a prefix. Other candidates (kotlin, …) are skipped with one warning. |
+| `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9`, `gradle=8.10`, `sbt=1.10.7` | `java` → jdk. The suffix maps to a vendor: `tem`→temurin, `zulu`, `amzn`→corretto, `librca`→liberica, `ms`→microsoft, `sapmchn`→sapmachine, `sem`→semeru, `graalce`→graalvm-ce, `graal`→graalvm, `nik`→liberica-nik, `mandrel`, `oracle`, `open`→openjdk, `kona`, `albba`→dragonwell, `jbr`→jetbrains. `.fx` before the suffix (`21.0.5.fx-zulu`) means `fx = true`. SDKMAN ids have no build number, so they match as a prefix. Other candidates (kotlin, …) are skipped with one warning. |
 | `.tool-versions` (asdf, mise) | `java temurin-21.0.5+11.0.LTS`, `java 21`, `maven 3.9.9` | `java` → jdk. `vendor-version` splits at the first `-` followed by a digit. asdf/mise names that differ map to jkit's (`adoptopenjdk`→temurin, `graalvm-community`→graalvm-ce, `oracle-graalvm`→graalvm, `semeru-openj9`→semeru), and others pass through as vendor names. A `-javafx` or `-fx` vendor suffix means `fx = true`. A plain number means any vendor, and `latest` means newest. Only the first version on a line is used, not asdf's fallbacks. `system`, `ref:` and `path:` give a warning and are skipped, as do other tools. Known limit: asdf's `zulu-…` ids use Zulu's own numbering, which won't match. |
 | `.java-version` | `21` or `17.0.2` | jdk only, vendor left out. `1.8` style is read as `8`. Values jenv uses that aren't versions (`openjdk64-17.0.2`, `system`) give a warning and are skipped. |
 

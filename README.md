@@ -1,6 +1,6 @@
 # jkit (prototype)
 
-Installs and switches JDKs from several vendors, Maven and Gradle. Single native binary,
+Installs and switches JDKs from several vendors, Maven, Gradle and sbt. Single native binary,
 built with Java 25, picocli and GraalVM native-image. See the design spec for the full plan.
 
 Website: <https://jkit-project.dev>
@@ -80,7 +80,7 @@ sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkman
 read by status and env, but shells don't switch to them on their own yet: see [docs/project-files.md](docs/project-files.md).
 `--json` on list, status, env, doctor, search, install, upgrade, use and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
-Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
+Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
@@ -92,7 +92,7 @@ Windows and Homebrew.
 | Module | Contents |
 | --- | --- |
 | `jkit-model` | ToolSpec, Version, Vendor, Platform; no I/O |
-| `jkit-sources` | Http (+ cache), foojay, Gradle and Maven Central clients |
+| `jkit-sources` | Http (+ cache), foojay, Gradle, Maven Central and sbt clients |
 | `jkit-core` | Store, Installer, Archives, Config, ShellEnv |
 | `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
 | `jkit-cli` | picocli commands and the native binary |

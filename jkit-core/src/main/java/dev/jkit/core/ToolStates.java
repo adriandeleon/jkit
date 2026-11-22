@@ -23,7 +23,7 @@ import java.util.Properties;
  */
 public final class ToolStates {
     /** The tools in display order. */
-    public static final List<Tool> TOOLS = List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.GRAALVM);
+    public static final List<Tool> TOOLS = List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT, Tool.GRAALVM);
 
     /** Reads a link's target (OS-specific); null when there is no link. */
     @FunctionalInterface

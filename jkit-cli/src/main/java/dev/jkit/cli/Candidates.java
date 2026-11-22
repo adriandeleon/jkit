@@ -10,7 +10,7 @@ final class Candidates {
     static final class Tools implements Iterable<String> {
         @Override
         public Iterator<String> iterator() {
-            return List.of("jdk", "maven", "gradle", "graalvm").iterator();
+            return List.of("jdk", "maven", "gradle", "sbt", "graalvm").iterator();
         }
     }
 

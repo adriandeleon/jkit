@@ -43,6 +43,7 @@ final class InstallCommand implements Callable<Integer> {
             case JDK, GRAALVM -> ctx.foojay().resolve(spec.tool(), spec.version(), vendor, ctx.platform, fx, pre);
             case MAVEN -> ctx.maven().resolve(spec.version(), pre);
             case GRADLE -> ctx.gradle().resolve(spec.version(), pre);
+            case SBT -> ctx.sbt().resolve(spec.version(), pre);
         };
         java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
