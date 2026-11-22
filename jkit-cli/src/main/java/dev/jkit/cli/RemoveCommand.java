@@ -55,15 +55,22 @@ final class RemoveCommand implements Callable<Integer> {
             throw new JkitException(spec + vendorSuffix + " matches " + matches.size() + " installed builds",
                     hints.toArray(String[]::new));
         }
+        // check every match first, so a refusal really means nothing was removed
+        if (!force) {
+            for (Installed i : matches) {
+                List<String> notes = ListCommand.notes(ctx, i);
+                if (!notes.isEmpty()) {
+                    throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)
+                            + "; nothing removed", "remove it anyway: add --force");
+                }
+            }
+        }
         List<Object> removed = new ArrayList<>();
         for (Installed i : matches) {
-            List<String> notes = ListCommand.notes(ctx, i);
-            if (!notes.isEmpty() && !force) {
-                throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)
-                        + "; nothing removed", "remove it anyway: add --force");
-            }
             removed.add(JsonOut.installed(ctx, i));
-            remove(ctx, i, json.json ? ctx.err : ctx.out);
+            try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
+                remove(ctx, i, json.json ? ctx.err : ctx.out);
+            }
         }
         if (json.json) {
             java.util.Map<String, Object> doc = JsonOut.document();
@@ -76,13 +83,21 @@ final class RemoveCommand implements Callable<Integer> {
     private static void remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
         Changes removedLinks = new Changes(ctx);
         Files.createDirectories(ctx.home.tmp());
-        Path trash = Files.createTempDirectory(ctx.home.tmp(), "remove-").resolve(i.id());
+        Path trashDir = Files.createTempDirectory(ctx.home.tmp(), "remove-");
+        Path trash = trashDir.resolve(i.id());
         try {
             // one rename first: if anything holds the folder open (Windows), nothing is touched
             Files.move(i.home(), trash, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            throw new JkitException(i.tool() + " " + i.label() + " is in use (IDE or Gradle daemon?)",
-                    "try: gradle --stop, then run this again");
+            Files.deleteIfExists(trashDir);
+            if (e instanceof java.nio.file.AccessDeniedException && !ctx.platform.isWindows()) {
+                throw new JkitException("permission denied moving " + i.home(),
+                        "check the folder's owner: ls -ld " + i.home().getParent());
+            }
+            throw new JkitException("can't remove " + i.tool() + " " + i.label() + ": " + e.getMessage(),
+                    ctx.platform.isWindows()
+                            ? "something may have it open (IDE or Gradle daemon?): try gradle --stop, then run this again"
+                            : "check the folder's permissions, then run this again");
         }
         Fs.deleteRecursively(trash.getParent());
         for (Tool t : Tool.values()) {

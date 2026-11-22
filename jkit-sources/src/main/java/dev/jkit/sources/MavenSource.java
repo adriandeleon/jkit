@@ -47,8 +47,26 @@ public final class MavenSource {
                 .orElseThrow(() -> noMatch(spec, pre));
         String file = "apache-maven-" + v.raw() + "-bin.zip";
         URI url = base.resolve(PATH + v.raw() + "/" + file);
-        String sha512 = FoojaySource.firstToken(http.get(URI.create(url + ".sha512")));
-        return new Artifact(Tool.MAVEN, v, null, url, file, "zip", "sha512", sha512, false);
+        Checksum checksum = checksum(url, file);
+        return new Artifact(Tool.MAVEN, v, null, url, file, "zip",
+                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
+    }
+
+    /** .sha512 exists from Maven 3.9.1 on; older releases have only .sha1 (and .md5). */
+    private Checksum checksum(URI url, String file) throws IOException {
+        for (String ext : new String[] {"sha512", "sha1"}) {
+            try {
+                Checksum c = Checksum.parse(http.get(URI.create(url + "." + ext)), file, ext);
+                if (c != null) {
+                    return c;
+                }
+            } catch (HttpStatusException e) {
+                if (e.status() != 404) {
+                    throw e;
+                }
+            }
+        }
+        return null;
     }
 
     private JkitException noMatch(String spec, boolean pre) {

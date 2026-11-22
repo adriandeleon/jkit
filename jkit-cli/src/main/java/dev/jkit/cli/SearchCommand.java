@@ -85,7 +85,7 @@ final class SearchCommand implements Callable<Integer> {
             if (spec.version() != null && vendorText != null) {
                 pkgs = new ArrayList<>(foojay.builds(spec.major(), vendor, ctx.platform, fx, pre));
             } else {
-                pkgs = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx));
+                pkgs = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx, pre));
                 if (spec.version() != null) {
                     pkgs.removeIf(p -> p.major() != spec.major());
                 }
@@ -141,7 +141,7 @@ final class SearchCommand implements Callable<Integer> {
     private void searchJdk(Context ctx) throws Exception {
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
         FoojaySource foojay = ctx.foojay();
-        List<Pkg> index = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx));
+        List<Pkg> index = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx, pre));
         if (spec.tool() == Tool.GRAALVM) {
             index.removeIf(p -> !p.vendor().isGraalVmBased());
         }

@@ -4,8 +4,9 @@ For editors, IDEs and scripts that drive jkit. With `--json`, a command prints *
 document on stdout**, also when it fails. Progress, download bars and messages go to stderr, so a
 program can read stdout whole and show stderr lines as progress.
 
-Commands with `--json`: `list`, `search`, `install`, `upgrade`, `use`, `remove`.
-(`reset` and `hook` only make sense in a shell.)
+Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
+`remove`. (`reset` and `hook` only make sense in a shell.) `--help` and `--version` with `--json`
+print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
 ## Versioning
 
@@ -28,7 +29,8 @@ Any failure prints this, with the same exit code the process exits with:
 }
 ```
 
-Exit codes: `0` success, `1` failure, `2` bad arguments, `3` no installed match (`use`, `remove`).
+Exit codes: `0` success, `1` failure, `2` bad arguments (unknown tool, vendor or shell, a version
+that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin with no install).
 
 ## The install object
 
@@ -196,7 +198,8 @@ What `available` holds for a JDK (or `graalvm`):
 ```
 
 `status` is `installed` or `already-installed` (then `verified` is null). `verified` is false when the
-source publishes no checksum.
+source publishes no checksum, or only an md5 or sha1 one (jkit still checks those, but they don't
+count as verified). Downloads and checksums come only over https.
 
 ## `jkit upgrade [tool[@major]] [vendor] [--dry-run] --json`
 

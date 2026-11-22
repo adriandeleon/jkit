@@ -31,7 +31,7 @@ jobs:
           - runner: ubuntu-22.04-arm
             platform: linux-aarch64
             profiles: native,linux-packages
-          # macOS binaries are signed with the Developer ID and notarized (see "Sign and notarize").
+          # macOS binaries ship unsigned for now; "Sign and notarize" below is switched off.
           - runner: macos-15
             platform: macos-aarch64
             arch: arm64
@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up GraalVM
         uses: graalvm/setup-graalvm@f70bc8032f90a104502824a54bcb94b6f01715bc # v1.6.8
@@ -149,9 +151,21 @@ jobs:
       - name: Smoke test
         env:
           JKIT_HOME: ${{ runner.temp }}/jkit-home
+        shell: bash
         run: |
-          jkit-cli/target/jkit --version | grep -Fx "jkit $VERSION"
-          jkit-cli/target/jkit search jdk --maintained | head -3
+          set -euo pipefail
+          jkit=jkit-cli/target/jkit
+          "$jkit" --version | grep -Fx "jkit $VERSION"
+          # run each command to completion first, so a crash fails the step (a pipe into head would hide it)
+          out=$("$jkit" search jdk --maintained)
+          printf '%s\n' "$out" | head -3
+          # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
+          for cmd in "list --json" "status --json" "env --json --global" "doctor --json" "search maven --json"; do
+            doc=$("$jkit" $cmd) || { echo "::error::jkit $cmd failed"; exit 1; }
+            printf '%s' "$doc" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
+              || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
+          done
+          "$jkit" hook bash > /dev/null
           file jkit-cli/target/jkit
           if [ "$RUNNER_OS" = macOS ]; then
             lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
@@ -197,6 +211,11 @@ jobs:
           cat SHA256SUMS
           flags=()
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" * \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
-            --title "jkit ${GITHUB_REF_NAME#v}" "${flags[@]}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # a re-run: replace the files, keep the release and its notes
+            gh release upload "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" * \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+              --title "jkit ${GITHUB_REF_NAME#v}" "${flags[@]}"
+          fi

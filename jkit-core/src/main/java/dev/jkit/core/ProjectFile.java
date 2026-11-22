@@ -138,7 +138,7 @@ public final class ProjectFile {
     static ProjectSpec readToml(Path file) {
         TomlParseResult toml;
         try {
-            toml = Toml.parse(file);
+            toml = Toml.parse(text(file));
         } catch (IOException e) {
             throw cannotRead(file, e);
         }
@@ -347,19 +347,39 @@ public final class ProjectFile {
 
     /** {@code 1.8} → {@code 8}, {@code 1.8.0_392} → {@code 8.0_392}: the pre-9 numbering. */
     static String legacyJavaVersion(String text) {
-        if (text.matches("1\\.[1-8](\\D.*)?")) {
-            return text.substring(2);
-        }
-        return text;
+        return dev.jkit.model.Version.fromLegacyJava(text);
     }
 
     // helpers
 
     private static List<String> lines(Path file) {
         try {
-            return Files.readAllLines(file);
+            return text(file).lines().toList();
         } catch (IOException e) {
             throw cannotRead(file, e);
+        }
+    }
+
+    /**
+     * The file as text: UTF-8 or UTF-16 by byte-order mark (PowerShell 5's {@code echo 21 > .java-version}
+     * writes UTF-16), else UTF-8, else Latin-1. Never a decoding error.
+     */
+    static String text(Path file) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
+            return new String(bytes, 3, bytes.length - 3, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xfe) {
+            return new String(bytes, 2, bytes.length - 2, java.nio.charset.StandardCharsets.UTF_16LE);
+        }
+        if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xfe && (bytes[1] & 0xff) == 0xff) {
+            return new String(bytes, 2, bytes.length - 2, java.nio.charset.StandardCharsets.UTF_16BE);
+        }
+        try {
+            return java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
         }
     }
 

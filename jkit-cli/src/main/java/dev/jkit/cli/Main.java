@@ -6,6 +6,7 @@ import picocli.CommandLine.Command;
 
 @Command(name = "jkit",
         mixinStandardHelpOptions = true,
+        scope = CommandLine.ScopeType.INHERIT, // --help and --version on every subcommand too
         versionProvider = VersionProvider.class,
         description = "Installs and switches JDKs, Maven and Gradle.",
         subcommands = {
@@ -69,6 +70,21 @@ public final class Main implements Runnable {
             ex.getCommandLine().usage(System.err);
             return CommandLine.ExitCode.USAGE;
         });
+        java.util.List<String> list = java.util.Arrays.asList(args);
+        if (json && (list.contains("-h") || list.contains("--help") || list.contains("help")
+                || list.contains("-V") || list.contains("--version"))) {
+            // help and version under --json: still one JSON document on stdout. Parse errors print
+            // their own error document through the handler above.
+            java.io.StringWriter text = new java.io.StringWriter();
+            cli.setOut(new java.io.PrintWriter(text, true));
+            int code = cli.execute(list.stream().filter(a -> !a.equals(JsonOut.FLAG)).toArray(String[]::new));
+            if (code == 0) {
+                java.util.Map<String, Object> doc = JsonOut.document();
+                doc.put(list.contains("-V") || list.contains("--version") ? "version" : "help", text.toString().strip());
+                System.out.println(JsonOut.write(doc));
+            }
+            return code;
+        }
         return cli.execute(args);
     }
 

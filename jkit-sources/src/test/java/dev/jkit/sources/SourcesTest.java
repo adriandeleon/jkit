@@ -15,16 +15,16 @@ import org.junit.jupiter.api.Test;
 
 class SourcesTest {
 
-    /** Answers by the first route whose text the URL contains. */
-    private static Http fake(Map<String, String> routes) {
+    /** Answers by the longest route whose text the URL contains (so overlapping keys are stable); else 404. */
+    static Http fake(Map<String, String> routes) {
         return new Http() {
             @Override
             public String get(URI uri) throws IOException {
                 return routes.entrySet().stream()
                         .filter(e -> uri.toString().contains(e.getKey()))
+                        .max(java.util.Comparator.comparingInt(e -> e.getKey().length()))
                         .map(Map.Entry::getValue)
-                        .findFirst()
-                        .orElseThrow(() -> new IOException("no fixture for " + uri));
+                        .orElseThrow(() -> new HttpStatusException(404, uri));
             }
 
             @Override
@@ -109,5 +109,80 @@ class SourcesTest {
         assertThat(a.checksum()).isEqualTo("deadbeef");
         assertThatThrownBy(() -> maven.resolve("4", false))
                 .hasMessageContaining("only pre-releases match maven@4: 4.0.0-rc-7");
+    }
+
+    @Test
+    void oldMavenFallsBackToSha1() throws IOException {
+        String metadata = "<metadata><versioning><versions><version>3.8.8</version></versions></versioning></metadata>";
+        String sha1 = "a".repeat(40);
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata,
+                "apache-maven-3.8.8-bin.zip.sha1", sha1)), MavenSource.DEFAULT_BASE);
+        Artifact a = maven.resolve("3.8.8", false);
+        assertThat(a.checksumAlgorithm()).isEqualTo("sha1");
+        assertThat(a.checksum()).isEqualTo(sha1);
+    }
+
+    @Test
+    void exactPreReleaseSpecPicksThatPreRelease() throws IOException {
+        String metadata = "<metadata><versioning><versions><version>4.0.0-rc-4</version>"
+                + "<version>4.0.0-rc-7</version><version>4.0.0-rc-10</version></versions></versioning></metadata>";
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata,
+                ".sha512", "b".repeat(128))), MavenSource.DEFAULT_BASE);
+        assertThat(maven.resolve("4.0.0-rc-4", true).version().raw()).isEqualTo("4.0.0-rc-4");
+        assertThat(maven.resolve("4", true).version().raw()).isEqualTo("4.0.0-rc-10"); // rc-10 is newer than rc-7
+    }
+
+    @Test
+    void checksumUriKeepsTheRealAlgorithmAndReadsBsdFiles() throws IOException {
+        String sha512 = "c".repeat(128);
+        String md5 = "d".repeat(32);
+        String jetbrains = """
+                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
+                "checksum_type":"sha256","checksum_uri":"https://example.invalid/b.tar.gz.checksum"}]}""";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", jetbrains,
+                "b.tar.gz.checksum", sha512 + " *b.tar.gz\n")), FoojaySource.DEFAULT_BASE);
+        Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
+        assertThat(a.checksumAlgorithm()).isEqualTo("sha512");
+        assertThat(a.checksum()).isEqualTo(sha512);
+
+        Checksum bsd = Checksum.parse("MD5 (b.tar.gz) = " + md5 + "\n", "b.tar.gz", "sha256");
+        assertThat(bsd).isEqualTo(new Checksum("md5", md5));
+        Checksum many = Checksum.parse("e".repeat(64) + "  other.zip\n" + "f".repeat(64) + "  b.tar.gz\n", "b.tar.gz", null);
+        assertThat(many.hash()).isEqualTo("f".repeat(64));
+    }
+
+    @Test
+    void checksumOverPlainHttpIsRefused() {
+        String info = """
+                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
+                "checksum_type":"sha256","checksum_uri":"http://example.invalid/b.sha256"}]}""";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", info,
+                "b.sha256", "f".repeat(64))), FoojaySource.DEFAULT_BASE);
+        assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("refusing to download over http");
+    }
+
+    @Test
+    void skipsBuildsWithoutDirectDownload() throws IOException {
+        String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
+        String older = "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/a.tar.gz\",\"checksum\":\"\"}]}";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", none, "ids/a", older)),
+                FoojaySource.DEFAULT_BASE);
+        Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
+        assertThat(a.version().raw()).isEqualTo("21.0.12+8");
+        assertThat(a.checksum()).isNull();
+    }
+
+    @Test
+    void gradleTreatsOldMilestonesAsPreReleases() throws IOException {
+        String all = """
+                [{"version":"8.10.2","downloadUrl":"https://example.invalid/gradle-8.10.2-bin.zip","checksum":"%s",
+                  "checksumUrl":"","rcFor":"","milestoneFor":""},
+                 {"version":"1.0-milestone-9","downloadUrl":"https://example.invalid/gradle-1.0-milestone-9-bin.zip",
+                  "checksum":"","checksumUrl":"","rcFor":"","milestoneFor":""}]""".formatted("a".repeat(64));
+        GradleSource gradle = new GradleSource(fake(Map.of("versions/all", all)), GradleSource.DEFAULT_BASE);
+        assertThat(gradle.versions(false)).extracting(dev.jkit.model.Version::raw).containsExactly("8.10.2");
+        assertThat(gradle.resolve("8", false).checksumAlgorithm()).isEqualTo("sha256");
     }
 }

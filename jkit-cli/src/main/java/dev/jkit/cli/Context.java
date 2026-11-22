@@ -56,8 +56,14 @@ final class Context {
         this.configError = error;
         this.store = new Store(home);
         this.os = OsServices.current();
-        this.http = new CachingHttp(new JdkHttp(env), home.index(), Duration.ofHours(24),
-                Clock.systemUTC(), refresh, offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")));
+        this.http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
+                Duration.ofHours(24), Clock.systemUTC(), refresh,
+                offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
+                message -> System.err.println("warning: " + message));
+    }
+
+    static String userAgent() {
+        return "jkit/" + VersionProvider.version();
     }
 
     static Context create(boolean refresh, boolean offline) {
@@ -70,6 +76,18 @@ final class Context {
      */
     static Context lenient(Map<String, String> env, PrintStream out) {
         return new Context(env, false, true, out, true);
+    }
+
+    /**
+     * For the read-only commands (status, list, env): a broken config.toml is a warning, not a
+     * failure, so they can still say what is going on. Never online.
+     */
+    static Context readOnly() {
+        Context ctx = lenient(System.getenv(), System.out);
+        if (ctx.configError != null) {
+            ctx.err.println("warning: " + ctx.configError + "; using the built-in defaults");
+        }
+        return ctx;
     }
 
     /** For tests: a context over an explicit environment, never online. */

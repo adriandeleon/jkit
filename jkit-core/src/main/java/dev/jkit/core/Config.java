@@ -21,8 +21,8 @@ public record Config(String jdkVendor, String graalvmVendor) {
                 if (toml.hasErrors()) {
                     throw new JkitException("invalid " + home.config() + ": " + toml.errors().getFirst());
                 }
-                jdk = valueOr(toml.getString("jdk.vendor"), jdk);
-                graalvm = valueOr(toml.getString("graalvm.vendor"), graalvm);
+                jdk = valueOr(string(toml, "jdk.vendor", home), jdk);
+                graalvm = valueOr(string(toml, "graalvm.vendor", home), graalvm);
             } catch (IOException e) {
                 throw new JkitException("cannot read " + home.config() + ": " + e.getMessage());
             }
@@ -30,6 +30,15 @@ public record Config(String jdkVendor, String graalvmVendor) {
         jdk = valueOr(env.get("JKIT_JDK_VENDOR"), jdk);
         graalvm = valueOr(env.get("JKIT_GRAALVM_VENDOR"), graalvm);
         return new Config(jdk, graalvm);
+    }
+
+    private static String string(TomlParseResult toml, String key, JkitHome home) {
+        Object value = toml.get(key);
+        if (value == null || value instanceof String) {
+            return (String) value;
+        }
+        throw new JkitException("invalid " + home.config() + ": " + key + " must be a string, like "
+                + key + " = \"temurin\"");
     }
 
     private static String valueOr(String value, String fallback) {

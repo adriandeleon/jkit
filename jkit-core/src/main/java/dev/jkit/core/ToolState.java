@@ -46,7 +46,7 @@ public record ToolState(Tool tool, Path shellChoice, PinnedTool pin, Installed p
         if (source != wanted) {
             return false;
         }
-        return wanted != Source.PROJECT || pinInstall != null;
+        return wanted != Source.PROJECT || wantedHome != null;
     }
 
     /** True when there is nothing to say about this tool: not set, not pinned, no link. */

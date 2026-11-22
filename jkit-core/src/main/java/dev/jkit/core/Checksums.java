@@ -13,9 +13,16 @@ import java.util.Locale;
 final class Checksums {
     private Checksums() { }
 
+    /** sha256 and up; md5 and sha1 only catch a broken download. */
+    static boolean strong(String algorithm) {
+        String a = algorithm.toLowerCase(Locale.ROOT).replace("-", "");
+        return a.equals("sha256") || a.equals("sha384") || a.equals("sha512");
+    }
+
     static void verify(Path file, String algorithm, String expected, String label) throws IOException {
         String javaName = switch (algorithm.toLowerCase(Locale.ROOT).replace("-", "")) {
             case "sha256" -> "SHA-256";
+            case "sha384" -> "SHA-384";
             case "sha512" -> "SHA-512";
             case "sha1" -> "SHA-1";
             case "md5" -> "MD5";

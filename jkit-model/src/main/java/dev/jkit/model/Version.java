@@ -18,12 +18,15 @@ public final class Version implements Comparable<Version> {
     private final int[] parts;
     private final int[] build;
     private final boolean preRelease;
+    /** The pre-release tag after the numbers, lower case: {@code rc-7}, {@code ea}; empty for a release. */
+    private final String suffix;
 
-    private Version(String raw, int[] parts, int[] build, boolean preRelease) {
+    private Version(String raw, int[] parts, int[] build, boolean preRelease, String suffix) {
         this.raw = raw;
         this.parts = parts;
         this.build = build;
         this.preRelease = preRelease;
+        this.suffix = suffix;
     }
 
     public static Version parse(String raw) {
@@ -40,10 +43,24 @@ public final class Version implements Comparable<Version> {
         // "8u472" -> 8.0.472
         core = core.replaceFirst("^(\\d+)u(\\d+)", "$1.0.$2");
         int dash = core.indexOf('-');
+        String suffix = "";
         if (dash >= 0) {
+            suffix = core.substring(dash + 1).toLowerCase(Locale.ROOT);
             core = core.substring(0, dash);
         }
-        return new Version(text, numbers(core), numbers(buildText), pre);
+        return new Version(text, numbers(core), numbers(buildText), pre, pre ? suffix : "");
+    }
+
+    /**
+     * Java's pre-9 numbering as later versions write it: {@code 1.8} → {@code 8},
+     * {@code 1.8.0_432} → {@code 8.0_432}. Other text is returned as is. For JDK versions only:
+     * Gradle 1.8 is a real Gradle version.
+     */
+    public static String fromLegacyJava(String text) {
+        if (text.matches("1\\.[1-8](\\D.*)?")) {
+            return text.substring(2);
+        }
+        return text;
     }
 
     /** True when {@code text} starts with a number, as every version jkit installs does. */
@@ -78,7 +95,9 @@ public final class Version implements Comparable<Version> {
 
     /**
      * True when {@code spec} is empty, equals this version, or is a component-wise prefix:
-     * {@code 21} matches {@code 21.0.13+9}; {@code 21.0.5} matches {@code 21.0.5.1+2}.
+     * {@code 21} matches {@code 21.0.13+9}; {@code 21.0.5} matches {@code 21.0.5.1+2}. Missing
+     * components count as 0, so {@code 21.0.0} matches {@code 21+35}. A spec with a pre-release
+     * tag matches only that tag: {@code 4.0.0-rc-4} doesn't match {@code 4.0.0-rc-7}.
      */
     public boolean matches(String spec) {
         if (spec == null || spec.isBlank() || spec.equalsIgnoreCase("latest")) {
@@ -88,13 +107,16 @@ public final class Version implements Comparable<Version> {
             return true;
         }
         Version want = parse(spec);
-        if (want.parts.length == 0 || want.parts.length > parts.length) {
+        if (want.parts.length == 0) {
             return false;
         }
         for (int i = 0; i < want.parts.length; i++) {
-            if (want.parts[i] != parts[i]) {
+            if (want.parts[i] != part(i)) {
                 return false;
             }
+        }
+        if (want.preRelease && !want.suffix.equals(suffix)) {
+            return false;
         }
         if (want.build.length > 0) {
             return Arrays.equals(want.build, Arrays.copyOf(build, want.build.length));
@@ -122,7 +144,43 @@ public final class Version implements Comparable<Version> {
                 return Integer.compare(a, b);
             }
         }
-        return raw.compareTo(other.raw);
+        int c = naturalCompare(suffix, other.suffix);
+        return c != 0 ? c : raw.compareTo(other.raw);
+    }
+
+    /** Text compared run by run, numbers by value: rc-2 before rc-10, alpha before beta before rc. */
+    static int naturalCompare(String a, String b) {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            char ca = a.charAt(i);
+            char cb = b.charAt(j);
+            if (Character.isDigit(ca) && Character.isDigit(cb)) {
+                int ei = i;
+                while (ei < a.length() && Character.isDigit(a.charAt(ei))) {
+                    ei++;
+                }
+                int ej = j;
+                while (ej < b.length() && Character.isDigit(b.charAt(ej))) {
+                    ej++;
+                }
+                java.math.BigInteger na = new java.math.BigInteger(a.substring(i, ei));
+                java.math.BigInteger nb = new java.math.BigInteger(b.substring(j, ej));
+                int c = na.compareTo(nb);
+                if (c != 0) {
+                    return c;
+                }
+                i = ei;
+                j = ej;
+            } else {
+                if (ca != cb) {
+                    return Character.compare(ca, cb);
+                }
+                i++;
+                j++;
+            }
+        }
+        return Integer.compare(a.length() - i, b.length() - j);
     }
 
     @Override

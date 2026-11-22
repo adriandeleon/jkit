@@ -12,13 +12,21 @@ import picocli.CommandLine.Parameters;
 @Command(name = "reset", description = "Clears a shell-level choice; the global version applies again.")
 final class ResetCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>", completionCandidates = Candidates.Tools.class)
-    String toolText;
+    @Parameters(index = "0", paramLabel = "<tool>", completionCandidates = Candidates.Tools.class,
+            converter = ToolConverter.class)
+    Tool tool;
+
+    /** Parsing here, not in call(), so an unknown tool is a usage error (exit 2). */
+    static final class ToolConverter implements picocli.CommandLine.ITypeConverter<Tool> {
+        @Override
+        public Tool convert(String value) {
+            return Tool.parse(value.trim());
+        }
+    }
 
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
-        Tool tool = Tool.parse(toolText);
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active", "add to ~/.bashrc:  eval \"$(jkit hook bash)\"");

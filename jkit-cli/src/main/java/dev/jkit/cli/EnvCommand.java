@@ -45,10 +45,33 @@ final class EnvCommand implements Callable<Integer> {
     /** What a new process gets: the chosen install folder per tool, and the variables to set. */
     record Result(Path dir, Optional<ProjectSpec> project, Map<Tool, Path> homes, Map<String, String> variables) { }
 
+    /**
+     * The shell that will read the output: the one that started jkit when it is a known shell
+     * ({@code eval "$(jkit env)"} in a bash script run from fish is bash), else the hook's
+     * JKIT_SHELL, else bash.
+     */
+    static String defaultShell(Map<String, String> env) {
+        String parent = ProcessHandle.current().parent()
+                .flatMap(p -> p.info().command())
+                .map(c -> Path.of(c).getFileName().toString().toLowerCase(java.util.Locale.ROOT))
+                .map(c -> c.endsWith(".exe") ? c.substring(0, c.length() - 4) : c)
+                .orElse("");
+        if (parent.startsWith("-")) {
+            parent = parent.substring(1); // login shells
+        }
+        if (SHELLS.contains(parent)) {
+            return parent;
+        }
+        if (parent.equals("sh") || parent.equals("dash") || parent.equals("ksh")) {
+            return "bash"; // same syntax for export/unset
+        }
+        return env.getOrDefault("JKIT_SHELL", "bash");
+    }
+
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
-        String syntax = shell != null ? shell : ctx.env.getOrDefault("JKIT_SHELL", "bash");
+        Context ctx = Context.readOnly();
+        String syntax = shell != null ? shell : defaultShell(ctx.env);
         if (!SHELLS.contains(syntax)) {
             throw new JkitException("unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
         }

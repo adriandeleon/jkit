@@ -9,13 +9,21 @@ public record ToolSpec(Tool tool, String version) {
     public static ToolSpec parse(String text) {
         int at = text.indexOf('@');
         if (at < 0) {
-            return new ToolSpec(Tool.parse(text), null);
+            return new ToolSpec(Tool.parse(text.trim()), null);
         }
+        Tool tool = Tool.parse(text.substring(0, at).trim());
         String version = text.substring(at + 1).trim();
         if (version.isEmpty() || version.equalsIgnoreCase("latest")) {
-            version = null;
+            return new ToolSpec(tool, null);
         }
-        return new ToolSpec(Tool.parse(text.substring(0, at)), version);
+        if (tool == Tool.JDK || tool == Tool.GRAALVM) {
+            version = Version.fromLegacyJava(version); // jdk@1.8 is jdk@8
+        }
+        if (!Version.looksLikeVersion(version)) {
+            throw new JkitException("'" + text.trim() + "': '" + version + "' is not a version",
+                    "e.g. " + tool.id() + "@21, " + tool.id() + "@21.0.5, or " + tool.id() + "@latest");
+        }
+        return new ToolSpec(tool, version);
     }
 
     /** The feature-release number (first component), or -1 for "newest". */

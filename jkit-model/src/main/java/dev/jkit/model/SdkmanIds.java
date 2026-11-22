@@ -72,6 +72,8 @@ public final class SdkmanIds {
             throw new IllegalArgumentException("'" + id + "' is a GraalVM/Mandrel release id; "
                     + "use the Java version instead, e.g. 21.0.5-graalce");
         }
+        // SDKMAN writes early-access builds as 26.ea.20; foojay as 26-ea+20
+        version = version.replaceFirst("^(\\d+)\\.ea\\.(\\d+)$", "$1-ea+$2").replaceFirst("^(\\d+)\\.ea$", "$1-ea");
         requireVersion(version, id);
         String vendor = VENDORS.get(suffix);
         if (vendor == null) {

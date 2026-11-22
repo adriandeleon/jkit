@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  */
 public final class Installer {
 
-    /** {@code verified} is false when the source published no checksum. */
+    /** {@code verified} is false when the source published no checksum, or only an md5 or sha1 one. */
     public record Result(Installed installed, boolean fresh, boolean verified) { }
 
     private final JkitHome home;
@@ -33,36 +33,88 @@ public final class Installer {
 
     @SuppressWarnings("try") // the lock is held for the whole block
     public Result install(Artifact artifact, Http.Progress progress) throws IOException {
+        Http.requireSecure(artifact.url());
         Tool storeTool = artifact.tool().storeTool();
-        Path dest = home.tools(storeTool).resolve(Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx()));
+        Path toolsDir = home.tools(storeTool);
+        Path dest = toolsDir.resolve(Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx())).normalize();
+        if (!toolsDir.equals(dest.getParent())) {
+            throw new JkitException("refusing an install folder outside " + toolsDir + ": " + dest);
+        }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         Files.createDirectories(home.root());
         try (FileChannel channel = FileChannel.open(home.lockFile(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
             if (Files.isDirectory(dest)) {
-                return new Result(installed, false, true);
+                if (!Files.isRegularFile(dest.resolve(Store.MARKER))) {
+                    throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
+                            "move or delete that folder, then install again");
+                }
+                return new Result(installed, false, Store.verified(dest));
             }
             Files.createDirectories(home.tmp());
+            removeLeftovers(home.tmp());
             Path work = Files.createTempDirectory(home.tmp(), "install-");
+            IOException failure = null;
             try {
-                Path archive = work.resolve(artifact.fileName());
+                Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
                 http.download(artifact.url(), archive, progress);
-                boolean verified = artifact.checksum() != null;
-                if (verified) {
+                boolean verified = false;
+                if (artifact.checksum() != null && artifact.checksumAlgorithm() != null) {
+                    // md5 and sha1 still catch a broken download, but don't count as verified
                     Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
+                    verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
                 Path out = work.resolve("out");
                 Archives.extract(archive, out, artifact.archiveType());
                 Path toolHome = locateHome(out);
                 requireExecutable(storeTool, toolHome, artifact.label());
-                Store.writeMarker(toolHome, installed, artifact.url().toString());
+                Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
                 Files.createDirectories(dest.getParent());
                 Files.move(toolHome, dest, StandardCopyOption.ATOMIC_MOVE);
                 return new Result(installed, true, verified);
+            } catch (IOException | RuntimeException e) {
+                if (e instanceof IOException io) {
+                    failure = io;
+                }
+                throw e;
             } finally {
-                Fs.deleteRecursively(work);
+                try {
+                    Fs.deleteRecursively(work);
+                } catch (IOException e) {
+                    if (failure != null) {
+                        failure.addSuppressed(e);
+                    }
+                    // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
+                }
             }
         }
+    }
+
+    /** Folders an interrupted install (Ctrl-C skips finally blocks) left; only called with the lock held. */
+    private static void removeLeftovers(Path tmp) {
+        try (Stream<Path> children = Files.list(tmp)) {
+            for (Path child : children.toList()) {
+                if (child.getFileName().toString().startsWith("install-")) {
+                    try {
+                        Fs.deleteRecursively(child);
+                    } catch (IOException ignored) {
+                        // doctor reports what is left
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // nothing to clean
+        }
+    }
+
+    /** The source's file name, without any folder part; a fixed name if it has none. */
+    static String safeFileName(String fileName, String archiveType) {
+        String name = fileName == null ? "" : fileName.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        if (name.isBlank() || name.equals(".") || name.equals("..")) {
+            return "download." + archiveType;
+        }
+        return name;
     }
 
     /** The single top folder, or macOS's Contents/Home inside it. */

@@ -41,7 +41,12 @@ public final class FoojaySource {
 
     /** Newest build per vendor and major version for one platform: one request. */
     public List<Pkg> newestPerVendorAndMajor(Platform platform, boolean fx) throws IOException {
-        return packages(platform, "latest=available&release_status=ga", fx);
+        return newestPerVendorAndMajor(platform, fx, false);
+    }
+
+    /** As above; with {@code pre}, early-access builds count too. */
+    public List<Pkg> newestPerVendorAndMajor(Platform platform, boolean fx, boolean pre) throws IOException {
+        return packages(platform, "latest=available&release_status=ga" + (pre ? "&release_status=ea" : ""), fx);
     }
 
     /** Every build of one major from one vendor, newest first. */
@@ -49,7 +54,9 @@ public final class FoojaySource {
             throws IOException {
         String status = pre ? "release_status=ga&release_status=ea" : "release_status=ga";
         List<Pkg> all = packages(platform,
-                "jdk_version=" + major + "&distribution=" + vendor.foojayName() + "&" + status, fx);
+                "jdk_version=" + major + "&distribution="
+                        + java.net.URLEncoder.encode(vendor.foojayName(), java.nio.charset.StandardCharsets.UTF_8)
+                        + "&" + status, fx);
         all.sort(Comparator.comparing(Pkg::version).reversed());
         return all;
     }
@@ -99,7 +106,7 @@ public final class FoojaySource {
     }
 
     private static Vendor throwUnknown(String message, List<String> hints) {
-        throw new JkitException(message, hints.toArray(String[]::new));
+        throw new JkitException(2, message, hints.toArray(String[]::new)); // a bad argument
     }
 
     public List<Major> majors() throws IOException {
@@ -129,25 +136,33 @@ public final class FoojaySource {
         } else {
             major = Version.parse(versionSpec).part(0);
         }
-        Pkg pkg = builds(major, vendor, platform, fx, pre).stream()
+        List<Pkg> candidates = builds(major, vendor, platform, fx, pre).stream()
                 .filter(p -> p.version().matches(versionSpec))
                 .filter(p -> pre || !p.version().isPreRelease())
-                .findFirst()
-                .orElseThrow(() -> noMatch(tool, versionSpec, vendor, platform, fx, major));
-        JsonNode info = Json.parse(http.get(base.resolve("ids/" + pkg.id()))).path("result").path(0);
-        String url = Json.text(info, "direct_download_uri");
-        if (url.isEmpty()) {
-            throw new JkitException(pkg.vendor() + " " + pkg.version() + " has no direct download");
+                .toList();
+        if (candidates.isEmpty()) {
+            throw noMatch(tool, versionSpec, vendor, platform, fx, major);
         }
-        String checksum = Json.text(info, "checksum");
-        String algorithm = Json.text(info, "checksum_type");
-        String checksumUri = Json.text(info, "checksum_uri");
-        if (checksum.isEmpty() && !checksumUri.isEmpty()) {
-            checksum = firstToken(http.get(URI.create(checksumUri)));
-            algorithm = checksumUri.contains("sha512") ? "sha512" : "sha256";
+        // the newest build that can be downloaded directly; some vendors list builds behind a form
+        for (Pkg pkg : candidates) {
+            JsonNode info = Json.parse(http.get(base.resolve("ids/" + pkg.id()))).path("result").path(0);
+            String url = Json.text(info, "direct_download_uri");
+            if (url.isEmpty()) {
+                continue;
+            }
+            Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
+            String checksumUri = Json.text(info, "checksum_uri");
+            if (checksum == null && !checksumUri.isEmpty()) {
+                URI uri = Http.requireSecure(URI.create(checksumUri));
+                checksum = Checksum.parse(http.get(uri), pkg.fileName(), Json.text(info, "checksum_type"));
+            }
+            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.requireSecure(URI.create(url)), pkg.fileName(),
+                    pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
+                    checksum == null ? null : checksum.hash(), fx);
         }
-        return new Artifact(tool, pkg.version(), pkg.vendor(), URI.create(url), pkg.fileName(),
-                pkg.archiveType(), checksum.isEmpty() ? null : algorithm, checksum.isEmpty() ? null : checksum, fx);
+        Pkg newest = candidates.getFirst();
+        throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download",
+                "download it from the vendor's site, or pick another vendor");
     }
 
     private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,
@@ -203,11 +218,5 @@ public final class FoojaySource {
             }
         }
         return new ArrayList<>(byKey.values());
-    }
-
-    static String firstToken(String text) {
-        String trimmed = text.trim();
-        int space = trimmed.indexOf(' ');
-        return space < 0 ? trimmed : trimmed.substring(0, space);
     }
 }

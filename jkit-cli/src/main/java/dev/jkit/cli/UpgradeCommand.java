@@ -67,113 +67,86 @@ final class UpgradeCommand implements Callable<Integer> {
     public Integer call() throws Exception {
         Context ctx = options.context();
         Map<Line, List<Installed>> lines = lines(ctx);
-        if (jsonFlag.json) {
-            return json(ctx, lines);
-        }
-        if (lines.isEmpty()) {
+        boolean json = jsonFlag.json;
+        java.io.PrintStream say = json ? ctx.err : ctx.out;
+        if (lines.isEmpty() && !json) {
             ctx.out.println(spec == null ? "nothing installed yet · try: jkit search jdk"
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");
             return 0;
         }
+        List<Object> rows = new ArrayList<>();
         int failures = 0;
-        int upgraded = 0;
+        int available = 0;
         for (Map.Entry<Line, List<Installed>> entry : lines.entrySet()) {
-            Line line = entry.getKey();
-            Installed newest = entry.getValue().getFirst();
-            Artifact artifact;
-            try {
-                artifact = resolve(ctx, line);
-            } catch (JkitException e) {
-                ctx.err.println("warning: " + line + ": " + e.getMessage());
+            Map<String, Object> row = upgrade(ctx, say, entry.getKey(), entry.getValue().getFirst());
+            rows.add(row);
+            if ("failed".equals(row.get("status"))) {
                 failures++;
-                continue;
+            } else if ("available".equals(row.get("status"))) {
+                available++;
             }
-            if (artifact.version().compareTo(newest.version()) <= 0
-                    || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
-                ctx.out.println(line + " is up to date (" + newest.version() + ")");
-                continue;
-            }
-            if (dryRun) {
-                ctx.out.println(line + ": " + newest.version() + " → " + artifact.version());
-                upgraded++;
-                continue;
-            }
-            ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-            Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-            if (!result.verified()) {
-                ctx.err.println("warning: the source publishes no checksum; the download was not verified");
-            }
-            ctx.out.println("upgraded " + line + ": " + newest.version() + " → " + artifact.version());
-            upgraded++;
-            moveLinks(ctx, ctx.out, line, newest, result.installed().home());
-            ctx.out.println("  remove the old build: jkit remove " + line.userTool() + "@" + newest.version()
-                    + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
         }
-        if (dryRun && upgraded > 0) {
+        if (json) {
+            Map<String, Object> doc = JsonOut.document();
+            doc.put("dryRun", dryRun);
+            doc.put("lines", rows);
+            ctx.out.println(JsonOut.write(doc));
+        } else if (dryRun && available > 0) {
             ctx.out.println("run without --dry-run to install");
         }
         return failures == 0 ? 0 : 1;
     }
 
     /**
-     * {@code dryRun} and {@code lines}: one object per release line with {@code status} up-to-date,
-     * available (dry run), upgraded or failed, the installed {@code from} build, the newest {@code to}
-     * build, and on failure an {@code error}. Exit code 1 when any line failed.
+     * One release line, for text and {@code --json} alike: {@code status} up-to-date, available
+     * (dry run), upgraded or failed, the installed {@code from} build, the newest {@code to} build,
+     * and on failure an {@code error}. A failure on one line never stops the others, so what
+     * earlier lines changed is always reported.
      */
-    private int json(Context ctx, Map<Line, List<Installed>> lines) throws Exception {
-        Map<String, Object> doc = JsonOut.document();
-        doc.put("dryRun", dryRun);
-        List<Object> out = new ArrayList<>();
-        int failures = 0;
-        for (Map.Entry<Line, List<Installed>> entry : lines.entrySet()) {
-            Line line = entry.getKey();
-            Installed newest = entry.getValue().getFirst();
-            Map<String, Object> row = JsonOut.fields(
-                    "tool", line.userTool().id(),
-                    "major", line.major(),
-                    "vendor", line.vendor() == null ? null : line.vendor().name(),
-                    "fx", line.fx(),
-                    "from", newest.version().raw(),
-                    "to", null,
-                    "status", null);
-            out.add(row);
-            Artifact artifact;
-            try {
-                artifact = resolve(ctx, line);
-            } catch (JkitException e) {
-                row.put("status", "failed");
-                row.put("error", JsonOut.fields("message", e.getMessage(), "hints", List.copyOf(e.hints())));
-                failures++;
-                continue;
-            }
+    private Map<String, Object> upgrade(Context ctx, java.io.PrintStream say, Line line, Installed newest) {
+        Map<String, Object> row = JsonOut.fields(
+                "tool", line.userTool().id(),
+                "major", line.major(),
+                "vendor", line.vendor() == null ? null : line.vendor().name(),
+                "fx", line.fx(),
+                "from", newest.version().raw(),
+                "to", null,
+                "status", null);
+        try {
+            Artifact artifact = resolve(ctx, line);
             row.put("to", artifact.version().raw());
             if (artifact.version().compareTo(newest.version()) <= 0
                     || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
                 row.put("to", newest.version().raw());
                 row.put("status", "up-to-date");
-                continue;
+                say.println(line + " is up to date (" + newest.version() + ")");
+                return row;
             }
             if (dryRun) {
                 row.put("status", "available");
-                continue;
+                say.println(line + ": " + newest.version() + " → " + artifact.version());
+                return row;
             }
             ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-            try {
-                Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-                row.put("status", "upgraded");
-                row.put("verified", result.verified());
-                row.put("path", result.installed().home());
-                moveLinks(ctx, ctx.err, line, newest, result.installed().home());
-            } catch (Exception e) {
-                JkitException je = Errors.describe(e);
-                row.put("status", "failed");
-                row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
-                failures++;
+            Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
+            if (!result.verified()) {
+                ctx.err.println("warning: " + InstallCommand.UNVERIFIED);
             }
+            row.put("status", "upgraded");
+            row.put("verified", result.verified());
+            row.put("path", result.installed().home());
+            say.println("upgraded " + line + ": " + newest.version() + " → " + artifact.version());
+            moveLinks(ctx, say, line, newest, result.installed().home());
+            say.println("  remove the old build: jkit remove " + line.userTool() + "@" + newest.version()
+                    + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
+        } catch (Exception e) {
+            JkitException je = Errors.describe(e);
+            row.put("status", "failed");
+            row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
+            ctx.err.println("warning: " + line + ": " + je.getMessage());
+            je.hints().forEach(h -> ctx.err.println("  " + h));
         }
-        doc.put("lines", out);
-        ctx.out.println(JsonOut.write(doc));
-        return failures == 0 ? 0 : 1;
+        return row;
     }
 
     /** Installed builds grouped by release line, each newest first, lines in store order. */

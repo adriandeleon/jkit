@@ -17,7 +17,11 @@ final class HookCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        Context ctx = Context.create(false, true);
+        // lenient: a typo in config.toml must not leave every new shell without the hook
+        Context ctx = Context.lenient(System.getenv(), System.out);
+        if (ctx.configError != null) {
+            ctx.err.println("warning: " + ctx.configError);
+        }
         String name = shell != null ? shell : ctx.platform.isWindows() ? "pwsh" : "bash";
         ctx.out.print(ctx.os.hook(name, ctx.home.root()));
         if (name.equals("bash") || name.equals("zsh")) {

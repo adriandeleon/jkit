@@ -78,7 +78,6 @@ public final class ShellEnv {
         if (jdkIsGraalVm && homes.containsKey(Tool.JDK) && !homes.containsKey(Tool.GRAALVM)) {
             out.put(Tool.GRAALVM.homeVariable(), homes.get(Tool.JDK).toString());
         }
-        String tools = home.toolsRoot().toString();
         List<String> entries = new ArrayList<>();
         for (Tool t : Tool.values()) {
             if (t.onPath() && homes.containsKey(t)) {
@@ -86,7 +85,7 @@ public final class ShellEnv {
             }
         }
         for (String entry : env.getOrDefault("PATH", "").split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !entry.startsWith(tools) && !entries.contains(entry)) {
+            if (!entry.isEmpty() && !underTools(entry, home) && !entries.contains(entry)) {
                 entries.add(entry);
             }
         }
@@ -111,7 +110,6 @@ public final class ShellEnv {
     }
 
     static String path(Map<String, String> env, JkitHome home, Map<Tool, String> active) {
-        String tools = home.toolsRoot().toString();
         List<String> entries = new ArrayList<>();
         for (Tool t : Tool.values()) {
             if (t.onPath() && active.containsKey(t)) {
@@ -120,11 +118,23 @@ public final class ShellEnv {
         }
         String current = env.getOrDefault("PATH", "");
         for (String entry : current.split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !entry.startsWith(tools)) {
+            if (!entry.isEmpty() && !underTools(entry, home)) {
                 entries.add(entry);
             }
         }
         return String.join(File.pathSeparator, entries);
+    }
+
+    /**
+     * Whether a PATH entry is inside tools/, compared folder by folder (so tools-old/ isn't), and
+     * on Windows without regard to case or slash direction.
+     */
+    static boolean underTools(String entry, JkitHome home) {
+        try {
+            return Path.of(entry).toAbsolutePath().normalize().startsWith(home.toolsRoot());
+        } catch (java.nio.file.InvalidPathException e) {
+            return false;
+        }
     }
 
     /** Renders changes for a shell: bash/zsh, fish or pwsh. */
@@ -134,17 +144,17 @@ public final class ShellEnv {
             String k = e.getKey();
             String v = e.getValue();
             switch (shell) {
-                case "fish" -> sb.append(v == null ? "set -e " + k : "set -gx " + k + " " + quote(v)).append('\n');
+                case "fish" -> sb.append(v == null ? "set -e " + k : "set -gx " + k + " " + quote(shell, v)).append('\n');
                 case "pwsh", "powershell" -> sb.append(v == null
                         ? "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue"
-                        : "$env:" + k + " = " + quote(v)).append('\n');
-                default -> sb.append(v == null ? "unset " + k : "export " + k + "=" + quote(v)).append('\n');
+                        : "$env:" + k + " = " + quote(shell, v)).append('\n');
+                default -> sb.append(v == null ? "unset " + k : "export " + k + "=" + quote(shell, v)).append('\n');
             }
         }
         return sb.toString();
     }
 
-    private static String quote(String value) {
-        return "'" + value.replace("'", "'\\''") + "'";
+    private static String quote(String shell, String value) {
+        return dev.jkit.model.ShellQuote.quote(shell, value);
     }
 }

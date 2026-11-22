@@ -165,6 +165,13 @@ final class DoctorCommand implements Callable<Integer> {
     static void hook(Report r) {
         String shell = r.ctx.env.get("JKIT_SHELL");
         if (shell != null && !shell.isBlank()) {
+            if (r.ctx.env.get("JKIT_ENV_FILE") == null) {
+                // the hook exports JKIT_SHELL, so subshells and scripts inherit it without the function
+                r.warn("JKIT_SHELL=" + shell + " is inherited, but the jkit function isn't defined here "
+                                + "(a subshell or script?), so jkit use can't change this shell",
+                        "load the hook in this shell too, or run jkit from your interactive shell");
+                return;
+            }
             r.ok("shell hook loaded (" + shell + ")");
             return;
         }
@@ -451,7 +458,8 @@ final class DoctorCommand implements Callable<Integer> {
         if (!r.network) {
             return;
         }
-        JdkHttp http = new JdkHttp(r.ctx.env);
+        // one quick try each: doctor answers "can I reach it now", not "eventually"
+        JdkHttp http = new JdkHttp(r.ctx.env, Context.userAgent(), Duration.ofSeconds(10), 1);
         List<URI> uris = List.of(
                 r.ctx.url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE).resolve("distributions?include_versions=false"),
                 r.ctx.url("JKIT_SOURCES_GRADLE_URL", GradleSource.DEFAULT_BASE).resolve("versions/current"),
@@ -462,7 +470,7 @@ final class DoctorCommand implements Callable<Integer> {
                 http.get(uri);
                 r.ok("reached " + uri.getHost() + " (" + Duration.ofNanos(System.nanoTime() - start).toMillis() + " ms)");
             } catch (Exception e) {
-                r.fail("can't reach " + uri.getHost() + ": " + e.getMessage(),
+                r.fail("can't reach " + uri.getHost() + ": " + Errors.describe(e).getMessage(),
                         "check your connection; behind a proxy, set HTTPS_PROXY or JKIT_NETWORK_PROXY");
             }
         }

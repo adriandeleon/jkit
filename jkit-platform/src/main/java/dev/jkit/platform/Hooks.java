@@ -1,5 +1,6 @@
 package dev.jkit.platform;
 
+import dev.jkit.model.ShellQuote;
 import java.nio.file.Path;
 
 /**
@@ -15,7 +16,7 @@ final class Hooks {
         return """
                 # jkit shell hook (%1$s)
                 export JKIT_SHELL=%1$s
-                __jkit_g='%2$s'
+                __jkit_g=%2$s
                 for __jkit_t in gradle maven jdk; do
                   case ":$PATH:" in *":$__jkit_g/$__jkit_t/bin:"*) ;; *) PATH="$__jkit_g/$__jkit_t/bin:$PATH" ;; esac
                 done
@@ -34,18 +35,23 @@ final class Hooks {
                   rm -f "$__jkit_env"
                   return $__jkit_rc
                 }
-                """.formatted(shell, g);
+                """.formatted(shell, ShellQuote.quote(shell, g));
     }
 
     static String fish(Path root) {
-        String g = root.resolve("global").toString();
+        String g = ShellQuote.quote("fish", root.resolve("global").toString());
         return """
                 # jkit shell hook (fish)
                 set -gx JKIT_SHELL fish
+                set -l __jkit_g %1$s
                 for t in gradle maven jdk
-                  contains -- '%1$s'/$t/bin $PATH; or set -gx PATH '%1$s'/$t/bin $PATH
+                  contains -- $__jkit_g/$t/bin $PATH; or set -gx PATH $__jkit_g/$t/bin $PATH
                 end
-                set -q JAVA_HOME; or test -e '%1$s/jdk'; and set -gx JAVA_HOME '%1$s/jdk'
+                if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end
+                if not set -q MAVEN_HOME; and test -e $__jkit_g/maven; set -gx MAVEN_HOME $__jkit_g/maven; end
+                if not set -q GRADLE_HOME; and test -e $__jkit_g/gradle; set -gx GRADLE_HOME $__jkit_g/gradle; end
+                if not set -q GRAALVM_HOME; and test -e $__jkit_g/graalvm; set -gx GRAALVM_HOME $__jkit_g/graalvm; end
+                set -e __jkit_g
                 function jkit
                   set -l envfile (mktemp)
                   env JKIT_ENV_FILE=$envfile jkit $argv
@@ -58,10 +64,23 @@ final class Hooks {
     }
 
     static String powershell(Path root) {
-        String g = root.resolve("global").toString();
+        String g = ShellQuote.quote("pwsh", root.resolve("global").toString());
         return """
                 # jkit shell hook (PowerShell)
                 $env:JKIT_SHELL = 'pwsh'
+                $__jkitG = %1$s
+                $__jkitSep = [IO.Path]::PathSeparator
+                foreach ($t in 'gradle', 'maven', 'jdk') {
+                  $bin = Join-Path (Join-Path $__jkitG $t) 'bin'
+                  if (($env:PATH -split [regex]::Escape($__jkitSep)) -notcontains $bin) { $env:PATH = $bin + $__jkitSep + $env:PATH }
+                }
+                foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('GRAALVM_HOME', 'graalvm'))) {
+                  $dir = Join-Path $__jkitG $pair[1]
+                  if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
+                    Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+                  }
+                }
+                Remove-Variable __jkitG, __jkitSep, t, bin, pair, dir -ErrorAction SilentlyContinue
                 function jkit {
                   # dot-sourcing needs a .ps1 extension
                   $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
@@ -73,7 +92,6 @@ final class Hooks {
                   Remove-Item $envFile -ErrorAction SilentlyContinue
                   $global:LASTEXITCODE = $rc
                 }
-                # global folders: %s
                 """.formatted(g);
     }
 }

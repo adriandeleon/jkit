@@ -19,7 +19,7 @@ final class ListCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
+        Context ctx = Context.readOnly();
         if (jsonFlag.json) {
             ctx.out.println(JsonOut.write(json(ctx)));
             return 0;
