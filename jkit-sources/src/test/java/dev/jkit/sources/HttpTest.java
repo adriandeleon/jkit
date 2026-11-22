@@ -137,7 +137,16 @@ class HttpTest {
         assertThatThrownBy(() -> portal.get(uri)).isInstanceOf(JkitException.class).hasMessageContaining("web page");
         assertThat(dir).satisfiesAnyOf(d -> assertThat(d).doesNotExist(), d -> assertThat(d).isEmptyDirectory());
 
-        new CachingHttp(answering("{\"result\":[]}", false), dir, Duration.ofHours(24), clock, false, false).get(uri);
+        List<Path> stored = new ArrayList<>();
+        new CachingHttp(answering("{\"result\":[]}", false), dir, Duration.ofHours(24), clock, false, false,
+                new CachingHttp.Listener() {
+                    @Override
+                    public void stored(URI u, Path file, boolean created) {
+                        assertThat(created).isTrue();
+                        stored.add(file);
+                    }
+                }).get(uri);
+        assertThat(stored).hasSize(1); // the cache says what it wrote
         try (var files = Files.list(dir)) {
             for (Path f : files.toList()) {
                 assertThat(f.getFileName().toString()).endsWith(".cache"); // no leftover temp files
@@ -146,7 +155,12 @@ class HttpTest {
         }
         List<String> warnings = new ArrayList<>();
         CachingHttp down = new CachingHttp(answering(null, true), dir, Duration.ofHours(24), clock, false, false,
-                warnings::add);
+                new CachingHttp.Listener() {
+                    @Override
+                    public void stale(String message) {
+                        warnings.add(message);
+                    }
+                });
         assertThat(down.get(uri)).isEqualTo("{\"result\":[]}");
         assertThat(warnings).singleElement().asString().contains("30 h ago");
     }

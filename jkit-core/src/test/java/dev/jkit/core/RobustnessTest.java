@@ -129,10 +129,11 @@ class RobustnessTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Path leftover = Files.createDirectories(home.tmp().resolve("install-123/out"));
-        new Installer(home, serving(archive)).install(
+        Installer.Result result = new Installer(home, serving(archive)).install(
                 artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", "sha256", digest(archive, "SHA-256")),
                 Http.Progress.NONE);
         assertThat(leftover.getParent()).doesNotExist();
+        assertThat(result.removedLeftovers()).containsExactly(leftover.getParent()); // so the command can say so
     }
 
     @Test

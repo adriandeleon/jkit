@@ -15,12 +15,18 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * What a command changed outside the store: variables of the calling shell and global links, plus
- * what that means for this shell and new ones. Printed as indented lines under the command's own
- * message, and in JSON as {@code "changes"}: a list of {@code {kind, name, action, value}}.
+ * Everything a command changed: variables of the calling shell, global links, folders it created
+ * or deleted and files it wrote, plus what that means for this shell and new ones. Every command
+ * that changes something reports it here, so nothing changes silently. Printed as indented lines
+ * under the command's own message, and in JSON as {@code "changes"}: a list of
+ * {@code {kind, name, action, value}}.
  */
 final class Changes {
-    /** {@code kind}: env or link. {@code action}: set, unset, add, remove (PATH entries). */
+    /**
+     * {@code kind} env: {@code action} set, unset, add or remove (PATH entries). link: set or remove.
+     * folder: create or delete. file: a cached version list or checksum, create or update
+     * ({@code value} is where its content came from).
+     */
     record Change(String kind, String name, String action, String value) { }
 
     private final Context ctx;
@@ -77,6 +83,29 @@ final class Changes {
         return this;
     }
 
+    /** A folder this command created (an install) or deleted (remove, leftovers). */
+    Changes folder(Path folder, boolean created) {
+        changes.add(new Change("folder", folder.toAbsolutePath().toString(), created ? "create" : "delete", null));
+        return this;
+    }
+
+    /**
+     * What the command wrote to disk on the side: the jkit home if it made it, and the files (version
+     * lists, checksums) the cache stored. Each is reported once, by whichever Changes asks first.
+     */
+    Changes disk() {
+        if (!ctx.homeExisted && !ctx.homeReported && java.nio.file.Files.exists(ctx.home.root())) {
+            changes.add(new Change("folder", ctx.home.root().toAbsolutePath().toString(), "create", null));
+            ctx.homeReported = true;
+        }
+        for (Context.CacheWrite w : ctx.cacheWrites) {
+            changes.add(new Change("file", w.file().toAbsolutePath().toString(), w.created() ? "create" : "update",
+                    w.source().toString()));
+        }
+        ctx.cacheWrites.clear();
+        return this;
+    }
+
     Changes note(String note) {
         notes.add(note);
         return this;
@@ -117,9 +146,21 @@ final class Changes {
         return changes.isEmpty();
     }
 
-    /** Indented lines: one per change, then the notes. */
+    /** Indented lines: one per change (cached files folded into one line), then the notes. */
     void print(PrintStream out) {
+        int listsCreated = 0;
+        int listsUpdated = 0;
+        Set<String> hosts = new LinkedHashSet<>();
         for (Change c : changes) {
+            if (c.kind().equals("file")) {
+                if (c.action().equals("create")) {
+                    listsCreated++;
+                } else {
+                    listsUpdated++;
+                }
+                hosts.add(java.net.URI.create(c.value()).getHost());
+                continue;
+            }
             out.println("  " + switch (c.kind() + " " + c.action()) {
                 case "env set" -> "set    " + c.name() + "=" + tilde(c.value());
                 case "env unset" -> "unset  " + c.name();
@@ -127,8 +168,21 @@ final class Changes {
                 case "env remove" -> "PATH   - " + tilde(c.value());
                 case "link set" -> "link   " + tilde(c.name()) + " → " + tilde(c.value());
                 case "link remove" -> "link   " + tilde(c.name()) + " removed";
+                case "folder create" -> "folder " + tilde(c.name()) + " created";
+                case "folder delete" -> "folder " + tilde(c.name()) + " deleted";
                 default -> c.toString();
             });
+        }
+        if (listsCreated + listsUpdated > 0) {
+            List<String> parts = new ArrayList<>();
+            if (listsCreated > 0) {
+                parts.add(listsCreated + (listsCreated == 1 ? " file" : " files") + " saved");
+            }
+            if (listsUpdated > 0) {
+                parts.add(listsUpdated + (listsUpdated == 1 ? " file" : " files") + " refreshed");
+            }
+            out.println("  cache  " + tilde(ctx.home.index().toAbsolutePath().toString()) + ": "
+                    + String.join(", ", parts) + " from " + String.join(", ", hosts));
         }
         for (String note : notes) {
             out.println("  " + note);

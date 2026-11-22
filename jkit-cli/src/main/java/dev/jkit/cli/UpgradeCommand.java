@@ -86,10 +86,17 @@ final class UpgradeCommand implements Callable<Integer> {
                 available++;
             }
         }
+        // version lists fetched to check the lines (the upgrades report their own changes)
+        Changes lists = new Changes(ctx).disk();
+        if (!lists.isEmpty()) {
+            say.println("checked for newer builds");
+            lists.print(say);
+        }
         if (json) {
             Map<String, Object> doc = JsonOut.document();
             doc.put("dryRun", dryRun);
             doc.put("lines", rows);
+            doc.put("changes", lists.json());
             ctx.out.println(JsonOut.write(doc));
         } else if (dryRun && available > 0) {
             ctx.out.println("run without --dry-run to install");
@@ -135,10 +142,13 @@ final class UpgradeCommand implements Callable<Integer> {
             row.put("status", "upgraded");
             row.put("verified", result.verified());
             row.put("path", result.installed().home());
-            say.println("upgraded " + line + ": " + newest.version() + " → " + artifact.version());
-            moveLinks(ctx, say, line, newest, result.installed().home());
-            say.println("  remove the old build: jkit remove " + line.userTool() + "@" + newest.version()
+            Changes changes = InstallCommand.installed(ctx, result);
+            moveLinks(ctx, changes, line, newest, result.installed().home());
+            changes.note("the old build stays: jkit remove " + line.userTool() + "@" + newest.version()
                     + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
+            row.put("changes", changes.json());
+            say.println("upgraded " + line + ": " + newest.version() + " → " + artifact.version());
+            changes.print(say);
         } catch (Exception e) {
             JkitException je = Errors.describe(e);
             row.put("status", "failed");
@@ -184,8 +194,8 @@ final class UpgradeCommand implements Callable<Integer> {
         };
     }
 
-    /** Moves global links that pointed at the line's previous newest build; hints for this shell. */
-    private static void moveLinks(Context ctx, java.io.PrintStream out, Line line, Installed previous, Path newHome) throws Exception {
+    /** Moves global links that pointed at the line's previous newest build, recording them; hints for this shell. */
+    private static void moveLinks(Context ctx, Changes changes, Line line, Installed previous, Path newHome) throws Exception {
         for (Tool t : Tool.values()) {
             if (t.storeTool() != line.tool()) {
                 continue;
@@ -194,12 +204,11 @@ final class UpgradeCommand implements Callable<Integer> {
             Path target = ctx.os.readLink(link);
             if (target != null && target.equals(previous.home())) {
                 ctx.os.pointLink(link, newHome);
-                out.println("  global " + t + " → " + line.userTool() + " " + newHome.getFileName());
-                new Changes(ctx).link(link, newHome).print(out);
+                changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
             if (shell != null && Path.of(shell).equals(previous.home())) {
-                out.println("  this shell still uses the old build: jkit use " + t + "@" + line.major()
+                changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }
         }

@@ -191,10 +191,36 @@ What `available` holds for a JDK (or `graalvm`):
 `available` holds every matching version (`tool`, `version`, `major`, `preRelease`, `installed`), and
 `majors` is empty. Newest first. `--maintained`, `--pre` and `--fx` filter as they do for text output.
 
+## What changed: `changes`
+
+Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
+prints a line for each change under its own message, and with `--json` lists them in `changes`
+(`install`, `upgrade` per line and for the lookup, `use`, `remove`, `search`):
+
+```json
+"changes": [
+  { "kind": "folder", "name": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null },
+  { "kind": "file", "name": "/home/me/.jkit/index/3f9a….cache", "action": "update",
+    "value": "https://api.foojay.io/disco/v3.0/packages?…" }
+]
+```
+
+- `kind: folder`: an install folder, the jkit home on first use, or a leftover of an interrupted
+  install; `action` is `create` or `delete`.
+- `kind: file`: a cached version list or checksum under `index/`; `action` is `create` or `update`,
+  `value` is where it came from.
+  Text mode folds these into one `cache` line.
+- `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
+- `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
+  is reported per entry, with `action` `add` or `remove`.
+
+`list`, `status`, `env`, `doctor` and `hook` never change anything.
+
 ## `jkit install <tool>@<version> [vendor] --json`
 
 ```json
-{ "schemaVersion": 1, "status": "installed", "verified": true, "installed": { "...": "the install object" } }
+{ "schemaVersion": 1, "status": "installed", "verified": true, "installed": { "...": "the install object" },
+  "changes": [ { "kind": "folder", "name": "…/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null } ] }
 ```
 
 `status` is `installed` or `already-installed` (then `verified` is null). `verified` is false when the
@@ -215,8 +241,8 @@ count as verified). Downloads and checksums come only over https.
 ```
 
 One entry per release line. `status`: `up-to-date`, `available` (dry run), `upgraded` (then also
-`verified` and `path`) or `failed` (then `error: {message, hints}` and `to` may be null). Exits `1`
-when any line failed.
+`verified`, `path` and `changes`: the new folder and any global link moved) or `failed` (then `error: {message, hints}` and `to` may be null). Exits `1`
+when any line failed. The top-level `changes` lists the cached files written to check the lines.
 
 ## `jkit use <tool>@<version> [vendor] [--global] --json`
 
@@ -238,12 +264,11 @@ lines text mode prints, also on stderr):
 }
 ```
 
-- `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
-- `kind: env`: a variable of the calling shell (`--global` changes none); `action` is `set` (with
-  `value`) or `unset`. `PATH` is reported per entry, with `action` `add` or `remove`.
+`--global` changes a link and no variables; without it, only variables of this shell change.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 
 ```json
-{ "schemaVersion": 1, "removed": [ { "...": "the install object, as it was before removal" } ] }
+{ "schemaVersion": 1, "removed": [ { "...": "the install object, as it was before removal" } ],
+  "changes": [ { "kind": "folder", "name": "…/tools/jdk/17.0.13+11-zulu", "action": "delete", "value": null } ] }
 ```

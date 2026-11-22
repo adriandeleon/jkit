@@ -66,21 +66,24 @@ final class RemoveCommand implements Callable<Integer> {
             }
         }
         List<Object> removed = new ArrayList<>();
+        List<Object> changes = new ArrayList<>();
         for (Installed i : matches) {
             removed.add(JsonOut.installed(ctx, i));
             try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
-                remove(ctx, i, json.json ? ctx.err : ctx.out);
+                changes.addAll(remove(ctx, i, json.json ? ctx.err : ctx.out).json());
             }
         }
         if (json.json) {
             java.util.Map<String, Object> doc = JsonOut.document();
             doc.put("removed", removed);
+            doc.put("changes", changes);
             ctx.out.println(JsonOut.write(doc));
         }
         return 0;
     }
 
-    private static void remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
+    /** Removes one install and its global links; prints and returns what changed. */
+    private static Changes remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
         Changes removedLinks = new Changes(ctx);
         Files.createDirectories(ctx.home.tmp());
         Path trashDir = Files.createTempDirectory(ctx.home.tmp(), "remove-");
@@ -100,13 +103,14 @@ final class RemoveCommand implements Callable<Integer> {
                             : "check the folder's permissions, then run this again");
         }
         Fs.deleteRecursively(trash.getParent());
+        removedLinks.folder(i.home(), false);
         for (Tool t : Tool.values()) {
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
             if (t.storeTool() == i.tool() && target != null && target.equals(i.home())) {
                 ctx.os.removeLink(link);
                 removedLinks.link(link, null);
-                ctx.err.println("warning: there is no global " + t + " any more");
+                removedLinks.note("warning: there is no global " + t + " any more");
             }
             String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
             if (t.storeTool() == i.tool() && shell != null && Path.of(shell).equals(i.home())) {
@@ -115,5 +119,6 @@ final class RemoveCommand implements Callable<Integer> {
         }
         say.println("removed " + i.tool() + " " + i.label());
         removedLinks.print(say);
+        return removedLinks;
     }
 }
