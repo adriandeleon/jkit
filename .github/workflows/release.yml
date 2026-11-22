@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 to publish a release. Each platform builds the native binary and runs
-# the tests; Linux packages a .deb, an .rpm and a tar.gz, macOS (arm64 and x64) a
-# binary in a tar.gz (unsigned for now: see "Sign and notarize"). The release job attaches them all
+# the tests; Linux packages a .deb, an .rpm and a tar.gz, macOS (arm64 and x64) a signed,
+# notarized binary in a tar.gz. The release job attaches them all
 # with a SHA256SUMS file. A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the
 # Vitrina apt repository skips.
 
@@ -85,10 +85,8 @@ jobs:
       # A bare binary cannot carry a stapled ticket, so Gatekeeper looks the notarization up online
       # the first time a downloaded copy runs. Without the secrets, a pre-release tag (with a hyphen)
       # ships the linker's ad-hoc signature with a warning; a release tag fails.
-      # Turned off for now: macOS binaries ship with the linker's ad-hoc signature. Drop the
-      # `false &&` to sign and notarize again.
       - name: Sign and notarize
-        if: false && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         env:
           CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
