@@ -100,7 +100,9 @@ final class StatusCommand implements Callable<Integer> {
 
     private static String detail(ToolState s, ToolStates.Result result) {
         return switch (s.source()) {
-            case PROJECT -> projectFile(result) + " (" + pinText(s.pin()) + ")";
+            case PROJECT -> s.pin() == null
+                    ? projectFile(result) + " (follows its GraalVM jdk)"
+                    : projectFile(result) + " (" + pinText(s.pin()) + ")";
             case OUTSIDE, STALE -> s.tool().homeVariable() + "=" + Changes.tilde(s.current().toString());
             default -> "";
         };
@@ -117,7 +119,7 @@ final class StatusCommand implements Callable<Integer> {
             return s.source() == Source.SHELL && s.pin() != null && s.pinInstall() != null
                     && !s.pinInstall().home().equals(s.shellChoice())
                     ? projectFile(result) + " wants " + pinText(s.pin()) + "; this shell chose another with jkit use"
-                            + ", to follow it: " + useCommand(tool, s.pinInstall(), false)
+                            + ", to follow it: jkit reset " + tool
                     : null;
         }
         return switch (s.wanted()) {
@@ -125,11 +127,11 @@ final class StatusCommand implements Callable<Integer> {
                     + tool.homeVariable() + " was changed since: jkit use " + tool + " again, or jkit reset " + tool;
             case PROJECT -> s.pin() == null // GraalVM following the project's GraalVM JDK
                     ? tool.homeVariable() + " follows the project's GraalVM JDK, which this shell doesn't have yet: "
-                            + "jkit use jdk, or eval \"$(jkit env)\""
+                            + "jkit sync"
                     : s.pinInstall() == null
-                    ? projectFile(result) + " wants " + pinText(s.pin()) + ", not installed: " + installCommand(s.pin())
+                    ? projectFile(result) + " wants " + pinText(s.pin()) + ", not installed: jkit sync"
                     : projectFile(result) + " wants " + tool + " " + s.pinInstall().label() + "; this shell has "
-                            + (s.source() == Source.NONE ? "none" : label(s.source())) + ": " + useCommand(tool, s.pinInstall(), false);
+                            + (s.source() == Source.NONE ? "none" : label(s.source())) + ": jkit sync";
             case GLOBAL -> switch (s.source()) {
                 case OUTSIDE -> tool.homeVariable() + " is set outside jkit and wins over the global " + tool
                         + "; remove it from your shell profile to use jkit's";

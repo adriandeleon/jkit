@@ -196,7 +196,7 @@ What `available` holds for a JDK (or `graalvm`):
 
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
 prints a line for each change under its own message, and with `--json` lists them in `changes`
-(`install`, `upgrade` per line and for the lookup, `use`, `remove`, `search`):
+(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`):
 
 ```json
 "changes": [
@@ -210,7 +210,8 @@ prints a line for each change under its own message, and with `--json` lists the
   install; `action` is `create` or `delete`.
 - `kind: file`: a cached version list or checksum under `index/`; `action` is `create` or `update`,
   `value` is where it came from.
-  Text mode folds these into one `cache` line.
+  Text mode folds these into one `cache` line. Also a project file `pin` or `unpin` wrote, with
+  `value` null.
 - `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
   is reported per entry, with `action` `add` or `remove`.
@@ -266,6 +267,48 @@ lines text mode prints, also on stderr):
 ```
 
 `--global` changes a link and no variables; without it, only variables of this shell change.
+
+## `jkit pin <tool>[@version] [vendor] [--fx] [--exact] [--here] --json`
+
+```json
+{ "schemaVersion": 1, "file": "/home/me/src/app/jkit.toml", "created": false, "tool": "jdk",
+  "pin": { "version": "21", "vendor": null, "fx": false },
+  "previous": { "version": "17", "vendor": null, "fx": false },
+  "installed": { "...": "the install object the pin picks, or null when it isn't installed yet" },
+  "changes": [ { "kind": "file", "name": "/home/me/src/app/jkit.toml", "action": "update", "value": null } ],
+  "notes": [] }
+```
+
+`previous` is null when the file didn't pin the tool. With the shell hook active, `changes` also
+lists the variables of this shell that now follow the project.
+
+## `jkit unpin <tool> [--here] --json`
+
+```json
+{ "schemaVersion": 1, "file": "/home/me/src/app/jkit.toml", "tool": "jdk", "removed": true,
+  "previous": { "version": "21", "vendor": null, "fx": false }, "changes": [], "notes": [] }
+```
+
+`removed` is false (and nothing changes) when the file didn't pin the tool.
+
+## `jkit sync [--dry-run] --json`
+
+```json
+{
+  "schemaVersion": 1,
+  "dryRun": false,
+  "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
+  "tools": [
+    { "tool": "jdk", "pin": { "version": "21", "vendor": null, "fx": false },
+      "status": "already-installed", "label": "21.0.9+10 temurin", "installed": { "...": "the install object" } }
+  ],
+  "changes": [], "notes": []
+}
+```
+
+`status` per tool: `already-installed`, `installed` or `would-install` (dry run; `installed` is
+null). `changes` lists new install folders and, with the shell hook active, the variables of this
+shell that now follow the project; without the hook `notes` says the shell is unchanged.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 

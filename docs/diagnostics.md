@@ -190,8 +190,8 @@ have proved safe.
 3. **`java-runs`:** on by default.
 4. **`doctor --fix`:** not for now.
 
-Until `jkit sync` exists (project files phase 2), status suggests `jkit install …` for a
-pin with no matching install, and `jkit use …` for one that isn't applied.
+Now that `jkit sync` exists, status suggests it both for a pin with no matching install and
+for one that isn't applied (it suggested `jkit install …` and `jkit use …` before).
 
 Left out of the first version of doctor: telling which `jkit` the hook calls (it reports
 every distinct `jkit` on PATH instead), and the "auto-switch is off" note, which waits for

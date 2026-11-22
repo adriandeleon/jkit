@@ -9,7 +9,7 @@ import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "reset", description = "Clears a shell-level choice; the global version applies again.")
+@Command(name = "reset", description = "Clears a shell-level choice; the project's version (from jkit sync) or the global one applies again.")
 final class ResetCommand implements Callable<Integer> {
 
     @Parameters(index = "0", paramLabel = "<tool>", completionCandidates = Candidates.Tools.class,
@@ -31,7 +31,27 @@ final class ResetCommand implements Callable<Integer> {
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active", "add to ~/.bashrc:  eval \"$(jkit hook bash)\"");
         }
-        java.util.Map<String, String> changes = ShellEnv.reset(ctx.env, ctx.home, tool);
+        // the project's install applies again only while this folder's project still pins it
+        String projectVar = ShellEnv.projectVariable(tool);
+        java.util.Map<String, String> env = new java.util.HashMap<>(ctx.env);
+        String applied = env.get(projectVar);
+        Path project = null;
+        if (applied != null && !applied.isBlank()) {
+            dev.jkit.core.ToolState state = dev.jkit.core.ToolStates.read(ctx.env, Path.of("").toAbsolutePath(),
+                    ctx.home, ctx.store, ctx.config, ctx.os::readLink).get(tool);
+            project = state.pinInstall() == null ? null : state.pinInstall().home();
+        }
+        java.util.Map<String, String> changes;
+        if (project == null) {
+            env.remove(projectVar);
+            changes = ShellEnv.reset(env, ctx.home, tool, false);
+        } else {
+            env.put(projectVar, project.toString());
+            changes = ShellEnv.reset(env, ctx.home, tool, tool == Tool.JDK && EnvCommand.isGraalVm(ctx, project));
+        }
+        if (applied != null && !java.util.Objects.equals(env.get(projectVar), applied)) {
+            changes.put(projectVar, env.get(projectVar));
+        }
         Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
         ctx.out.println("reset " + tool + " in this shell");
         Changes report = new Changes(ctx).env(changes);

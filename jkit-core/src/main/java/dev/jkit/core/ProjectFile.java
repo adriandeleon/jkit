@@ -136,12 +136,16 @@ public final class ProjectFile {
     // jkit.toml
 
     static ProjectSpec readToml(Path file) {
-        TomlParseResult toml;
         try {
-            toml = Toml.parse(text(file));
+            return readToml(file, text(file));
         } catch (IOException e) {
             throw cannotRead(file, e);
         }
+    }
+
+    /** {@code text} read as the {@code jkit.toml} at {@code file}, which needn't exist (for checking an edit). */
+    static ProjectSpec readToml(Path file, String text) {
+        TomlParseResult toml = Toml.parse(text);
         if (toml.hasErrors()) {
             TomlParseError error = toml.errors().getFirst();
             throw new JkitException(at(file, error.position()) + ": invalid TOML: " + error.getMessage());
@@ -364,7 +368,7 @@ public final class ProjectFile {
      * The file as text: UTF-8 or UTF-16 by byte-order mark (PowerShell 5's {@code echo 21 > .java-version}
      * writes UTF-16), else UTF-8, else Latin-1. Never a decoding error.
      */
-    static String text(Path file) throws IOException {
+    public static String text(Path file) throws IOException {
         byte[] bytes = Files.readAllBytes(file);
         if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
             return new String(bytes, 3, bytes.length - 3, java.nio.charset.StandardCharsets.UTF_8);
