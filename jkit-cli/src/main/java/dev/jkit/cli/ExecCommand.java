@@ -127,6 +127,7 @@ final class ExecCommand implements Callable<Integer> {
                 variables.put(t.homeVariable(), null); // a jkit install whose bin is no longer on PATH
             }
         }
+        variables.put(ShellEnv.PROJECT, null);
         variables.put("JKIT_ENV_FILE", null); // a jkit use in there must not change the calling shell
         return new Plan(dir, List.copyOf(command), variables);
     }

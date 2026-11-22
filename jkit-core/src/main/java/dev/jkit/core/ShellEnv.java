@@ -20,6 +20,11 @@ import java.util.Map;
  */
 public final class ShellEnv {
     static final String GRAALVM_FOLLOWS = "JKIT_GRAALVM_FOLLOWS_JDK";
+    /**
+     * The project applied to this shell, as {@link ProjectFile#key}: lets the {@code cd} hook see
+     * that nothing changed without reading the files again.
+     */
+    public static final String PROJECT = "JKIT_PROJECT";
 
     private ShellEnv() { }
 
@@ -95,7 +100,24 @@ public final class ShellEnv {
      */
     public static Map<String, String> project(Map<String, String> env, JkitHome home, Map<Tool, Path> homes,
                                               boolean jdkIsGraalVm) {
+        return project(env, home, homes, jdkIsGraalVm, false, null);
+    }
+
+    /**
+     * Like {@link #project(Map, JkitHome, Map, boolean)}, also recording which project was applied in
+     * {@link #PROJECT}: {@code projectKey}, or unset when null (no project here any more).
+     */
+    public static Map<String, String> project(Map<String, String> env, JkitHome home, Map<Tool, Path> homes,
+                                              boolean jdkIsGraalVm, String projectKey) {
+        return project(env, home, homes, jdkIsGraalVm, true, projectKey);
+    }
+
+    private static Map<String, String> project(Map<String, String> env, JkitHome home, Map<Tool, Path> homes,
+                                               boolean jdkIsGraalVm, boolean recordKey, String projectKey) {
         Map<String, String> out = new LinkedHashMap<>();
+        if (recordKey && (projectKey != null || env.containsKey(PROJECT))) {
+            out.put(PROJECT, projectKey);
+        }
         Map<String, String> after = new HashMap<>(env);
         for (Tool t : Tool.values()) {
             boolean shellChoice = blankToNull(env.get(stateVariable(t))) != null;

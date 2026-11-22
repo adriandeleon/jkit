@@ -59,38 +59,73 @@ final class ProjectShell {
      * project, it takes away what an earlier sync applied.
      */
     static void apply(Context ctx, Path dir, Changes report) throws Exception {
-        ToolStates.Result states = ToolStates.read(ctx.env, dir, ctx.home, ctx.store, ctx.config, ctx.os::readLink);
-        if (states.projectError() != null) {
-            throw new JkitException(states.projectError());
-        }
-        String file = states.project().map(ProjectSpec::source).orElse("the project file");
-        Map<Tool, Path> homes = new EnumMap<>(Tool.class);
-        for (ToolState s : states.tools()) {
-            if (s.pin() == null) {
-                continue;
-            }
-            if (s.pinInstall() == null) {
-                report.note(file + " wants " + StatusCommand.pinText(s.pin()) + ", not installed: jkit sync");
-                continue;
-            }
-            homes.put(s.tool(), s.pinInstall().home());
-            if (s.shellChoice() != null && !same(s.shellChoice(), s.pinInstall().home())) {
-                report.note("this shell chose its own " + s.tool() + " with jkit use, which wins over " + file
-                        + ": jkit reset " + s.tool() + " to follow " + file);
-            }
-        }
+        Plan plan = plan(ctx, dir);
+        plan.notes().forEach(report::note);
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
-            if (!homes.isEmpty()) {
+            if (plan.applies()) {
                 report.note("the jkit shell hook isn't active, so this shell is unchanged; "
                         + "run one command with these versions: jkit exec -- <command>, or eval \"$(jkit env)\"");
             }
             return;
         }
+        Files.writeString(Path.of(envFile), ShellEnv.format(plan.changes(), ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        report.env(plan.changes());
+        if (plan.applies() && !ctx.config.autoSwitch()) {
+            report.note("to switch to a project's versions on cd: add auto_switch = true under [shell] in "
+                    + Changes.tilde(ctx.home.config().toString()) + ", then open a new shell");
+        }
+    }
+
+    /**
+     * What applying the project found from {@code dir} changes in this shell.
+     *
+     * @param project  the project, or empty when there is none here
+     * @param applied  the tools it sets, with their installs (a shell choice still wins for *_HOME)
+     * @param missing  true when a pin has no matching install
+     * @param changes  variables to set (value) or unset (null), including {@link ShellEnv#PROJECT}
+     */
+    record Plan(Optional<ProjectSpec> project, Map<Tool, Installed> applied, boolean missing,
+                Map<String, String> changes, java.util.List<String> notes) {
+        boolean applies() {
+            return !applied.isEmpty();
+        }
+    }
+
+    /** Suffix of {@link ShellEnv#PROJECT} when a pin wasn't installed, so the cd hook looks again. */
+    static final String MISSING = ";missing";
+
+    static Plan plan(Context ctx, Path dir) throws Exception {
+        ToolStates.Result states = ToolStates.read(ctx.env, dir, ctx.home, ctx.store, ctx.config, ctx.os::readLink);
+        if (states.projectError() != null) {
+            throw new JkitException(states.projectError());
+        }
+        String file = states.project().map(ProjectSpec::source).orElse("the project file");
+        Map<Tool, Installed> applied = new EnumMap<>(Tool.class);
+        Map<Tool, Path> homes = new EnumMap<>(Tool.class);
+        java.util.List<String> notes = new java.util.ArrayList<>();
+        boolean missing = false;
+        for (ToolState s : states.tools()) {
+            if (s.pin() == null) {
+                continue;
+            }
+            if (s.pinInstall() == null) {
+                notes.add(file + " wants " + StatusCommand.pinText(s.pin()) + ", not installed: jkit sync");
+                missing = true;
+                continue;
+            }
+            applied.put(s.tool(), s.pinInstall());
+            homes.put(s.tool(), s.pinInstall().home());
+            if (s.shellChoice() != null && !same(s.shellChoice(), s.pinInstall().home())) {
+                notes.add("this shell chose its own " + s.tool() + " with jkit use, which wins over " + file
+                        + ": jkit reset " + s.tool() + " to follow " + file);
+            }
+        }
+        String key = states.project().isEmpty() ? null
+                : ProjectFile.key(states.project().get().files()) + (missing ? MISSING : "");
         Map<String, String> changes = ShellEnv.project(ctx.env, ctx.home, homes,
-                EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK)));
-        Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
-        report.env(changes);
+                EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK)), key);
+        return new Plan(states.project(), applied, missing, changes, notes);
     }
 
     /** The install whose home is {@code home} (following links), or null. */

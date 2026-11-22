@@ -2,6 +2,8 @@ package dev.jkit.cli;
 
 import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
+import dev.jkit.core.ToolState;
+import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
@@ -17,7 +19,8 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "remove", description = "Removes installed versions. Refuses anything in use without --force.")
+@Command(name = "remove", description = {"Removes installed versions. Refuses anything global or chosen in this shell without --force.",
+        "Warns, but doesn't refuse, when the project file here pins it."})
 final class RemoveCommand implements Callable<Integer> {
 
     @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
@@ -67,10 +70,11 @@ final class RemoveCommand implements Callable<Integer> {
         }
         List<Object> removed = new ArrayList<>();
         List<Object> changes = new ArrayList<>();
+        ToolStates.Result here = StatusCommand.read(ctx, Path.of("").toAbsolutePath());
         for (Installed i : matches) {
             removed.add(JsonOut.installed(ctx, i));
             try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
-                changes.addAll(remove(ctx, i, json.json ? ctx.err : ctx.out).json());
+                changes.addAll(remove(ctx, i, here, json.json ? ctx.err : ctx.out).json());
             }
         }
         if (json.json) {
@@ -83,7 +87,8 @@ final class RemoveCommand implements Callable<Integer> {
     }
 
     /** Removes one install and its global links; prints and returns what changed. */
-    private static Changes remove(Context ctx, Installed i, java.io.PrintStream say) throws IOException {
+    private static Changes remove(Context ctx, Installed i, ToolStates.Result here, java.io.PrintStream say)
+            throws IOException {
         Changes removedLinks = new Changes(ctx);
         Files.createDirectories(ctx.home.tmp());
         Path trashDir = Files.createTempDirectory(ctx.home.tmp(), "remove-");
@@ -115,6 +120,18 @@ final class RemoveCommand implements Callable<Integer> {
             String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
             if (t.storeTool() == i.tool() && shell != null && Path.of(shell).equals(i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
+            }
+            String project = ctx.env.get(dev.jkit.core.ShellEnv.projectVariable(t));
+            if (t.storeTool() == i.tool() && (shell == null || shell.isBlank()) && project != null
+                    && Path.of(project).equals(i.home())) {
+                removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder "
+                        + "(applied from a project file): jkit sync to install it again, or jkit reset " + t);
+            }
+        }
+        for (ToolState s : here.tools()) {
+            if (s.pinInstall() != null && s.pinInstall().home().equals(i.home())) {
+                removedLinks.note("warning: " + here.project().map(p -> p.source()).orElse("the project file")
+                        + " here pins " + StatusCommand.pinText(s.pin()) + ", which this was: jkit sync installs it again");
             }
         }
         say.println("removed " + i.tool() + " " + i.label());

@@ -1,6 +1,6 @@
 # Project files (pin and sync)
 
-Status: phases 1 and 2 implemented (see the end).
+Status: implemented, phases 1 to 4 (see the end).
 
 ## Goal
 
@@ -254,12 +254,13 @@ mvn -B verify
 5. **Where the search stops:** at `$HOME` for directories below it, and at the root
    elsewhere.
 
-Status: phase 1 (parsing and discovery) is implemented in `ProjectFile`, `SdkmanIds` and
-`ToolVersionsIds`, with tests in `ProjectFileTest` and `ProjectIdsTest`. Phase 2 (`pin`, `unpin`,
-`sync`) is implemented in `PinCommand`, `UnpinCommand`, `SyncCommand` and `ProjectWriter`, with
-part of phase 3: `ShellEnv` has the project layer (`JKIT_PROJECT_<TOOL>`, shell > project >
-global) and `reset` goes back to the project. Tests: `ProjectWriterTest`, `ShellEnvTest`,
-`PinSyncTest`. Still to do: `JKIT_PROJECT`, `hook-env` and the `cd` hooks (phase 3), and phase 4.
+Status: all four phases are implemented. Phase 1 (parsing and discovery): `ProjectFile`,
+`SdkmanIds` and `ToolVersionsIds`, tested in `ProjectFileTest` and `ProjectIdsTest`. Phase 2
+(`pin`, `unpin`, `sync`): `PinCommand`, `UnpinCommand`, `SyncCommand` and `ProjectWriter`, tested in
+`ProjectWriterTest` and `PinSyncTest`. Phase 3 (the project layer and switching on `cd`):
+`ShellEnv`, the hidden `HookEnvCommand` and `Hooks.autoSwitch`, tested in `ShellEnvTest`,
+`HookEnvTest` and `HooksTest`. Phase 4: `list`, `use` and `remove`. PowerShell doesn't switch on
+`cd` yet.
 
 Phase 2 notes, where it differs from or adds to the text above:
 
@@ -272,3 +273,31 @@ Phase 2 notes, where it differs from or adds to the text above:
 - `reset <tool>` goes back to the project's install only while the project found from the current
   folder still pins the tool; otherwise it also drops the project state and goes back to global.
   This is how to leave a project's versions until the `cd` hooks land.
+
+Phase 3 and 4 notes, where they differ from or add to the text above:
+
+- Every switch on `cd` is announced, never silent: a `jkit: using ~/src/app/jkit.toml: jdk 21.0.9+10
+  temurin, maven 3.9.11` line (or `jkit: left the project in ~/src/app: back to the global
+  versions`), then one line per variable set, unset, or PATH entry added or removed, as other
+  commands print them, then the notes (pins not installed, a `jkit use` choice that keeps winning).
+  The same project again, such as a `cd` into a subfolder, prints nothing.
+- `JKIT_PROJECT` is `path:mtime` per file, joined by `;`. `ProjectFile.locate` finds the files
+  without reading them, so an unchanged project costs a few file checks. When a pin wasn't
+  installed, the value ends in `;missing` and the next `cd` looks again, quietly unless something
+  can now be applied.
+- A broken project file is reported once (until it changes), and leaves the shell's versions as
+  they were.
+- `hook-env` never fails: an unexpected error is one `jkit:` line on stderr, and the `cd` goes
+  ahead.
+- `jkit hook` reads `shell.auto_switch` when the shell starts, so turning it on or off takes a new
+  shell. `jkit hook <shell> --install --auto-switch` adds the hook to the shell's startup file and
+  sets `auto_switch = true` in `config.toml` (`ConfigWriter`, which edits one line and reads the
+  file back), printing both changes. For PowerShell, `jkit hook pwsh` warns that it isn't supported yet.
+- `sync`, `pin` and `unpin` also record `JKIT_PROJECT`, so the next `cd` within the project stays
+  quiet. While auto-switch is off they add a note on how to turn it on.
+- `list` marks installs with the project file's name (`jkit.toml`), and its `--json` has `project`
+  (`dir`, `files`, `tools`: tool → install, or `null` when not installed).
+- `use` notes when it overrides the project's pin in this shell, and `use --global` when the
+  project's pin wins over the new global version in this folder.
+- `remove` warns when the project here pins the install, and when this shell's `*_HOME` came from
+  the project and now points at the removed folder.

@@ -178,9 +178,9 @@ final class DoctorCommand implements Callable<Integer> {
         }
         String name = Path.of(r.ctx.env.getOrDefault("SHELL", "bash")).getFileName().toString();
         String fix = switch (name) {
-            case "zsh" -> "add to ~/.zshrc:  eval \"$(jkit hook zsh)\"";
-            case "fish" -> "add to ~/.config/fish/config.fish:  jkit hook fish | source";
-            default -> "add to ~/.bashrc:  eval \"$(jkit hook bash)\"";
+            case "zsh" -> "jkit hook zsh --install, then open a new shell";
+            case "fish" -> "jkit hook fish --install, then open a new shell";
+            default -> "jkit hook bash --install, then open a new shell";
         };
         r.warn("shell hook not loaded: jkit use can't change this shell, and the global versions aren't on PATH", fix);
     }

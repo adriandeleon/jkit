@@ -106,7 +106,7 @@ class DoctorTest {
         env.put("SHELL", "/usr/bin/zsh");
         Finding hook = only(run(), "hook");
         assertThat(hook.level()).isEqualTo(Level.WARN);
-        assertThat(hook.fix()).isEqualTo("add to ~/.zshrc:  eval \"$(jkit hook zsh)\"");
+        assertThat(hook.fix()).isEqualTo("jkit hook zsh --install, then open a new shell");
     }
 
     @Test
@@ -213,7 +213,7 @@ class DoctorTest {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         DoctorCommand.print(findings, new PrintStream(bytes, true, StandardCharsets.UTF_8));
         String text = bytes.toString(StandardCharsets.UTF_8);
-        assertThat(text).contains("warn  shell hook not loaded").contains("      fix: add to ~/.bashrc")
+        assertThat(text).contains("warn  shell hook not loaded").contains("      fix: jkit hook bash --install")
                 .endsWith("1 warning, 1 problem\n");
 
         JsonNode doc = JSON.readTree(JsonOut.write(DoctorCommand.json(findings)));

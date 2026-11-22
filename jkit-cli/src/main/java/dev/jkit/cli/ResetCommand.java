@@ -29,7 +29,7 @@ final class ResetCommand implements Callable<Integer> {
         Context ctx = Context.create(false, true);
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
-            throw new JkitException("the jkit shell hook is not active", "add to ~/.bashrc:  eval \"$(jkit hook bash)\"");
+            throw new JkitException("the jkit shell hook is not active", "load it in new shells: jkit hook bash --install (or zsh, fish)");
         }
         // the project's install applies again only while this folder's project still pins it
         String projectVar = ShellEnv.projectVariable(tool);

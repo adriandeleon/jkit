@@ -137,7 +137,7 @@ final class StatusCommand implements Callable<Integer> {
                         + "; remove it from your shell profile to use jkit's";
                 case STALE -> "set by jkit earlier but no longer chosen: open a new shell, or jkit reset " + tool;
                 default -> ctx.env.get("JKIT_SHELL") == null
-                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded; add to ~/.bashrc:  eval \"$(jkit hook bash)\""
+                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: jkit hook bash --install (or zsh, fish), then open a new shell"
                         : "the global " + tool + " isn't applied in this shell yet: open a new shell";
             };
             case NONE -> s.source() == Source.STALE

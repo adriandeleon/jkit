@@ -59,16 +59,63 @@ public final class ProjectFile {
             }
             return Optional.of(read(file));
         }
+        List<Path> files = locate(start, env);
+        return files.isEmpty() ? Optional.empty() : Optional.of(inDir(files.getFirst().getParent()).orElseThrow());
+    }
+
+    /**
+     * The project files {@link #find} would read, without reading them: the {@code JKIT_PROJECT_FILE}
+     * file, a {@code jkit.toml} (or {@code .jkit.toml}), or the other formats found together. Empty
+     * when there is none. Cheap: only file checks, for the {@code cd} hook.
+     */
+    public static List<Path> locate(Path start, Map<String, String> env) {
+        String override = env.get(OVERRIDE);
+        if (override != null) {
+            return override.isBlank() ? List.of() : List.of(start.resolve(override).toAbsolutePath().normalize());
+        }
         Path dir = start.toAbsolutePath().normalize();
         Path home = home(env);
         boolean belowHome = home != null && dir.startsWith(home);
         for (; dir != null; dir = dir.getParent()) {
-            Optional<ProjectSpec> found = inDir(dir);
-            if (found.isPresent() || (belowHome && dir.equals(home))) {
+            List<Path> found = filesIn(dir);
+            if (!found.isEmpty() || (belowHome && dir.equals(home))) {
                 return found;
             }
         }
-        return Optional.empty();
+        return List.of();
+    }
+
+    private static List<Path> filesIn(Path dir) {
+        for (String name : List.of(JKIT_TOML, HIDDEN_TOML)) {
+            if (Files.isRegularFile(dir.resolve(name))) {
+                return List.of(dir.resolve(name));
+            }
+        }
+        List<Path> found = new ArrayList<>();
+        for (String name : List.of(SDKMANRC, TOOL_VERSIONS, JAVA_VERSION)) {
+            if (Files.isRegularFile(dir.resolve(name))) {
+                found.add(dir.resolve(name));
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Identifies the project files and their contents' age, {@code path:mtime} joined by
+     * {@code ;}, so the {@code cd} hook can tell nothing changed without reading them.
+     */
+    public static String key(List<Path> files) {
+        List<String> parts = new ArrayList<>();
+        for (Path f : files) {
+            long mtime;
+            try {
+                mtime = Files.getLastModifiedTime(f).toMillis();
+            } catch (java.io.IOException e) {
+                mtime = -1;
+            }
+            parts.add(f + ":" + mtime);
+        }
+        return String.join(";", parts);
     }
 
     private static Path home(Map<String, String> env) {
