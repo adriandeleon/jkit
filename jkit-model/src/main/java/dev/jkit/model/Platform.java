@@ -42,14 +42,15 @@ public enum Platform {
         if (!arm && !x64) {
             throw new JkitException("unsupported CPU architecture: " + osArch);
         }
+        // "darwin" contains "win", so macOS first
+        if (name.contains("mac") || name.contains("darwin")) {
+            return arm ? MACOS_AARCH64 : MACOS_X64;
+        }
         if (name.contains("win")) {
             if (arm) {
                 throw new JkitException("Windows on ARM is not supported yet");
             }
             return WINDOWS_X64;
-        }
-        if (name.contains("mac") || name.contains("darwin")) {
-            return arm ? MACOS_AARCH64 : MACOS_X64;
         }
         if (name.contains("linux")) {
             return arm ? LINUX_AARCH64 : LINUX_X64;

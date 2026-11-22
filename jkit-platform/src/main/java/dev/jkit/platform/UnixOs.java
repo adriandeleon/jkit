@@ -11,8 +11,9 @@ final class UnixOs implements OsServices {
     @Override
     public void pointLink(Path link, Path target) throws IOException {
         Files.createDirectories(link.getParent());
-        Path tmp = link.resolveSibling("." + link.getFileName() + ".new");
-        Files.deleteIfExists(tmp);
+        // a name of its own, so two jkit runs switching at once don't trip over each other's temp link
+        Path tmp = link.resolveSibling("." + link.getFileName() + ".new-" + ProcessHandle.current().pid()
+                + "-" + Long.toHexString(System.nanoTime()));
         // relative, so moving the jkit folder keeps the link valid
         Files.createSymbolicLink(tmp, link.getParent().toAbsolutePath().relativize(target.toAbsolutePath()));
         Files.move(tmp, link, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -39,8 +40,9 @@ final class UnixOs implements OsServices {
         return switch (shell) {
             case "bash", "zsh" -> Hooks.posix(shell, root);
             case "fish" -> Hooks.fish(root);
+            case "pwsh", "powershell" -> Hooks.powershell(root);
             default -> throw new dev.jkit.model.JkitException("unsupported shell: " + shell,
-                    "shells: bash, zsh, fish (pwsh on Windows)");
+                    "shells: bash, zsh, fish, pwsh");
         };
     }
 }

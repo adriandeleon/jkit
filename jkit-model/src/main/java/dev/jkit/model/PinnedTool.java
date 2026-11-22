@@ -6,6 +6,12 @@ package dev.jkit.model;
  */
 public record PinnedTool(Tool tool, String version, Vendor vendor, boolean fx) {
 
+    public PinnedTool {
+        if (version != null && (tool == Tool.JDK || tool == Tool.GRAALVM)) {
+            version = Version.fromLegacyJava(version); // jdk = "1.8" is 8
+        }
+    }
+
     /** The spec for install and lookup; the vendor stays separate, as on the command line. */
     public ToolSpec spec() {
         return new ToolSpec(tool, version);

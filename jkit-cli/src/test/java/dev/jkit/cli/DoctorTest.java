@@ -50,6 +50,7 @@ class DoctorTest {
                 "JKIT_HOME", home.toString(),
                 "HOME", tmp.resolve("user").toString(),
                 "JKIT_SHELL", "bash",
+                "JKIT_ENV_FILE", tmp.resolve("jkit-env").toString(), // run through the hook's jkit function
                 "JAVA_HOME", home.resolve("global/jdk").toString(),
                 "PATH", path(home.resolve("global/jdk/bin"), usrBin)));
     }
@@ -106,6 +107,14 @@ class DoctorTest {
         Finding hook = only(run(), "hook");
         assertThat(hook.level()).isEqualTo(Level.WARN);
         assertThat(hook.fix()).isEqualTo("add to ~/.zshrc:  eval \"$(jkit hook zsh)\"");
+    }
+
+    @Test
+    void inheritedHookWithoutTheFunctionIsAWarning() {
+        env.remove("JKIT_ENV_FILE"); // JKIT_SHELL came from a parent shell; no jkit function here
+        Finding hook = only(run(), "hook");
+        assertThat(hook.level()).isEqualTo(Level.WARN);
+        assertThat(hook.message()).contains("inherited");
     }
 
     @Test

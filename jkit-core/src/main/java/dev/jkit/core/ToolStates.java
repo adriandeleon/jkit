@@ -53,9 +53,16 @@ public final class ToolStates {
             projectError = e.getMessage();
         }
         List<ToolState> tools = new ArrayList<>();
+        ToolState jdk = null;
         for (Tool tool : TOOLS) {
             PinnedTool pin = project.map(p -> p.get(tool)).orElse(null);
-            tools.add(read(tool, env, home, store, config, links, pin));
+            ToolState state = read(tool, env, home, store, config, links, pin);
+            if (tool == Tool.JDK) {
+                jdk = state;
+            } else if (tool == Tool.GRAALVM && jdk != null) {
+                state = followJdk(state, jdk, home, store);
+            }
+            tools.add(state);
         }
         return new Result(project, projectError, List.copyOf(tools));
     }
@@ -104,6 +111,36 @@ public final class ToolStates {
         Installed active = current == null ? null : installAt(store, tool, current);
         return new ToolState(tool, shellChoice, pin, pinInstall, global, globalMissing, current, active, source,
                 wanted, wantedHome);
+    }
+
+    /**
+     * With no GraalVM of its own (no shell choice, pin or global link), GRAALVM_HOME follows a
+     * GraalVM-based JDK: {@code jkit env} and the shell set it to the JDK's folder. Without this,
+     * such a GRAALVM_HOME would look stale.
+     */
+    static ToolState followJdk(ToolState g, ToolState jdk, JkitHome home, Store store) throws IOException {
+        if (g.shellChoice() != null || g.pin() != null || g.global() != null) {
+            return g;
+        }
+        Source wanted = g.wanted();
+        Path wantedHome = g.wantedHome();
+        if (jdk.wantedHome() != null && installAt(store, Tool.GRAALVM, jdk.wantedHome()) != null) {
+            wanted = jdk.wanted();
+            wantedHome = jdk.wantedHome();
+        }
+        Source source = g.source();
+        Path current = g.current();
+        if (current != null && installAt(store, Tool.GRAALVM, current) != null) {
+            if (jdk.shellChoice() != null && same(current, jdk.shellChoice())) {
+                source = Source.SHELL;
+            } else if (jdk.pinInstall() != null && same(current, jdk.pinInstall().home())) {
+                source = Source.PROJECT;
+            } else if (same(current, home.global(Tool.JDK)) || (jdk.global() != null && same(current, jdk.global()))) {
+                source = Source.GLOBAL;
+            }
+        }
+        return new ToolState(g.tool(), g.shellChoice(), g.pin(), g.pinInstall(), g.global(), g.globalMissing(),
+                g.current(), g.active(), source, wanted, wantedHome);
     }
 
     /**

@@ -2,22 +2,47 @@ package dev.jkit.platform;
 
 import dev.jkit.model.JkitException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 
 /**
  * Windows: directory junctions, which need no admin rights or Developer Mode. Java has no API to
- * create one, so this runs {@code cmd /c mklink /J}. Untested in the prototype (built on Linux).
+ * create one, so this runs {@code cmd /c mklink /J}. A junction whose target is gone can't be
+ * read back through Java, so each one has a {@code .<name>.target} file beside it naming its
+ * target. Untested in the prototype (built on Linux).
  */
 final class WindowsOs implements OsServices {
 
     @Override
     public void pointLink(Path link, Path target) throws IOException {
         Files.createDirectories(link.getParent());
-        removeLink(link);
-        Process p = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString())
-                .redirectErrorStream(true).start();
+        // the new junction first, under a name of its own; the old one goes only once it exists
+        Path tmp = link.resolveSibling("." + link.getFileName() + ".new-" + ProcessHandle.current().pid()
+                + "-" + Long.toHexString(System.nanoTime()));
+        mklink(tmp, target.toAbsolutePath());
+        try {
+            removeLink(link);
+            Files.move(tmp, link);
+        } catch (IOException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
+        Files.writeString(targetFile(link), target.toAbsolutePath().toString(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The paths travel in environment variables and sit inside quotes, so cmd treats {@code & ^ |}
+     * in them as text and expands {@code %} only once (in the command, not in the values).
+     */
+    private static void mklink(Path link, Path target) throws IOException {
+        ProcessBuilder pb = new ProcessBuilder("cmd", "/d", "/s", "/c",
+                "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
+        pb.environment().put("JKIT_LINK", link.toString());
+        pb.environment().put("JKIT_TARGET", target.toString());
+        Process p = pb.start();
         try {
             String output = new String(p.getInputStream().readAllBytes());
             if (p.waitFor() != 0) {
@@ -34,7 +59,16 @@ final class WindowsOs implements OsServices {
         if (!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
             return null;
         }
-        return link.toRealPath();
+        try {
+            return link.toRealPath();
+        } catch (NoSuchFileException e) {
+            // the target is gone: report where it pointed, so callers see a broken link
+            Path recorded = targetFile(link);
+            if (Files.isRegularFile(recorded)) {
+                return Path.of(Files.readString(recorded, StandardCharsets.UTF_8).trim()).normalize();
+            }
+            return link;
+        }
     }
 
     @Override
@@ -42,6 +76,11 @@ final class WindowsOs implements OsServices {
         if (Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
             Files.delete(link); // deletes the junction, not its target
         }
+        Files.deleteIfExists(targetFile(link));
+    }
+
+    private static Path targetFile(Path link) {
+        return link.resolveSibling("." + link.getFileName() + ".target");
     }
 
     @Override

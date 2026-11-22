@@ -32,6 +32,9 @@ final class InstallCommand implements Callable<Integer> {
     @Mixin
     JsonOut.Flag json = new JsonOut.Flag();
 
+    static final String UNVERIFIED = "the download was not verified: the source publishes no checksum, "
+            + "or only a weak one (md5 or sha1)";
+
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
@@ -52,7 +55,7 @@ final class InstallCommand implements Callable<Integer> {
         ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
         Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
         if (!result.verified()) {
-            ctx.err.println("warning: the source publishes no checksum; the download was not verified");
+            ctx.err.println("warning: " + UNVERIFIED);
         }
         say.println("installed " + artifact.label() + " → " + result.installed().home());
         if (json.json) {

@@ -40,14 +40,10 @@ public final class Store {
                 if (!Files.isRegularFile(marker)) {
                     continue;
                 }
-                Properties p = new Properties();
-                try (InputStream in = Files.newInputStream(marker)) {
-                    p.load(in);
+                Installed installed = read(tool, child, marker);
+                if (installed == null) {
+                    continue; // a damaged marker; doctor reports the folder as a leftover
                 }
-                String vendor = p.getProperty("vendor", "");
-                Installed installed = new Installed(tool.storeTool(), Version.parse(p.getProperty("version")),
-                        vendor.isEmpty() ? null : Vendor.fromFoojay(vendor), child,
-                        Boolean.parseBoolean(p.getProperty("fx", "false")));
                 if (tool == Tool.GRAALVM && (installed.vendor() == null || !installed.vendor().isGraalVmBased())) {
                     continue;
                 }
@@ -59,6 +55,23 @@ public final class Store {
         return out;
     }
 
+    private static Installed read(Tool tool, Path dir, Path marker) {
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(marker)) {
+            p.load(in);
+            String version = p.getProperty("version", "").trim();
+            if (version.isEmpty()) {
+                return null;
+            }
+            String vendor = p.getProperty("vendor", "").trim();
+            return new Installed(tool.storeTool(), Version.parse(version),
+                    vendor.isEmpty() ? null : Vendor.fromFoojay(vendor), dir,
+                    Boolean.parseBoolean(p.getProperty("fx", "false")));
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
     /** Installs matching a version prefix and (for vendor tools) a vendor, newest first. */
     public List<Installed> find(Tool tool, String versionSpec, Vendor vendor) throws IOException {
         return list(tool).stream()
@@ -67,17 +80,52 @@ public final class Store {
                 .toList();
     }
 
+    /** True when that build is installed: its folder exists and carries jkit's marker. */
     public boolean contains(Tool tool, Version version, Vendor vendor, boolean fx) throws IOException {
-        return Files.isDirectory(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor, fx)));
+        return Files.isRegularFile(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor, fx)).resolve(MARKER));
     }
 
-    static void writeMarker(Path dir, Installed installed, String url) throws IOException {
+    /**
+     * Holds jkit's install lock until closed: one process at a time changes tools/. Blocks while
+     * another jkit holds it.
+     */
+    public AutoCloseable lock() throws IOException {
+        Files.createDirectories(home.root());
+        java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(home.lockFile(),
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
+        java.nio.channels.FileLock lock;
+        try {
+            lock = channel.lock();
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
+        return () -> {
+            try (channel) {
+                lock.release();
+            }
+        };
+    }
+
+    /** Whether the install was checked against a strong checksum; false for installs made before jkit recorded it. */
+    static boolean verified(Path dir) {
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(dir.resolve(MARKER))) {
+            p.load(in);
+        } catch (IOException e) {
+            return false;
+        }
+        return Boolean.parseBoolean(p.getProperty("verified", "false"));
+    }
+
+    static void writeMarker(Path dir, Installed installed, String url, boolean verified) throws IOException {
         Properties p = new Properties();
         p.setProperty("tool", installed.tool().id());
         p.setProperty("version", installed.version().raw());
         p.setProperty("vendor", installed.vendor() == null ? "" : installed.vendor().foojayName());
         p.setProperty("fx", Boolean.toString(installed.fx()));
         p.setProperty("url", url);
+        p.setProperty("verified", Boolean.toString(verified));
         try (var out = Files.newOutputStream(dir.resolve(MARKER))) {
             p.store(out, "written by jkit");
         }

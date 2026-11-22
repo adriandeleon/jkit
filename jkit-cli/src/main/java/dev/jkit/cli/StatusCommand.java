@@ -24,7 +24,7 @@ final class StatusCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
+        Context ctx = Context.readOnly();
         Path cwd = Path.of("").toAbsolutePath();
         ToolStates.Result result = read(ctx, cwd);
         if (json.json) {
@@ -123,7 +123,10 @@ final class StatusCommand implements Callable<Integer> {
         return switch (s.wanted()) {
             case SHELL -> "this shell chose " + Changes.tilde(s.shellChoice().toString()) + " with jkit use, but "
                     + tool.homeVariable() + " was changed since: jkit use " + tool + " again, or jkit reset " + tool;
-            case PROJECT -> s.pinInstall() == null
+            case PROJECT -> s.pin() == null // GraalVM following the project's GraalVM JDK
+                    ? tool.homeVariable() + " follows the project's GraalVM JDK, which this shell doesn't have yet: "
+                            + "jkit use jdk, or eval \"$(jkit env)\""
+                    : s.pinInstall() == null
                     ? projectFile(result) + " wants " + pinText(s.pin()) + ", not installed: " + installCommand(s.pin())
                     : projectFile(result) + " wants " + tool + " " + s.pinInstall().label() + "; this shell has "
                             + (s.source() == Source.NONE ? "none" : label(s.source())) + ": " + useCommand(tool, s.pinInstall(), false);

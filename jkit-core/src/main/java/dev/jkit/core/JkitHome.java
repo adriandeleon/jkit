@@ -10,9 +10,13 @@ public record JkitHome(Path root) {
     public static JkitHome fromEnv(Map<String, String> env) {
         String override = env.get("JKIT_HOME");
         if (override != null && !override.isBlank()) {
-            return new JkitHome(Path.of(override).toAbsolutePath());
+            return new JkitHome(Path.of(override));
         }
         return new JkitHome(Path.of(System.getProperty("user.home"), ".jkit"));
+    }
+
+    public JkitHome {
+        root = root.toAbsolutePath().normalize();
     }
 
     public Path toolsRoot() { return root.resolve("tools"); }

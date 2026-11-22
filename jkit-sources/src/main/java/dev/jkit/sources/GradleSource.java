@@ -33,14 +33,14 @@ public final class GradleSource {
                 .filter(x -> x.version().matches(spec))
                 .findFirst()
                 .orElseThrow(() -> new JkitException("no Gradle release matches " + (spec == null ? "latest" : spec)));
-        String checksum = r.checksum();
-        if (checksum.isEmpty() && !r.checksumUrl().isEmpty()) {
-            checksum = FoojaySource.firstToken(http.get(URI.create(r.checksumUrl())));
-        }
         String url = r.url();
-        return new Artifact(Tool.GRADLE, r.version(), null, URI.create(url),
-                url.substring(url.lastIndexOf('/') + 1), "zip",
-                checksum.isEmpty() ? null : "sha256", checksum.isEmpty() ? null : checksum, false);
+        String file = url.substring(url.lastIndexOf('/') + 1);
+        Checksum checksum = Checksum.of(r.checksum(), "sha256");
+        if (checksum == null && !r.checksumUrl().isEmpty()) {
+            checksum = Checksum.parse(http.get(Http.requireSecure(URI.create(r.checksumUrl()))), file, "sha256");
+        }
+        return new Artifact(Tool.GRADLE, r.version(), null, Http.requireSecure(URI.create(url)), file, "zip",
+                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
     }
 
     private List<Release> releases(boolean pre) throws IOException {
@@ -51,11 +51,13 @@ public final class GradleSource {
                     || n.path("releaseNightly").asBoolean() || n.path("broken").asBoolean()) {
                 continue;
             }
-            boolean isPre = !Json.text(n, "rcFor").isEmpty() || !Json.text(n, "milestoneFor").isEmpty();
+            String version = Json.text(n, "version");
+            boolean isPre = !Json.text(n, "rcFor").isEmpty() || !Json.text(n, "milestoneFor").isEmpty()
+                    || Version.parse(version).isPreRelease(); // 1.0-milestone-* carry no milestoneFor
             if (isPre && !pre) {
                 continue;
             }
-            out.add(new Release(Version.parse(Json.text(n, "version")), Json.text(n, "downloadUrl"),
+            out.add(new Release(Version.parse(version), Json.text(n, "downloadUrl"),
                     Json.text(n, "checksum"), Json.text(n, "checksumUrl")));
         }
         out.sort(Comparator.comparing(Release::version).reversed());
