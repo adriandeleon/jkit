@@ -153,7 +153,7 @@ final class StatusCommand implements Callable<Integer> {
     }
 
     /** {@code jdk = "21"}, {@code jdk = 21 zulu fx}. */
-    private static String pinText(PinnedTool pin) {
+    static String pinText(PinnedTool pin) {
         return pin.tool() + " " + (pin.version() == null ? "latest" : pin.version())
                 + (pin.vendor() == null ? "" : " " + pin.vendor().name()) + (pin.fx() ? " fx" : "");
     }
@@ -163,7 +163,7 @@ final class StatusCommand implements Callable<Integer> {
                 + (i.fx() ? " --fx" : "") + (global ? " --global" : "");
     }
 
-    private static String installCommand(PinnedTool pin) {
+    static String installCommand(PinnedTool pin) {
         return "jkit install " + pin.tool() + "@" + (pin.version() == null ? "latest" : pin.version())
                 + (pin.vendor() == null ? "" : " " + pin.vendor().name()) + (pin.fx() ? " --fx" : "");
     }

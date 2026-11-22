@@ -69,19 +69,20 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, status, remove, copyright, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, status, env, remove, copyright, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 `status` shows which version of each tool is active here and where it comes from (this shell, a
 project file, the global default, or something set outside jkit), with a hint when that isn't what
-jkit would pick. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) are
-read but not applied yet: see [docs/project-files.md](docs/project-files.md).
-`--json` on list, status, search, install, upgrade, use and remove prints one JSON document for editors and
+jkit would pick. `env` prints the environment for a new process here, for CI and IDEs
+without the hook (`eval "$(jkit env)"`). Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) are
+read by status and env, but shells don't switch to them on their own yet: see [docs/project-files.md](docs/project-files.md).
+`--json` on list, status, env, search, install, upgrade, use and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
 Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
-pin/sync (applying project files), signed packages and an apt/dnf repository, env, doctor, init, prune, config command, self update,
+pin/sync (applying project files), signed packages and an apt/dnf repository, doctor, init, prune, config command, self update,
 Windows and Homebrew.
 
 ## Modules

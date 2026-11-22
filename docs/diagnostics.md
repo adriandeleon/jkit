@@ -1,6 +1,6 @@
 # Diagnostics: status, env, doctor
 
-Status: `status` implemented; `env` and `doctor` not yet. Builds on project files (docs/project-files.md);
+Status: `status` and `env` implemented; `doctor` not yet. Builds on project files (docs/project-files.md);
 phase 1 of that (reading `jkit.toml` and friends) is all these commands need.
 
 ## Goal

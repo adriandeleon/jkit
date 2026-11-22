@@ -113,6 +113,32 @@ Never uses the network. Reads the project file found from the working directory 
   file can't be read.
 - `matches` is true when `source` is what jkit would pick; `hint` says what to do when it isn't.
 
+## `jkit env [--global] [--dir <path>] --json`
+
+Never uses the network. The environment for a new process in `dir`: global links,
+overridden by the project's pins (shell choices don't count).
+
+```json
+{
+  "schemaVersion": 1,
+  "dir": "/home/me/src/app",
+  "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
+  "variables": {
+    "JAVA_HOME": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin",
+    "MAVEN_HOME": "/home/me/.jkit/global/maven"
+  },
+  "pathPrepend": ["/home/me/.jkit/tools/jdk/21.0.9+10-temurin/bin", "/home/me/.jkit/global/maven/bin"],
+  "path": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin/bin:/home/me/.jkit/global/maven/bin:/usr/bin",
+  "pathSeparator": ":"
+}
+```
+
+- `variables` holds only the `*_HOME` variables of tools that are chosen; others are left out,
+  not unset. `GRAALVM_HOME` follows a GraalVM JDK when no GraalVM is chosen.
+- `pathPrepend` is what to put first on PATH; `path` is the whole PATH jkit would set (the
+  current PATH with old jkit install folders removed).
+- A pin with no matching install is an error document with exit code 3.
+
 ## `jkit search <tool>[@version] [vendor] --json`
 
 ```json
