@@ -27,7 +27,10 @@ final class Context {
     final Config config;
     final Store store;
     final OsServices os;
-    final Http http;
+    private final boolean refresh;
+    private final boolean offline;
+    /** Built on first use: the HTTP client costs startup time that status, env and the cd hook don't need. */
+    private Http http;
     final PrintStream out;
     final PrintStream err = System.err;
     /** Why config.toml couldn't be read, for a lenient context (doctor); otherwise always null. */
@@ -67,20 +70,29 @@ final class Context {
         this.configError = error;
         this.store = new Store(home);
         this.os = OsServices.current();
-        this.http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
-                Duration.ofHours(24), Clock.systemUTC(), refresh,
-                offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
-                new CachingHttp.Listener() {
-                    @Override
-                    public void stored(URI uri, java.nio.file.Path file, boolean created) {
-                        cacheWrites.add(new CacheWrite(uri, file, created));
-                    }
+        this.refresh = refresh;
+        this.offline = offline;
+    }
 
-                    @Override
-                    public void stale(String message) {
-                        System.err.println("warning: " + message);
-                    }
-                });
+    /** The caching HTTP client, created on first use. */
+    Http http() {
+        if (http == null) {
+            http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
+                    Duration.ofHours(24), Clock.systemUTC(), refresh,
+                    offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
+                    new CachingHttp.Listener() {
+                        @Override
+                        public void stored(URI uri, java.nio.file.Path file, boolean created) {
+                            cacheWrites.add(new CacheWrite(uri, file, created));
+                        }
+
+                        @Override
+                        public void stale(String message) {
+                            System.err.println("warning: " + message);
+                        }
+                    });
+        }
+        return http;
     }
 
     static String userAgent() {
@@ -122,25 +134,25 @@ final class Context {
     }
 
     FoojaySource foojay() {
-        return new FoojaySource(http, url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
+        return new FoojaySource(http(), url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
     }
 
     GradleSource gradle() {
-        return new GradleSource(http, url("JKIT_SOURCES_GRADLE_URL", GradleSource.DEFAULT_BASE));
+        return new GradleSource(http(), url("JKIT_SOURCES_GRADLE_URL", GradleSource.DEFAULT_BASE));
     }
 
     MavenSource maven() {
-        return new MavenSource(http, url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE));
+        return new MavenSource(http(), url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE));
     }
 
     /** Versions from the Maven repository; zips from JKIT_SOURCES_SBT_URL (the sbt GitHub releases). */
     SbtSource sbt() {
-        return new SbtSource(http, url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE),
+        return new SbtSource(http(), url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE),
                 url("JKIT_SOURCES_SBT_URL", SbtSource.DEFAULT_DOWNLOADS));
     }
 
     Installer installer() {
-        return new Installer(home, http);
+        return new Installer(home, http());
     }
 
     URI url(String variable, URI fallback) {

@@ -55,6 +55,9 @@ on a browser-downloaded copy.
 ```bash
 export JKIT_HOME=/tmp/jkit-home          # keep tests away from ~/.jkit
 eval "$(jkit hook bash)"                 # shell wrapper for `jkit use`, plus tab completion
+                                         # (switches on cd with auto_switch = true under [shell] in config.toml)
+jkit hook bash --install                 # or zsh, fish: adds that line to ~/.bashrc for new shells
+jkit hook --install --auto-switch         # also switch to a project's versions on cd
 jkit search jdk
 jkit install jdk@21                      # default vendor (temurin)
 jkit install jdk@17 zulu
@@ -71,7 +74,7 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, pin, unpin, sync, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, pin, unpin, sync, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested; `--install` adds it to the shell's startup file),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 `status` shows which version of each tool is active here and where it comes from (this shell, a
 project file, the global default, or something set outside jkit), with a hint when that isn't what
@@ -80,7 +83,11 @@ without the hook (`eval "$(jkit env)"`). `doctor` checks the setup (shell hook, 
 set outside jkit, broken links, leftovers, whether the active JDK runs; `--network` for the
 sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) record a project's versions:
 `jkit pin jdk@21` writes `jkit.toml`, and `jkit sync` installs what it asks for and switches this
-shell to it. Shells don't switch on `cd` yet: see [docs/project-files.md](docs/project-files.md).
+shell to it. With `auto_switch = true` under `[shell]` in `~/.jkit/config.toml` (or
+`JKIT_AUTO_SWITCH=1`; `jkit hook --install --auto-switch` sets both up), bash, zsh and fish switch to a project's versions on `cd` and back when you
+leave, and print every variable they change; see [docs/project-files.md](docs/project-files.md).
+`list` marks the installs the project here picks, `use` says when it overrides one, and `remove`
+warns before taking one away.
 `exec` runs one command with the versions jkit picks (`jkit exec jdk@17 -- mvn test`), with no
 shell hook: for scripts, CI and AI agents, whose commands each start a new shell; see
 [docs/agents.md](docs/agents.md).
@@ -90,7 +97,7 @@ Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index 
 
 ## Not yet
 
-switching to project versions on `cd`, signed packages and an apt/dnf repository, init, prune, config command, self update,
+switching on `cd` in PowerShell, signed packages and an apt/dnf repository, init, prune, config command, self update,
 Windows and Homebrew.
 
 ## Modules

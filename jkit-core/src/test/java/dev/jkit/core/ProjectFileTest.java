@@ -206,6 +206,22 @@ class ProjectFileTest {
     }
 
     @Test
+    void locateFindsTheSameFilesWithoutReadingThemAndKeyChangesWithTheFile() throws IOException {
+        Path toml = write("home/repo/jkit.toml", "[tools\nbroken");
+        write("home/legacy/.sdkmanrc", "java=17.0.13-zulu\n");
+        Path jv = write("home/legacy/.java-version", "17\n");
+        assertThat(ProjectFile.locate(dir("home/repo/src"), env)).containsExactly(toml);
+        assertThat(ProjectFile.locate(dir("home/legacy"), env))
+                .containsExactly(tmp.resolve("home/legacy/.sdkmanrc"), jv);
+        assertThat(ProjectFile.locate(dir("home/none"), env)).isEmpty();
+
+        String key = ProjectFile.key(java.util.List.of(toml));
+        assertThat(key).startsWith(toml + ":");
+        Files.setLastModifiedTime(toml, java.nio.file.attribute.FileTime.fromMillis(12345));
+        assertThat(ProjectFile.key(java.util.List.of(toml))).isEqualTo(toml + ":12345").isNotEqualTo(key);
+    }
+
+    @Test
     void outsideHomeTheSearchGoesToTheRoot() throws IOException {
         write("ci/jkit.toml", "[tools]\njdk = \"21\"\n");
         assertThat(find("ci/workspace/repo").get(Tool.JDK).version()).isEqualTo("21");

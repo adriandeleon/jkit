@@ -71,6 +71,21 @@ class RobustnessTest {
     }
 
     @Test
+    void autoSwitchIsOffByDefaultAndReadFromConfigOrEnvironment() throws IOException {
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Files.createDirectories(home.root());
+        assertThat(Config.load(home, Map.of()).autoSwitch()).isFalse();
+        Files.writeString(home.config(), "[shell]\nauto_switch = true\n");
+        assertThat(Config.load(home, Map.of()).autoSwitch()).isTrue();
+        assertThat(Config.load(home, Map.of("JKIT_AUTO_SWITCH", "0")).autoSwitch()).isFalse();
+        Files.writeString(home.config(), "[shell]\nauto_switch = \"yes\"\n");
+        assertThatThrownBy(() -> Config.load(home, Map.of())).hasMessageContaining("shell.auto_switch must be true or false");
+        Files.delete(home.config());
+        assertThat(Config.load(home, Map.of("JKIT_AUTO_SWITCH", "1")).autoSwitch()).isTrue();
+        assertThatThrownBy(() -> Config.load(home, Map.of("JKIT_AUTO_SWITCH", "maybe"))).hasMessageContaining("isn't 1 or 0");
+    }
+
+    @Test
     void homeIsNormalized() {
         JkitHome home = JkitHome.fromEnv(Map.of("JKIT_HOME", tmp.resolve("a/../jkit").toString()));
         assertThat(home.root()).isEqualTo(tmp.resolve("jkit"));

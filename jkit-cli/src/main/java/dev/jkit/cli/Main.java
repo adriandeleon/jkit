@@ -22,6 +22,7 @@ import picocli.CommandLine.Command;
             PinCommand.class,
             UnpinCommand.class,
             SyncCommand.class,
+            HookEnvCommand.class,
             DoctorCommand.class,
             RemoveCommand.class,
             HookCommand.class,
@@ -40,6 +41,12 @@ public final class Main implements Runnable {
     }
 
     public static void main(String[] args) {
+        if (args.length >= 1 && args.length <= 2 && args[0].equals("hook-env")) {
+            // the cd hook runs this on every directory change: skip building the whole command line
+            HookEnvCommand hookEnv = new HookEnvCommand();
+            hookEnv.shell = args.length == 2 ? args[1] : null;
+            System.exit(hookEnv.call());
+        }
         System.exit(run(args));
     }
 

@@ -70,11 +70,18 @@ Never uses the network.
   "schemaVersion": 1,
   "home": "/home/me/.jkit",
   "global": { "jdk": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin", "maven": null, "gradle": null, "sbt": null, "graalvm": null },
+  "project": {
+    "dir": "/home/me/src/app",
+    "files": ["/home/me/src/app/jkit.toml"],
+    "tools": { "jdk": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin", "maven": null }
+  },
   "installed": [ { "tool": "jdk", "id": "21.0.9+10-temurin", "...": "the install object" } ]
 }
 ```
 
-`installed` holds JDKs, then Maven, then Gradle, then sbt, each newest first.
+`installed` holds JDKs, then Maven, then Gradle, then sbt, each newest first. `project` is the
+project file found from the working directory, or `null`; its `tools` maps each pinned tool to the
+install it picks, or `null` when none is installed (`jkit sync`).
 
 ## `jkit status --json`
 
@@ -196,7 +203,9 @@ What `available` holds for a JDK (or `graalvm`):
 
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
 prints a line for each change under its own message, and with `--json` lists them in `changes`
-(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`):
+(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`).
+The `cd` hook (`shell.auto_switch`) follows the same rule: whenever it switches versions it prints
+the same lines on stderr, under a `jkit: using …` or `jkit: left the project …` line.
 
 ```json
 "changes": [

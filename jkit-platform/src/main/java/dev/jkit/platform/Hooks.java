@@ -39,6 +39,47 @@ final class Hooks {
                 """.formatted(shell, ShellQuote.quote(shell, g));
     }
 
+    /**
+     * The part of the hook that switches to a project's versions on {@code cd}
+     * ({@code shell.auto_switch}): runs {@code jkit hook-env} when the directory changes and once
+     * when the hook loads. Null for shells without it (PowerShell, for now).
+     */
+    static String autoSwitch(String shell) {
+        return switch (shell) {
+            case "bash" -> """
+                    # switch to a project's versions on cd (shell.auto_switch)
+                    __jkit_hook_env() {
+                      local __jkit_rc=$?
+                      if [ "$PWD" != "${__jkit_pwd-}" ]; then
+                        __jkit_pwd=$PWD
+                        eval "$(command jkit hook-env bash)"
+                      fi
+                      return $__jkit_rc
+                    }
+                    case ";${PROMPT_COMMAND-};" in
+                      *";__jkit_hook_env;"*) ;;
+                      *) PROMPT_COMMAND="__jkit_hook_env${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+                    esac
+                    __jkit_hook_env
+                    """;
+            case "zsh" -> """
+                    # switch to a project's versions on cd (shell.auto_switch)
+                    __jkit_hook_env() { eval "$(command jkit hook-env zsh)"; }
+                    autoload -Uz add-zsh-hook
+                    add-zsh-hook chpwd __jkit_hook_env
+                    __jkit_hook_env
+                    """;
+            case "fish" -> """
+                    # switch to a project's versions on cd (shell.auto_switch)
+                    function __jkit_hook_env --on-variable PWD
+                      command jkit hook-env fish | source
+                    end
+                    __jkit_hook_env
+                    """;
+            default -> null;
+        };
+    }
+
     static String fish(Path root) {
         String g = ShellQuote.quote("fish", root.resolve("global").toString());
         return """

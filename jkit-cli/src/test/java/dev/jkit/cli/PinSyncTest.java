@@ -175,4 +175,23 @@ class PinSyncTest {
         StatusCommand.print(ctx, StatusCommand.read(ctx, project), ctx.out);
         assertThat(output()).contains("graalvm").contains("jkit.toml (follows its GraalVM jdk)");
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listMarksWhatTheProjectHerePicks() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\nmaven = \"4\"\n");
+        Context ctx = ctx();
+        Map<String, Object> doc = ListCommand.json(ctx, project);
+        Map<String, Object> p = (Map<String, Object>) doc.get("project");
+        assertThat(p.get("dir")).isEqualTo(project);
+        Map<String, Object> tools = (Map<String, Object>) p.get("tools");
+        assertThat(tools).containsEntry("jdk", temurin21).containsEntry("maven", null);
+
+        var here = StatusCommand.read(ctx, project);
+        var t21 = ctx.store.list(Tool.JDK).stream().filter(i -> i.home().equals(temurin21)).findFirst().orElseThrow();
+        var z17 = ctx.store.list(Tool.JDK).stream().filter(i -> i.home().equals(zulu17)).findFirst().orElseThrow();
+        assertThat(ListCommand.projectNotes(here, t21)).containsExactly("jkit.toml");
+        assertThat(ListCommand.projectNotes(here, z17)).isEmpty();
+        assertThat(ListCommand.json(ctx, tmp).get("project")).isNull();
+    }
 }

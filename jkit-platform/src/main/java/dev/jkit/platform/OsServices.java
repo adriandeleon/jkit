@@ -18,6 +18,14 @@ public interface OsServices {
     /** The script a shell's rc file evaluates: global PATH entries plus the jkit wrapper function. */
     String hook(String shell, Path jkitRoot);
 
+    /**
+     * What the hook adds to switch to a project's versions on {@code cd} (shell.auto_switch), or
+     * null when that shell doesn't support it yet.
+     */
+    default String autoSwitchHook(String shell) {
+        return Hooks.autoSwitch(shell);
+    }
+
     static OsServices current() {
         return Platform.current().isWindows() ? new WindowsOs() : new UnixOs();
     }

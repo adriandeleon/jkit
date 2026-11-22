@@ -44,6 +44,51 @@ class HooksTest {
         }
     }
 
+    /**
+     * An interactive bash with the auto-switch hook: jkit hook-env runs once when the hook loads and
+     * again only when the directory changes, its output is evaluated, and $? survives the prompt.
+     */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashAutoSwitchRunsHookEnvOnDirectoryChangeOnly() throws Exception {
+        Path root = tmp.resolve("home/.jkit");
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path log = tmp.resolve("calls.log");
+        Path fake = bin.resolve("jkit");
+        Files.writeString(fake, "#!/bin/sh\necho \"$*\" >> '" + log + "'\n"
+                + "[ \"$1\" = hook-env ] && echo \"export JKIT_TEST_DIR='$PWD'\"\nexit 0\n");
+        fake.toFile().setExecutable(true);
+        Path a = Files.createDirectories(tmp.resolve("a"));
+        Path hook = tmp.resolve("hook.sh");
+        Files.writeString(hook, Hooks.posix("bash", root) + Hooks.autoSwitch("bash"));
+        String input = ". '" + hook + "'\n"
+                + "cd '" + a + "'\n"
+                + "cd .\n"
+                + "false\n"
+                + "echo \"rc=$?\"\n"
+                + "echo \"dir=$JKIT_TEST_DIR\"\n"
+                + "exit\n";
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", "-i").directory(tmp.toFile());
+        withoutToolHomes(pb);
+        pb.environment().put("PATH", bin + ":" + pb.environment().get("PATH"));
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+        p.getOutputStream().write(input.getBytes(StandardCharsets.UTF_8));
+        p.getOutputStream().close();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out).contains("rc=1").contains("dir=" + a);
+        assertThat(Files.readAllLines(log)).containsExactly("hook-env bash", "hook-env bash");
+    }
+
+    @Test
+    void autoSwitchHooksForZshAndFishAndNoneForPowerShell() {
+        assertThat(Hooks.autoSwitch("zsh")).contains("add-zsh-hook chpwd __jkit_hook_env")
+                .contains("command jkit hook-env zsh");
+        assertThat(Hooks.autoSwitch("fish")).contains("--on-variable PWD").contains("command jkit hook-env fish | source");
+        assertThat(Hooks.autoSwitch("pwsh")).isNull();
+    }
+
     @Test
     void fishHookKeepsAnExistingJavaHomeAndSetsTheOtherHomes() {
         String fish = Hooks.fish(Path.of("/home/u/.jkit"));

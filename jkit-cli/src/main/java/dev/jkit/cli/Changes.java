@@ -106,7 +106,13 @@ final class Changes {
         return this;
     }
 
-    /** A project file this command wrote (pin, unpin). */
+    /** A file this command deleted (jkit hook fish --uninstall). */
+    Changes fileDeleted(Path file) {
+        changes.add(new Change("file", file.toAbsolutePath().toString(), "delete", null));
+        return this;
+    }
+
+    /** A project file or shell startup file this command wrote (pin, unpin, hook --install). */
     Changes file(Path file, boolean created) {
         changes.add(new Change("file", file.toAbsolutePath().toString(), created ? "create" : "update", null));
         return this;
@@ -141,7 +147,7 @@ final class Changes {
                     + "; remove it from your shell profile to use jkit's");
         } else if (ctx.env.get("JKIT_SHELL") == null) {
             note("the jkit hook is not loaded in this shell, so nothing sets " + var
-                    + "; add to ~/.bashrc:  eval \"$(jkit hook bash)\"");
+                    + "; load it in new shells: jkit hook bash --install");
         } else {
             note(var + " is not set in this shell yet; open a new shell, or: jkit use " + tool);
         }
@@ -178,6 +184,7 @@ final class Changes {
                 case "folder delete" -> "folder " + tilde(c.name()) + " deleted";
                 case "file create" -> "file   " + tilde(c.name()) + " created";
                 case "file update" -> "file   " + tilde(c.name()) + " updated";
+                case "file delete" -> "file   " + tilde(c.name()) + " deleted";
                 default -> c.toString();
             });
         }
