@@ -25,14 +25,23 @@ class HooksTest {
         Path script = tmp.resolve("hook.sh");
         Files.writeString(script, Hooks.posix("bash", root)
                 + "\nprintf '%s\\n' \"$JAVA_HOME\" \"$PATH\"\n");
-        Process p = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
-                .redirectErrorStream(true).start();
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb); // the hook keeps a JAVA_HOME the build itself runs with
+        Process p = pb.start();
         p.getOutputStream().close();
         String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
         assertThat(p.exitValue()).as(out).isZero();
         assertThat(out.lines().toList().getFirst()).isEqualTo(root.resolve("global/jdk").toString());
         assertThat(out).contains(root.resolve("global/jdk/bin").toString());
+    }
+
+    private static void withoutToolHomes(ProcessBuilder pb) {
+        for (String v : new String[] {"JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME", "SBT_HOME", "GRAALVM_HOME",
+                "PROMPT_COMMAND", "JKIT_PROJECT", "JKIT_ENV_FILE"}) {
+            pb.environment().remove(v);
+        }
     }
 
     @Test
