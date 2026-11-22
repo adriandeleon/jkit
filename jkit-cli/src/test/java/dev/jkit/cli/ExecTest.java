@@ -89,6 +89,21 @@ class ExecTest {
     }
 
     @Test
+    void aNamedToolCoversAPinThatIsNotInstalled() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"11\"\nmaven = \"3.9\"\n");
+        ExecCommand.Plan plan = plan("jdk@17", "zulu");
+        assertThat(plan.variables()).containsEntry("JAVA_HOME", zulu17.toString())
+                .containsEntry("MAVEN_HOME", home.resolve("tools/maven/3.9.11").toString());
+
+        // a missing pin for a tool not named is still an error, with a hint that fits exec
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"11\"\n");
+        assertThatThrownBy(() -> plan("maven"))
+                .isInstanceOf(JkitException.class)
+                .satisfies(e -> assertThat(((JkitException) e).hints()).contains(
+                        "or ignore the project file: jkit exec --global <tools> -- <command>"));
+    }
+
+    @Test
     void aToolThatIsNotInstalledExitsThree() {
         assertThatThrownBy(() -> plan("jdk@11"))
                 .isInstanceOf(JkitException.class)

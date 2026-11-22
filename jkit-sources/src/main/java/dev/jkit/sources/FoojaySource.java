@@ -145,7 +145,9 @@ public final class FoojaySource {
         }
         // the newest build that can be downloaded directly; some vendors list builds behind a form
         for (Pkg pkg : candidates) {
-            JsonNode info = Json.parse(http.get(base.resolve("ids/" + pkg.id()))).path("result").path(0);
+            // this answer carries the download link and often the checksum itself, so https too
+            JsonNode info = Json.parse(http.get(Http.requireSecure(base.resolve("ids/" + pkg.id()))))
+                    .path("result").path(0);
             String url = Json.text(info, "direct_download_uri");
             if (url.isEmpty()) {
                 continue;
@@ -196,7 +198,7 @@ public final class FoojaySource {
         // one package per vendor + version, preferring the platform's usual archive type
         Map<String, Pkg> byKey = new LinkedHashMap<>();
         for (JsonNode n : root.path("result")) {
-            if (platform.isLinux() && !Json.text(n, "lib_c_type").equals("glibc")) {
+            if (platform.isLinux() && !Json.text(n, "lib_c_type").equals(platform.libc())) {
                 continue;
             }
             if (n.path("feature").size() > 0) {

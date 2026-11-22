@@ -73,7 +73,7 @@ final class EnvCommand implements Callable<Integer> {
         Context ctx = Context.readOnly();
         String syntax = shell != null ? shell : defaultShell(ctx.env);
         if (!SHELLS.contains(syntax)) {
-            throw new JkitException("unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
+            throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
         }
         Path cwd = Path.of("").toAbsolutePath();
         Result result = compute(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), global);
@@ -92,6 +92,15 @@ final class EnvCommand implements Callable<Integer> {
      * install is an error (exit 3) so a CI step never runs with half an environment.
      */
     static Result compute(Context ctx, Path dir, boolean ignoreProject) throws Exception {
+        return compute(ctx, dir, ignoreProject, java.util.Set.of(), "jkit env --global");
+    }
+
+    /**
+     * As above, but a missing pin for a tool in {@code chosen} is no error: the caller sets that tool
+     * itself. {@code ignoreCommand} is the hint for skipping the project file.
+     */
+    static Result compute(Context ctx, Path dir, boolean ignoreProject, java.util.Set<Tool> chosen,
+            String ignoreCommand) throws Exception {
         if (!Files.isDirectory(dir)) {
             throw new JkitException(dir + " is not a folder");
         }
@@ -109,7 +118,9 @@ final class EnvCommand implements Callable<Integer> {
         List<ToolState> missing = new ArrayList<>();
         for (ToolState s : states.tools()) {
             if (s.pin() != null) {
-                if (s.pinInstall() == null) {
+                if (s.pinInstall() == null && chosen.contains(s.tool())) {
+                    continue; // the caller names its own version
+                } else if (s.pinInstall() == null) {
                     missing.add(s);
                 } else {
                     homes.put(s.tool(), s.pinInstall().home());
@@ -130,7 +141,7 @@ final class EnvCommand implements Callable<Integer> {
             for (ToolState s : missing) {
                 hints.add("install it: " + StatusCommand.installCommand(s.pin()));
             }
-            hints.add("or ignore the project file: jkit env --global");
+            hints.add("or ignore the project file: " + ignoreCommand);
             throw new JkitException(JkitException.NOT_INSTALLED,
                     file + " wants " + String.join(", ", wants) + ", not installed", hints.toArray(String[]::new));
         }

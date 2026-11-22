@@ -15,7 +15,10 @@ class HooksTest {
     @TempDir
     Path tmp;
 
-    /** Runs the bash hook for a home whose path has a quote, a space and a $, and prints what it set. */
+    /**
+     * Runs the bash hook for a home whose path has a quote, a space and a $, and prints what it set;
+     * under set -u, which some users keep on in interactive shells.
+     */
     @Test
     @DisabledOnOs(OS.WINDOWS)
     void bashHookWorksWithAwkwardHomePaths() throws Exception {
@@ -23,8 +26,8 @@ class HooksTest {
         Files.createDirectories(root.resolve("global"));
         Files.createSymbolicLink(root.resolve("global/jdk"), Files.createDirectories(tmp.resolve("jdk")));
         Path script = tmp.resolve("hook.sh");
-        Files.writeString(script, Hooks.posix("bash", root)
-                + "\nprintf '%s\\n' \"$JAVA_HOME\" \"$PATH\"\n");
+        Files.writeString(script, "set -u\n" + Hooks.posix("bash", root)
+                + "\ntype jkit > /dev/null\nprintf '%s\\n' \"$JAVA_HOME\" \"$PATH\"\n");
         ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
                 .redirectErrorStream(true);
         withoutToolHomes(pb); // the hook keeps a JAVA_HOME the build itself runs with

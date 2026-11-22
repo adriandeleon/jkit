@@ -127,7 +127,12 @@ final class SearchCommand implements Callable<Integer> {
             }
         } else {
             doc.put("majors", List.of());
-            List<Version> versions = spec.tool() == Tool.MAVEN ? ctx.maven().versions(pre) : ctx.gradle().versions(pre);
+            List<Version> versions = switch (spec.tool()) {
+                case MAVEN -> ctx.maven().versions(pre);
+                case GRADLE -> ctx.gradle().versions(pre);
+                case SBT -> ctx.sbt().versions(pre);
+                case JDK, GRAALVM -> throw new IllegalStateException("JDKs are listed above");
+            };
             for (Version v : versions) {
                 if (v.matches(spec.version())) {
                     available.add(JsonOut.fields(

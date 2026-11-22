@@ -30,6 +30,10 @@ Any failure prints this, with the same exit code the process exits with:
 }
 ```
 
+When a command had already changed something before it failed (`sync` installed one pin and the
+next download failed, `remove --all` removed some builds), the error document also has `changes`,
+in the same shape as on success.
+
 Exit codes: `0` success, `1` failure, `2` bad arguments (unknown tool, vendor or shell, a version
 that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin with no install).
 

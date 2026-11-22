@@ -157,7 +157,7 @@ final class HookCommand implements Callable<Integer> {
         Path config = ctx.home.config();
         String shown = Changes.tilde(config.toString());
         boolean exists = Files.exists(config);
-        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? Files.readString(config) : "",
+        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? dev.jkit.core.ProjectFile.text(config) : "",
                 "shell", "auto_switch", "true");
         if (!edit.changed()) {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");

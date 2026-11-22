@@ -2,23 +2,30 @@ package dev.jkit.model;
 
 import java.util.Locale;
 
-/** The five platforms jkit supports, with foojay's names for them. */
+/** The platforms jkit supports, with foojay's names for them; Linux comes with glibc or musl (Alpine). */
 public enum Platform {
-    LINUX_X64("linux-x64", "linux", "x64"),
-    LINUX_AARCH64("linux-aarch64", "linux", "aarch64"),
-    MACOS_X64("macos-x64", "macos", "x64"),
-    MACOS_AARCH64("macos-aarch64", "macos", "aarch64"),
-    WINDOWS_X64("windows-x64", "windows", "x64");
+    LINUX_X64("linux-x64", "linux", "x64", "glibc"),
+    LINUX_AARCH64("linux-aarch64", "linux", "aarch64", "glibc"),
+    LINUX_X64_MUSL("linux-x64-musl", "linux", "x64", "musl"),
+    LINUX_AARCH64_MUSL("linux-aarch64-musl", "linux", "aarch64", "musl"),
+    MACOS_X64("macos-x64", "macos", "x64", null),
+    MACOS_AARCH64("macos-aarch64", "macos", "aarch64", null),
+    WINDOWS_X64("windows-x64", "windows", "x64", null);
 
     private final String id;
     private final String os;
     private final String arch;
+    private final String libc;
 
-    Platform(String id, String os, String arch) {
+    Platform(String id, String os, String arch, String libc) {
         this.id = id;
         this.os = os;
         this.arch = arch;
+        this.libc = libc;
     }
+
+    /** foojay's lib_c_type for Linux builds (glibc or musl); null elsewhere. */
+    public String libc() { return libc; }
 
     public String id() { return id; }
 
@@ -31,7 +38,32 @@ public enum Platform {
     public boolean isLinux() { return os.equals("linux"); }
 
     public static Platform current() {
-        return of(System.getProperty("os.name"), System.getProperty("os.arch"));
+        Platform p = of(System.getProperty("os.name"), System.getProperty("os.arch"));
+        return p.isLinux() && isMusl(p.arch()) ? p.withMusl() : p;
+    }
+
+    /**
+     * Alpine and other musl systems: a glibc JDK there fails with "not found" from the missing
+     * loader. Debian's musl package adds ld-musl next to glibc, so ld-musl alone isn't enough; Alpine
+     * with gcompat has a glibc loader shim, so /etc/alpine-release counts too.
+     */
+    private static boolean isMusl(String arch) {
+        String a = arch.equals("x64") ? "x86_64" : "aarch64";
+        if (!java.nio.file.Files.exists(java.nio.file.Path.of("/lib/ld-musl-" + a + ".so.1"))) {
+            return false;
+        }
+        boolean glibcLoader = java.nio.file.Files.exists(java.nio.file.Path.of(
+                arch.equals("x64") ? "/lib64/ld-linux-x86-64.so.2" : "/lib/ld-linux-aarch64.so.1"));
+        return !glibcLoader || java.nio.file.Files.exists(java.nio.file.Path.of("/etc/alpine-release"));
+    }
+
+    /** The musl variant of a Linux platform. */
+    public Platform withMusl() {
+        return switch (this) {
+            case LINUX_X64, LINUX_X64_MUSL -> LINUX_X64_MUSL;
+            case LINUX_AARCH64, LINUX_AARCH64_MUSL -> LINUX_AARCH64_MUSL;
+            default -> throw new IllegalStateException(this + " has no musl variant");
+        };
     }
 
     static Platform of(String osName, String osArch) {

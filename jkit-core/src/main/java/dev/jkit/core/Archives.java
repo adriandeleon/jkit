@@ -87,14 +87,32 @@ public final class Archives {
         }
     }
 
-    /** A link whose target, resolved from where it sits, stays inside the target folder. */
+    /**
+     * A link whose target, resolved from where it sits, stays inside the archive's top folder (only
+     * that folder is installed), or inside the target folder for a link at the top. {@code ..} may
+     * only lead the target: after a name it would climb out of whatever that name turns out to be,
+     * and an earlier or later entry can make that name a symlink, so checking the text alone isn't
+     * enough ({@code a/b/../..} is inside on paper, outside if {@code a/b} links to {@code .}).
+     */
     private static void symlink(Path target, Path out, String linkName, String entryName) throws IOException {
         if (linkName == null || linkName.isEmpty()) {
             throw new IOException("archive symlink without a target: " + entryName);
         }
         Path link = Path.of(linkName);
-        if (link.isAbsolute() || link.getRoot() != null
-                || !out.getParent().resolve(link).normalize().startsWith(target)) {
+        boolean named = false;
+        boolean climbsAfterName = false;
+        for (Path part : link) {
+            String p = part.toString();
+            if (p.equals("..")) {
+                climbsAfterName |= named;
+            } else if (!p.equals(".") && !p.isEmpty()) {
+                named = true;
+            }
+        }
+        Path relative = target.relativize(out);
+        Path inside = relative.getNameCount() > 1 ? target.resolve(relative.getName(0)) : target;
+        if (link.isAbsolute() || link.getRoot() != null || climbsAfterName
+                || !out.getParent().resolve(link).normalize().startsWith(inside)) {
             throw new IOException("archive symlink points outside the target folder: " + entryName + " -> " + linkName);
         }
         createDirectories(target, out.getParent());

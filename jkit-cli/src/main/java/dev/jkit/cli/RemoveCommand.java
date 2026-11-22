@@ -75,6 +75,11 @@ final class RemoveCommand implements Callable<Integer> {
             removed.add(JsonOut.installed(ctx, i));
             try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
                 changes.addAll(remove(ctx, i, here, json.json ? ctx.err : ctx.out).json());
+            } catch (Exception e) {
+                if (changes.isEmpty()) {
+                    throw e;
+                }
+                throw new PartialFailure(Errors.describe(e), changes); // the earlier ones are gone
             }
         }
         if (json.json) {

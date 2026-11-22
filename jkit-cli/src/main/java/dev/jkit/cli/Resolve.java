@@ -18,13 +18,14 @@ final class Resolve {
         Tool tool = spec.tool();
         if (!tool.hasVendors()) {
             if (typed != null) {
-                throw new JkitException(tool + " has no vendors; drop '" + typed + "'");
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, tool + " has no vendors; drop '" + typed + "'");
             }
             return null;
         }
         Vendor vendor = typed == null ? ctx.config.defaultVendor(tool) : Vendor.of(typed);
         if (tool == Tool.GRAALVM && !vendor.isGraalVmBased()) {
-            throw new JkitException(vendor + " is not GraalVM-based",
+            throw new JkitException(typed != null ? picocli.CommandLine.ExitCode.USAGE : JkitException.GENERAL,
+                    vendor + " is not GraalVM-based",
                     "graalvm vendors: " + Vendor.graalVmVendorList());
         }
         return vendor;

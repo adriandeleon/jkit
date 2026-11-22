@@ -133,6 +133,55 @@ class ArchiveEscapeTest {
     }
 
     @Test
+    void climbingBackThroughAnEarlierSymlinkIsRefused() throws IOException {
+        // on paper jdk/a/b/c/s/../../../.. is jdk; for real s is ../../.. (jdk), so it's 4 levels above jdk
+        Path archive = tar(t -> {
+            file(t, "jdk/a/b/c/f", "x");
+            symlink(t, "jdk/a/b/c/s", "../../..");
+            symlink(t, "jdk/esc", "a/b/c/s/../../../..");
+        });
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("run/out"), "tar.gz"))
+                .hasMessageContaining("points outside");
+        assertThat(tmp.resolve("run/out/jdk/esc")).doesNotExist();
+    }
+
+    @Test
+    void climbingThroughALaterSymlinkIsRefused() throws IOException {
+        // x/.. is jdk while x doesn't exist yet; once x links to "." it's the folder above jdk
+        Path archive = tar(t -> {
+            symlink(t, "jdk/up", "x/..");
+            symlink(t, "jdk/x", ".");
+        });
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
+                .hasMessageContaining("points outside");
+    }
+
+    @Test
+    void linkLeavingTheTopFolderIsRefused() throws IOException {
+        // only jdk/ is installed, so a link into a sibling folder of the archive would dangle or worse
+        Path archive = tar(t -> {
+            file(t, "other/secret", "x");
+            symlink(t, "jdk/s", "../other/secret");
+        });
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
+                .hasMessageContaining("points outside");
+    }
+
+    @Test
+    void leadingClimbsAndTopLevelLinksStillWork() throws IOException {
+        Path archive = tar(t -> {
+            file(t, "jdk/Contents/Home/lib/libjli.dylib", "x");
+            symlink(t, "jdk/Contents/MacOS/libjli.dylib", "../Home/lib/libjli.dylib");
+            symlink(t, "jdk/./bin", "./Contents/Home/lib");
+            symlink(t, "top", "jdk/Contents/Home");
+        });
+        Path out = tmp.resolve("out");
+        Archives.extract(archive, out, "tar.gz");
+        assertThat(out.resolve("jdk/Contents/MacOS/libjli.dylib")).hasContent("x");
+        assertThat(out.resolve("top/lib/libjli.dylib")).hasContent("x");
+    }
+
+    @Test
     void nonNormalizedTargetStillWorks() throws IOException {
         Path out = tmp.resolve("x/../out2");
         Archives.extract(ArchivesTest.jdkTarGz(tmp, "jdk-21"), out, "tar.gz");

@@ -104,7 +104,10 @@ final class ExecCommand implements Callable<Integer> {
 
     static Plan plan(Context ctx, Path dir, boolean ignoreProject, List<Choice> choices, List<String> command)
             throws Exception {
-        EnvCommand.Result base = EnvCommand.compute(ctx, dir, ignoreProject);
+        java.util.Set<Tool> named = java.util.EnumSet.noneOf(Tool.class);
+        choices.forEach(c -> named.add(c.spec().tool()));
+        EnvCommand.Result base = EnvCommand.compute(ctx, dir, ignoreProject, named,
+                "jkit exec --global " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
         Map<Tool, Path> homes = new EnumMap<>(Tool.class);
         homes.putAll(base.homes());
         boolean jdkIsGraalVm = EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK));
@@ -183,11 +186,15 @@ final class ExecCommand implements Callable<Integer> {
         } catch (java.io.IOException e) {
             throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
         }
+        // Ctrl-C reaches the whole foreground process group, so the child gets its own SIGINT: a REPL
+        // handles it and keeps going, and its exit code is ours. Only SIGTERM/SIGHUP stop it from here.
+        List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
         Thread stop = new Thread(process::destroy);
         Runtime.getRuntime().addShutdownHook(stop);
         try {
             return process.waitFor();
         } finally {
+            Signals.restore(ignored);
             try {
                 Runtime.getRuntime().removeShutdownHook(stop);
             } catch (IllegalStateException shuttingDown) {
