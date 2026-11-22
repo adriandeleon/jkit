@@ -29,13 +29,31 @@ final class Context {
     final Http http;
     final PrintStream out;
     final PrintStream err = System.err;
+    /** Why config.toml couldn't be read, for a lenient context (doctor); otherwise always null. */
+    final String configError;
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
+        this(env, refresh, offline, out, false);
+    }
+
+    private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out, boolean lenient) {
         this.env = env;
         this.out = out;
         this.home = JkitHome.fromEnv(env);
         this.platform = Platform.current();
-        this.config = Config.load(home, env);
+        Config loaded;
+        String error = null;
+        try {
+            loaded = Config.load(home, env);
+        } catch (dev.jkit.model.JkitException e) {
+            if (!lenient) {
+                throw e;
+            }
+            error = e.getMessage();
+            loaded = new Config("temurin", "graalvm-ce");
+        }
+        this.config = loaded;
+        this.configError = error;
         this.store = new Store(home);
         this.os = OsServices.current();
         this.http = new CachingHttp(new JdkHttp(env), home.index(), Duration.ofHours(24),
@@ -44,6 +62,14 @@ final class Context {
 
     static Context create(boolean refresh, boolean offline) {
         return new Context(System.getenv(), refresh, offline, System.out);
+    }
+
+    /**
+     * For doctor: never online, and a broken config.toml doesn't throw; it is recorded in
+     * {@link #configError} and the built-in defaults are used.
+     */
+    static Context lenient(Map<String, String> env, PrintStream out) {
+        return new Context(env, false, true, out, true);
     }
 
     /** For tests: a context over an explicit environment, never online. */
@@ -72,7 +98,7 @@ final class Context {
         return new Installer(home, http);
     }
 
-    private URI url(String variable, URI fallback) {
+    URI url(String variable, URI fallback) {
         String value = env.get(variable);
         return value == null || value.isBlank() ? fallback : URI.create(value);
     }

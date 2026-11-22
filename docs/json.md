@@ -73,6 +73,94 @@ Never uses the network.
 
 `installed` holds JDKs, then Maven, then Gradle, each newest first.
 
+## `jkit status --json`
+
+Never uses the network. Reads the project file found from the working directory (see
+[project-files.md](project-files.md)).
+
+```json
+{
+  "schemaVersion": 1,
+  "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
+  "projectError": null,
+  "tools": [
+    {
+      "tool": "jdk",
+      "source": "global",
+      "home": "/home/me/.jkit/global/jdk",
+      "installed": { "tool": "jdk", "id": "17.0.13+11-zulu", "...": "the install object" },
+      "version": "17.0.13+11",
+      "pin": { "version": "21", "vendor": null, "fx": false },
+      "pinInstalled": { "tool": "jdk", "id": "21.0.9+10-temurin", "...": "the install object" },
+      "wanted": { "source": "project", "home": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin" },
+      "global": { "target": "/home/me/.jkit/tools/jdk/17.0.13+11-zulu", "missing": false },
+      "matches": false,
+      "hint": "jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit use jdk@21.0.9+10 temurin"
+    }
+  ]
+}
+```
+
+- `tools` always has `jdk`, `maven`, `gradle`, `graalvm`, in that order.
+- `source` is what this shell has: `shell` (`jkit use`), `project`, `global`, `outside` (a
+  `*_HOME` jkit didn't set), `stale` (a jkit install nothing chooses any more) or `none`.
+- `wanted.source` is what jkit would pick (shell, then project, then global, else `none`);
+  `wanted.home` is null when nothing is picked or a pin has no matching install.
+- `home` is the tool's `*_HOME` as set in this environment. `installed` is null when it isn't a
+  jkit install; `version` then comes from a JDK's `release` file when it has one.
+- `pin` and `pinInstalled` are null without a project pin. `global` is null without a global link.
+- `project` is null without a project file. `projectError` is the error message when the
+  file can't be read.
+- `matches` is true when `source` is what jkit would pick; `hint` says what to do when it isn't.
+
+## `jkit env [--global] [--dir <path>] --json`
+
+Never uses the network. The environment for a new process in `dir`: global links,
+overridden by the project's pins (shell choices don't count).
+
+```json
+{
+  "schemaVersion": 1,
+  "dir": "/home/me/src/app",
+  "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
+  "variables": {
+    "JAVA_HOME": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin",
+    "MAVEN_HOME": "/home/me/.jkit/global/maven"
+  },
+  "pathPrepend": ["/home/me/.jkit/tools/jdk/21.0.9+10-temurin/bin", "/home/me/.jkit/global/maven/bin"],
+  "path": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin/bin:/home/me/.jkit/global/maven/bin:/usr/bin",
+  "pathSeparator": ":"
+}
+```
+
+- `variables` holds only the `*_HOME` variables of tools that are chosen; others are left out,
+  not unset. `GRAALVM_HOME` follows a GraalVM JDK when no GraalVM is chosen.
+- `pathPrepend` is what to put first on PATH; `path` is the whole PATH jkit would set (the
+  current PATH with old jkit install folders removed).
+- A pin with no matching install is an error document with exit code 3.
+
+## `jkit doctor [--network] --json`
+
+Exit code 1 when any check has level `fail`, 0 otherwise; the document is printed either way.
+
+```json
+{
+  "schemaVersion": 1,
+  "checks": [
+    { "id": "home", "level": "ok", "message": "jkit 0.2.1, linux-x64, home ~/.jkit", "fix": null },
+    { "id": "links", "level": "fail", "message": "global maven → ~/.jkit/tools/maven/3.9.6, which no longer exists",
+      "fix": "jkit use maven@3.9.11 --global, or remove the link: rm ~/.jkit/global/maven" }
+  ],
+  "summary": { "ok": 9, "info": 2, "warn": 0, "fail": 1 }
+}
+```
+
+- `level` is `ok`, `info`, `warn` or `fail`; `fix` is null when there is nothing to do.
+- A check can report several lines (one per broken link, say). The ids are stable:
+  `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `store`,
+  `project`, `index`, `java-runs`, and `network` (only with `--network`).
+- Messages and fixes are for people and may change; filter on `id` and `level`.
+
 ## `jkit search <tool>[@version] [vendor] --json`
 
 ```json

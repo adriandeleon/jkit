@@ -62,6 +62,38 @@ public final class ShellEnv {
         return out;
     }
 
+    /**
+     * Variables for a new process (jkit env): each chosen tool's *_HOME, GRAALVM_HOME following a
+     * GraalVM JDK when no GraalVM is chosen, and PATH with the chosen bin folders first. Unlike
+     * {@link #use}, it records no shell state and leaves tools that aren't chosen alone.
+     */
+    public static Map<String, String> fresh(Map<String, String> env, JkitHome home, Map<Tool, Path> homes,
+                                            boolean jdkIsGraalVm) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Tool t : Tool.values()) {
+            if (homes.containsKey(t)) {
+                out.put(t.homeVariable(), homes.get(t).toString());
+            }
+        }
+        if (jdkIsGraalVm && homes.containsKey(Tool.JDK) && !homes.containsKey(Tool.GRAALVM)) {
+            out.put(Tool.GRAALVM.homeVariable(), homes.get(Tool.JDK).toString());
+        }
+        String tools = home.toolsRoot().toString();
+        List<String> entries = new ArrayList<>();
+        for (Tool t : Tool.values()) {
+            if (t.onPath() && homes.containsKey(t)) {
+                entries.add(homes.get(t).resolve("bin").toString());
+            }
+        }
+        for (String entry : env.getOrDefault("PATH", "").split(File.pathSeparator)) {
+            if (!entry.isEmpty() && !entry.startsWith(tools) && !entries.contains(entry)) {
+                entries.add(entry);
+            }
+        }
+        out.put("PATH", String.join(File.pathSeparator, entries));
+        return out;
+    }
+
     private static Map<Tool, String> active(Map<String, String> env) {
         Map<Tool, String> active = new EnumMap<>(Tool.class);
         for (Tool t : Tool.values()) {

@@ -66,4 +66,24 @@ class ShellEnvTest {
         assertThat(ShellEnv.format(changes, "fish")).startsWith("set -gx JAVA_HOME ");
         assertThat(ShellEnv.format(changes, "pwsh")).startsWith("$env:JAVA_HOME = ");
     }
+
+    @Test
+    void freshPutsChosenBinsFirstAndDropsOldJkitEntries() {
+        Path maven = Path.of("/h/.jkit/global/maven");
+        Map<String, String> env = Map.of("PATH", path("/h/.jkit/global/maven/bin", jdk17 + "/bin", "/usr/bin"));
+        Map<String, String> vars = ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk21, Tool.MAVEN, maven), false);
+        assertThat(vars.keySet()).containsExactly("JAVA_HOME", "MAVEN_HOME", "PATH");
+        assertThat(vars.get("JAVA_HOME")).isEqualTo(jdk21.toString());
+        assertThat(vars.get("PATH")).isEqualTo(path(jdk21 + "/bin", "/h/.jkit/global/maven/bin", "/usr/bin"));
+        assertThat(vars).doesNotContainKey(ShellEnv.stateVariable(Tool.JDK));
+    }
+
+    @Test
+    void freshGraalVmFollowsAGraalVmJdkUnlessOneIsChosen() {
+        Map<String, String> env = Map.of("PATH", "/usr/bin");
+        assertThat(ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk21), true)).containsEntry("GRAALVM_HOME", jdk21.toString());
+        assertThat(ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk21), false)).doesNotContainKey("GRAALVM_HOME");
+        assertThat(ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk21, Tool.GRAALVM, jdk17), true))
+                .containsEntry("GRAALVM_HOME", jdk17.toString());
+    }
 }
