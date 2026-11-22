@@ -139,6 +139,28 @@ overridden by the project's pins (shell choices don't count).
   current PATH with old jkit install folders removed).
 - A pin with no matching install is an error document with exit code 3.
 
+## `jkit doctor [--network] --json`
+
+Exit code 1 when any check has level `fail`, 0 otherwise; the document is printed either way.
+
+```json
+{
+  "schemaVersion": 1,
+  "checks": [
+    { "id": "home", "level": "ok", "message": "jkit 0.2.1, linux-x64, home ~/.jkit", "fix": null },
+    { "id": "links", "level": "fail", "message": "global maven → ~/.jkit/tools/maven/3.9.6, which no longer exists",
+      "fix": "jkit use maven@3.9.11 --global, or remove the link: rm ~/.jkit/global/maven" }
+  ],
+  "summary": { "ok": 9, "info": 2, "warn": 0, "fail": 1 }
+}
+```
+
+- `level` is `ok`, `info`, `warn` or `fail`; `fix` is null when there is nothing to do.
+- A check can report several lines (one per broken link, say). The ids are stable:
+  `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `store`,
+  `project`, `index`, `java-runs`, and `network` (only with `--network`).
+- Messages and fixes are for people and may change; filter on `id` and `level`.
+
 ## `jkit search <tool>[@version] [vendor] --json`
 
 ```json

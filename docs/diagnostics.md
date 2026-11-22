@@ -1,6 +1,6 @@
 # Diagnostics: status, env, doctor
 
-Status: `status` and `env` implemented; `doctor` not yet. Builds on project files (docs/project-files.md);
+Status: implemented (`status`, `env`, `doctor`). Builds on project files (docs/project-files.md);
 phase 1 of that (reading `jkit.toml` and friends) is all these commands need.
 
 ## Goal
@@ -192,3 +192,7 @@ have proved safe.
 
 Until `jkit sync` exists (project files phase 2), status suggests `jkit install …` for a
 pin with no matching install, and `jkit use …` for one that isn't applied.
+
+Left out of the first version of doctor: telling which `jkit` the hook calls (it reports
+every distinct `jkit` on PATH instead), and the "auto-switch is off" note, which waits for
+project files phase 3.

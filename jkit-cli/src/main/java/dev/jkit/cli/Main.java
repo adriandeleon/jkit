@@ -17,6 +17,7 @@ import picocli.CommandLine.Command;
             ListCommand.class,
             StatusCommand.class,
             EnvCommand.class,
+            DoctorCommand.class,
             RemoveCommand.class,
             HookCommand.class,
             CompletionCommand.class,
