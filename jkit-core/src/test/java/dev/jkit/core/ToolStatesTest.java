@@ -189,6 +189,6 @@ class ToolStatesTest {
         ToolStates.Result result = read();
         assertThat(result.projectError()).contains("invalid TOML");
         assertThat(result.project()).isEmpty();
-        assertThat(result.tools()).hasSize(4);
+        assertThat(result.tools()).hasSize(5);
     }
 }

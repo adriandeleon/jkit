@@ -11,8 +11,8 @@ class CompletionTest {
     void scriptCoversCommandsToolsAndVendors() {
         String script = CompletionCommand.script(new CommandLine(new Main()));
         assertThat(script).contains("complete -F _complete_jkit -o default jkit")
-                .contains("search install upgrade use reset list status env doctor remove hook completion copyright help")
-                .contains("\"jdk\" \"maven\" \"gradle\" \"graalvm\"")
+                .contains("search install upgrade use reset list status env exec doctor remove hook completion copyright help")
+                .contains("\"jdk\" \"maven\" \"gradle\" \"sbt\" \"graalvm\"")
                 .contains("\"temurin\" \"corretto\" \"zulu\"")
                 .contains("--global");
     }

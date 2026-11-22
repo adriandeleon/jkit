@@ -12,6 +12,7 @@ import dev.jkit.sources.GradleSource;
 import dev.jkit.sources.Http;
 import dev.jkit.sources.JdkHttp;
 import dev.jkit.sources.MavenSource;
+import dev.jkit.sources.SbtSource;
 import java.io.PrintStream;
 import java.net.URI;
 import java.time.Clock;
@@ -130,6 +131,12 @@ final class Context {
 
     MavenSource maven() {
         return new MavenSource(http, url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE));
+    }
+
+    /** Versions from the Maven repository; zips from JKIT_SOURCES_SBT_URL (the sbt GitHub releases). */
+    SbtSource sbt() {
+        return new SbtSource(http, url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE),
+                url("JKIT_SOURCES_SBT_URL", SbtSource.DEFAULT_DOWNLOADS));
     }
 
     Installer installer() {

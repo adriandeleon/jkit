@@ -41,6 +41,7 @@ public final class SdkmanIds {
             case "java" -> Tool.JDK;
             case "maven" -> Tool.MAVEN;
             case "gradle" -> Tool.GRADLE;
+            case "sbt" -> Tool.SBT;
             default -> null;
         };
     }

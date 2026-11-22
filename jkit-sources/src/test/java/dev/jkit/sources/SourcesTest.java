@@ -185,4 +185,55 @@ class SourcesTest {
         assertThat(gradle.versions(false)).extracting(dev.jkit.model.Version::raw).containsExactly("8.10.2");
         assertThat(gradle.resolve("8", false).checksumAlgorithm()).isEqualTo("sha256");
     }
+
+    private static final String SBT_METADATA = """
+            <metadata><versioning><versions>
+              <version>0.99.4</version><version>1.2.8</version><version>1.3.0-M5-94d5ec</version>
+              <version>1.3.0</version><version>1.10.7</version><version>1.12.0-M1</version>
+              <version>2.0-RC3</version><version>2.1.0-RC1</version><version>2.1.0</version>
+            </versions></versioning></metadata>""";
+
+    @Test
+    void sbtListsReleasesWithZipsNewestFirst() throws IOException {
+        SbtSource sbt = new SbtSource(fake(Map.of("org/scala-sbt/sbt/maven-metadata.xml", SBT_METADATA)),
+                MavenSource.DEFAULT_BASE, SbtSource.DEFAULT_DOWNLOADS);
+        assertThat(sbt.versions(false)).extracting(dev.jkit.model.Version::raw)
+                .containsExactly("2.1.0", "1.10.7", "1.3.0");
+        assertThat(sbt.versions(true)).extracting(dev.jkit.model.Version::raw)
+                .containsExactly("2.1.0", "2.1.0-RC1", "1.10.7", "1.3.0");
+    }
+
+    @Test
+    void sbtResolvesTheGitHubZipAndItsSha256() throws IOException {
+        String hash = "4f97451fa04c6ff94f00128382daac2703886611f09a5ad7e22f30789797cb59";
+        SbtSource sbt = new SbtSource(fake(Map.of(
+                "org/scala-sbt/sbt/maven-metadata.xml", SBT_METADATA,
+                "v1.10.7/sbt-1.10.7.zip.sha256", hash + "  sbt-1.10.7.zip\n")),
+                MavenSource.DEFAULT_BASE, SbtSource.DEFAULT_DOWNLOADS);
+        Artifact a = sbt.resolve("1", false);
+        assertThat(a.tool()).isEqualTo(Tool.SBT);
+        assertThat(a.url()).hasToString("https://github.com/sbt/sbt/releases/download/v1.10.7/sbt-1.10.7.zip");
+        assertThat(a.fileName()).isEqualTo("sbt-1.10.7.zip");
+        assertThat(a.checksumAlgorithm()).isEqualTo("sha256");
+        assertThat(a.checksum()).isEqualTo(hash);
+    }
+
+    @Test
+    void sbtWithoutAChecksumFileIsUnverifiedNotAnError() throws IOException {
+        SbtSource sbt = new SbtSource(fake(Map.of("org/scala-sbt/sbt/maven-metadata.xml", SBT_METADATA)),
+                MavenSource.DEFAULT_BASE, SbtSource.DEFAULT_DOWNLOADS);
+        Artifact a = sbt.resolve("1.3", false);
+        assertThat(a.version().raw()).isEqualTo("1.3.0");
+        assertThat(a.checksum()).isNull();
+    }
+
+    @Test
+    void sbtSaysWhenOnlyAPreReleaseMatchesOrTheVersionIsTooOld() {
+        SbtSource sbt = new SbtSource(fake(Map.of("org/scala-sbt/sbt/maven-metadata.xml", SBT_METADATA)),
+                MavenSource.DEFAULT_BASE, SbtSource.DEFAULT_DOWNLOADS);
+        assertThatThrownBy(() -> sbt.resolve("2.1.0-RC1", false))
+                .isInstanceOf(JkitException.class).hasMessageContaining("only pre-releases");
+        assertThatThrownBy(() -> sbt.resolve("1.2", false))
+                .isInstanceOf(JkitException.class).hasMessageContaining("no sbt release matches 1.2");
+    }
 }

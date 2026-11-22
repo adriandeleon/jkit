@@ -7,6 +7,7 @@ public enum Tool {
     JDK("jdk", "JAVA_HOME", "jdk", true),
     MAVEN("maven", "MAVEN_HOME", "maven", false),
     GRADLE("gradle", "GRADLE_HOME", "gradle", false),
+    SBT("sbt", "SBT_HOME", "sbt", false),
     /** Sets only GRAALVM_HOME; shares installs with {@link #JDK}. */
     GRAALVM("graalvm", "GRAALVM_HOME", "jdk", true);
 
@@ -42,9 +43,10 @@ public enum Tool {
             case "jdk", "java" -> JDK;
             case "maven", "mvn" -> MAVEN;
             case "gradle" -> GRADLE;
+            case "sbt" -> SBT;
             case "graalvm" -> GRAALVM;
             default -> throw new JkitException(
-                    "unknown tool '" + text + "'", "tools: jdk, maven, gradle, graalvm");
+                    "unknown tool '" + text + "'", "tools: jdk, maven, gradle, sbt, graalvm");
         };
     }
 

@@ -164,7 +164,7 @@ public final class ProjectFile {
                 try {
                     tool = Tool.parse(key);
                 } catch (JkitException e) {
-                    warnings.add(where + ": unknown tool '" + key + "', skipped (tools: jdk, maven, gradle, graalvm)");
+                    warnings.add(where + ": unknown tool '" + key + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
                     continue;
                 }
                 if (keyFor.containsKey(tool)) {

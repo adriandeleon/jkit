@@ -5,7 +5,8 @@ document on stdout**, also when it fails. Progress, download bars and messages g
 program can read stdout whole and show stderr lines as progress.
 
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
-`remove`. (`reset` and `hook` only make sense in a shell.) `--help` and `--version` with `--json`
+`remove`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout belongs to the command
+it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
 print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
 ## Versioning
@@ -52,12 +53,12 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
 }
 ```
 
-- `tool` is the store tool: `jdk` (GraalVM builds too, marked `graalvm: true`), `maven` or `gradle`.
+- `tool` is the store tool: `jdk` (GraalVM builds too, marked `graalvm: true`), `maven`, `gradle` or `sbt`.
 - `id` is the install folder's name under `tools/<tool>/`.
 - `major` is the feature release: 21 for `21.0.9+10`, 8 for `1.8.0_472`, 3 for Maven `3.9.11`.
-- `vendor` is null for Maven and Gradle.
-- `home` is the folder to use as `JAVA_HOME`, `MAVEN_HOME` or `GRADLE_HOME`.
-- `global` lists the slots (`jdk`, `graalvm`, `maven`, `gradle`) whose global link points here;
+- `vendor` is null for Maven, Gradle and sbt.
+- `home` is the folder to use as `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME` or `SBT_HOME`.
+- `global` lists the slots (`jdk`, `graalvm`, `maven`, `gradle`, `sbt`) whose global link points here;
   `activeInShell` the slots the calling shell's hook points here.
 
 ## `jkit list --json`
@@ -68,12 +69,12 @@ Never uses the network.
 {
   "schemaVersion": 1,
   "home": "/home/me/.jkit",
-  "global": { "jdk": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin", "maven": null, "gradle": null, "graalvm": null },
+  "global": { "jdk": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin", "maven": null, "gradle": null, "sbt": null, "graalvm": null },
   "installed": [ { "tool": "jdk", "id": "21.0.9+10-temurin", "...": "the install object" } ]
 }
 ```
 
-`installed` holds JDKs, then Maven, then Gradle, each newest first.
+`installed` holds JDKs, then Maven, then Gradle, then sbt, each newest first.
 
 ## `jkit status --json`
 
@@ -103,7 +104,7 @@ Never uses the network. Reads the project file found from the working directory 
 }
 ```
 
-- `tools` always has `jdk`, `maven`, `gradle`, `graalvm`, in that order.
+- `tools` always has `jdk`, `maven`, `gradle`, `sbt`, `graalvm`, in that order.
 - `source` is what this shell has: `shell` (`jkit use`), `project`, `global`, `outside` (a
   `*_HOME` jkit didn't set), `stale` (a jkit install nothing chooses any more) or `none`.
 - `wanted.source` is what jkit would pick (shell, then project, then global, else `none`);
@@ -187,7 +188,7 @@ What `available` holds for a JDK (or `graalvm`):
 | `jdk@21` | the newest matching build of every vendor |
 | `jdk@21 zulu` | every matching build of that vendor |
 
-`vendor` is the default vendor, or the one typed (`vendorChosen: true`). For Maven and Gradle,
+`vendor` is the default vendor, or the one typed (`vendorChosen: true`). For Maven, Gradle and sbt,
 `available` holds every matching version (`tool`, `version`, `major`, `preRelease`, `installed`), and
 `majors` is empty. Newest first. `--maintained`, `--pre` and `--fx` filter as they do for text output.
 
@@ -214,7 +215,7 @@ prints a line for each change under its own message, and with `--json` lists the
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
   is reported per entry, with `action` `add` or `remove`.
 
-`list`, `status`, `env`, `doctor` and `hook` never change anything.
+`list`, `status`, `env`, `exec`, `doctor` and `hook` never change anything.
 
 ## `jkit install <tool>@<version> [vendor] --json`
 

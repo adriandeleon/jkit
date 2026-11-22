@@ -8,7 +8,7 @@ import picocli.CommandLine.Command;
         mixinStandardHelpOptions = true,
         scope = CommandLine.ScopeType.INHERIT, // --help and --version on every subcommand too
         versionProvider = VersionProvider.class,
-        description = "Installs and switches JDKs, Maven and Gradle.",
+        description = "Installs and switches JDKs, Maven, Gradle and sbt.",
         subcommands = {
             SearchCommand.class,
             InstallCommand.class,
@@ -18,6 +18,7 @@ import picocli.CommandLine.Command;
             ListCommand.class,
             StatusCommand.class,
             EnvCommand.class,
+            ExecCommand.class,
             DoctorCommand.class,
             RemoveCommand.class,
             HookCommand.class,
@@ -40,7 +41,10 @@ public final class Main implements Runnable {
     }
 
     static int run(String... args) {
-        boolean json = java.util.Arrays.asList(args).contains(JsonOut.FLAG);
+        // only jkit's own arguments: everything after -- belongs to the command jkit exec runs
+        java.util.List<String> all = java.util.Arrays.asList(args);
+        java.util.List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
+        boolean json = list.contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
             if (System.getenv("JKIT_DEBUG") != null) {
@@ -70,14 +74,13 @@ public final class Main implements Runnable {
             ex.getCommandLine().usage(System.err);
             return CommandLine.ExitCode.USAGE;
         });
-        java.util.List<String> list = java.util.Arrays.asList(args);
         if (json && (list.contains("-h") || list.contains("--help") || list.contains("help")
                 || list.contains("-V") || list.contains("--version"))) {
             // help and version under --json: still one JSON document on stdout. Parse errors print
             // their own error document through the handler above.
             java.io.StringWriter text = new java.io.StringWriter();
             cli.setOut(new java.io.PrintWriter(text, true));
-            int code = cli.execute(list.stream().filter(a -> !a.equals(JsonOut.FLAG)).toArray(String[]::new));
+            int code = cli.execute(all.stream().filter(a -> !a.equals(JsonOut.FLAG)).toArray(String[]::new));
             if (code == 0) {
                 java.util.Map<String, Object> doc = JsonOut.document();
                 doc.put(list.contains("-V") || list.contains("--version") ? "version" : "help", text.toString().strip());

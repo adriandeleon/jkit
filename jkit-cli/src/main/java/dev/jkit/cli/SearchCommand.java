@@ -27,7 +27,7 @@ final class SearchCommand implements Callable<Integer> {
     private static final String INSTALLED = " ●";
 
     @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class,
-            description = "jdk, maven, gradle or graalvm, optionally with a version prefix.")
+            description = "jdk, maven, gradle, sbt or graalvm, optionally with a version prefix.")
     ToolSpec spec;
 
     @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class, description = "JDK vendor, e.g. temurin.")
@@ -61,6 +61,7 @@ final class SearchCommand implements Callable<Integer> {
             case JDK, GRAALVM -> searchJdk(ctx);
             case MAVEN -> grouped(ctx, ctx.maven().versions(pre));
             case GRADLE -> grouped(ctx, ctx.gradle().versions(pre));
+            case SBT -> grouped(ctx, ctx.sbt().versions(pre));
         }
         // stdout is the table; what the lookup wrote to disk goes to stderr
         new Changes(ctx).disk().print(ctx.err);
@@ -71,7 +72,7 @@ final class SearchCommand implements Callable<Integer> {
      * {@code tool}, {@code defaultVendor} and {@code majors} (JDKs only: major, lts, maintained) and
      * {@code available}: for a JDK with no version, the newest build per vendor and major; with a
      * version and no vendor, the newest matching build per vendor; with a vendor, every matching
-     * build. For Maven and Gradle, every matching version. Newest first.
+     * build. For Maven, Gradle and sbt, every matching version. Newest first.
      */
     Map<String, Object> json(Context ctx) throws Exception {
         Map<String, Object> doc = JsonOut.document();

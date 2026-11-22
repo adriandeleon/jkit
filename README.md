@@ -1,6 +1,6 @@
 # jkit (prototype)
 
-Installs and switches JDKs from several vendors, Maven and Gradle. Single native binary,
+Installs and switches JDKs from several vendors, Maven, Gradle and sbt. Single native binary,
 built with Java 25, picocli and GraalVM native-image. See the design spec for the full plan.
 
 Website: <https://jkit-project.dev>
@@ -59,6 +59,7 @@ jkit install jdk@21                      # default vendor (temurin)
 jkit install jdk@17 zulu
 jkit use jdk@21 --global
 jkit use jdk@17 zulu                     # this shell only
+jkit exec jdk@17 zulu -- java -version   # one command, no hook needed
 jkit install graalvm@25 && jkit use graalvm@25   # sets GRAALVM_HOME only
 jkit list
 jkit upgrade --dry-run                   # newest build within each installed major (21.0.5 → 21.0.9)
@@ -69,7 +70,7 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, status, env, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 `status` shows which version of each tool is active here and where it comes from (this shell, a
 project file, the global default, or something set outside jkit), with a hint when that isn't what
@@ -78,9 +79,12 @@ without the hook (`eval "$(jkit env)"`). `doctor` checks the setup (shell hook, 
 set outside jkit, broken links, leftovers, whether the active JDK runs; `--network` for the
 sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) are
 read by status and env, but shells don't switch to them on their own yet: see [docs/project-files.md](docs/project-files.md).
+`exec` runs one command with the versions jkit picks (`jkit exec jdk@17 -- mvn test`), with no
+shell hook: for scripts, CI and AI agents, whose commands each start a new shell; see
+[docs/agents.md](docs/agents.md).
 `--json` on list, status, env, doctor, search, install, upgrade, use and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
-Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
+Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
@@ -92,7 +96,7 @@ Windows and Homebrew.
 | Module | Contents |
 | --- | --- |
 | `jkit-model` | ToolSpec, Version, Vendor, Platform; no I/O |
-| `jkit-sources` | Http (+ cache), foojay, Gradle and Maven Central clients |
+| `jkit-sources` | Http (+ cache), foojay, Gradle, Maven Central and sbt clients |
 | `jkit-core` | Store, Installer, Archives, Config, ShellEnv |
 | `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
 | `jkit-cli` | picocli commands and the native binary |

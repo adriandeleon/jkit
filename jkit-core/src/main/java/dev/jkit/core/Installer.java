@@ -141,6 +141,7 @@ public final class Installer {
             case JDK, GRAALVM -> List.of("java", "java.exe");
             case MAVEN -> List.of("mvn", "mvn.cmd");
             case GRADLE -> List.of("gradle", "gradle.bat");
+            case SBT -> List.of("sbt", "sbt.bat");
         };
         for (String name : names) {
             if (Files.isRegularFile(toolHome.resolve("bin").resolve(name))) {
