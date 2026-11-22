@@ -138,7 +138,7 @@ final class EnvCommand implements Callable<Integer> {
         return new Result(dir, states.project(), homes, variables);
     }
 
-    private static boolean isGraalVm(Context ctx, Path jdkHome) throws Exception {
+    static boolean isGraalVm(Context ctx, Path jdkHome) throws Exception {
         if (jdkHome == null) {
             return false;
         }
