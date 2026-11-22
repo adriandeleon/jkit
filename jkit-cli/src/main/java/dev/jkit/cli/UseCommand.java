@@ -52,7 +52,8 @@ final class UseCommand implements Callable<Integer> {
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active, so this shell can't be changed",
                     "add to ~/.bashrc:  eval \"$(jkit hook bash)\"",
-                    "or set the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText) + " --global");
+                    "or set the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText) + " --global",
+                    "or run one command with it: jkit exec " + spec + (vendorText == null ? "" : " " + vendorText) + " -- <command>");
         }
         boolean graalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
         Map<String, String> changes = ShellEnv.use(ctx.env, ctx.home, tool, chosen.home(), graalVm);

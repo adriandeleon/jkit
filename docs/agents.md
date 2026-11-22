@@ -1,0 +1,67 @@
+# Using jkit from an AI agent or script
+
+jkit is built to be driven by programs, including LLM agents (Claude Code, Codex, Cursor,
+Aider, …) and CI. The rules an agent needs:
+
+- **Each agent command runs in a new shell**, so `jkit use` without `--global` can't stick (it
+  needs the shell hook, and the next command would lose it anyway). Run things through
+  **`jkit exec`** instead.
+- **Nothing asks a question.** No command prompts or reads stdin; the download progress bar is off
+  when stderr isn't a terminal.
+- **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use` and
+  `remove` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
+  list of commands to try. Shapes: [json.md](json.md).
+- **Exit codes** are stable: `0` ok, `1` failure, `2` bad arguments, `3` the version isn't
+  installed. `jkit exec` passes the command's own exit code through.
+- **Every change is reported**: folders created or deleted, links set, variables changed
+  (`changes` in JSON). `list`, `status`, `env`, `doctor` and `exec` change nothing in jkit's home.
+
+## `jkit exec`
+
+```bash
+jkit exec -- mvn test                        # the project's versions (jkit.toml, .sdkmanrc, …), else global
+jkit exec jdk@17 -- java -version            # newest installed JDK 17 from the default vendor
+jkit exec jdk@21 zulu maven@3.9 -- mvn -v    # several tools; a vendor follows its tool
+jkit exec --dir ../other-app -- ./gradlew build
+jkit exec --global -- java -version          # ignore project files
+```
+
+It sets `JAVA_HOME` (and `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME`, `GRAALVM_HOME` as chosen), puts
+those tools' `bin` folders first on `PATH`, runs the command in that environment and exits with
+its exit code. It never uses the network and never installs anything: a version that isn't
+installed exits `3` with the `jkit install …` command to run. jkit's own errors go to stderr as
+`error: …` followed by indented hints.
+
+`--` is required; everything after it belongs to the command, so `jkit exec -- mvn --help`
+shows Maven's help.
+
+## A typical agent loop
+
+```bash
+jkit status --json            # what is active here, and what the project file wants
+jkit install jdk@21           # only if needed; reports what it created
+jkit exec -- mvn -q verify    # build with the project's versions
+```
+
+To find versions: `jkit search jdk@21 --json` (online, cached 24 h; `--offline` uses the
+cache only). To check the setup when something looks wrong: `jkit doctor --json`.
+
+## Instructions to give the agent
+
+Paste this into the project's `AGENTS.md`, `CLAUDE.md` or equivalent:
+
+```markdown
+## Java toolchain (jkit)
+
+This machine manages JDKs, Maven, Gradle and sbt with jkit. Each of your shell commands starts
+a new shell, so don't use `jkit use` (without `--global`) or `eval "$(jkit env)"` to switch
+versions; prefix commands with `jkit exec` instead:
+
+- Build with the project's versions: `jkit exec -- mvn verify` (or `./gradlew build`, `sbt test`).
+- A specific version: `jkit exec jdk@17 -- java -version`; vendor after the tool: `jkit exec jdk@21 zulu -- …`.
+- What is active and what the project wants: `jkit status --json`. Installed builds: `jkit list --json`.
+- Exit code 3 means the version isn't installed; install it with `jkit install jdk@17` (downloads)
+  only if the user is fine with that.
+- Don't change the global default (`jkit use … --global`) or remove installs unless asked.
+- On failure, read the `error:` line and the hints under it on stderr (`--json`: `error.hints`).
+```

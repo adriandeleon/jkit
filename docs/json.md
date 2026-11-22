@@ -5,7 +5,8 @@ document on stdout**, also when it fails. Progress, download bars and messages g
 program can read stdout whole and show stderr lines as progress.
 
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
-`remove`. (`reset` and `hook` only make sense in a shell.) `--help` and `--version` with `--json`
+`remove`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout belongs to the command
+it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
 print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
 ## Versioning
@@ -214,7 +215,7 @@ prints a line for each change under its own message, and with `--json` lists the
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
   is reported per entry, with `action` `add` or `remove`.
 
-`list`, `status`, `env`, `doctor` and `hook` never change anything.
+`list`, `status`, `env`, `exec`, `doctor` and `hook` never change anything.
 
 ## `jkit install <tool>@<version> [vendor] --json`
 
