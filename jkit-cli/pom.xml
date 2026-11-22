@@ -83,7 +83,15 @@
   </build>
 
   <profiles>
-    <!-- mvn -Pnative package  (needs GRAALVM_HOME pointing at GraalVM 25) -->
+    <!--
+      mvn -Pnative package  (needs GRAALVM_HOME pointing at GraalVM 25)
+
+      Use package or verify with this profile, not install. On Oracle GraalVM the plugin makes a
+      base SBOM with cyclonedx-maven-plugin, which attaches target/base_sbom.json to the project as
+      an extra artifact; the plugin then embeds the SBOM in the binary and deletes that file. The
+      artifact stays attached, so install fails copying a file that's gone. The binary is fine.
+      <skipBaseSBOM>true</skipBaseSBOM> would avoid it, at the cost of a less detailed embedded SBOM.
+    -->
     <profile>
       <id>native</id>
       <build>

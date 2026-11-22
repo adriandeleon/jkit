@@ -23,14 +23,41 @@ final class WindowsOs implements OsServices {
         Path tmp = link.resolveSibling("." + link.getFileName() + ".new-" + ProcessHandle.current().pid()
                 + "-" + Long.toHexString(System.nanoTime()));
         mklink(tmp, target.toAbsolutePath());
-        try {
-            removeLink(link);
-            Files.move(tmp, link);
-        } catch (IOException e) {
-            Files.deleteIfExists(tmp);
-            throw e;
+        // A junction can't be renamed over another, so the swap is remove-then-move. Another jkit can
+        // recreate the link in between, and antivirus or the indexer can hold it briefly: retry, and if
+        // it still fails put the old link back, so a failed switch never leaves no global version.
+        Path old = readLink(link);
+        IOException last = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try {
+                removeLink(link);
+                Files.move(tmp, link);
+                Files.writeString(targetFile(link), target.toAbsolutePath().toString(), StandardCharsets.UTF_8);
+                return;
+            } catch (IOException e) {
+                last = e;
+                sleep(100L * attempt);
+            }
         }
-        Files.writeString(targetFile(link), target.toAbsolutePath().toString(), StandardCharsets.UTF_8);
+        Files.deleteIfExists(tmp);
+        if (old != null && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                mklink(link, old);
+                Files.writeString(targetFile(link), old.toString(), StandardCharsets.UTF_8);
+            } catch (IOException restore) {
+                last.addSuppressed(restore);
+            }
+        }
+        throw last;
+    }
+
+    private static void sleep(long millis) throws IOException {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted", e);
+        }
     }
 
     /**

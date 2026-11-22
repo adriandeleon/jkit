@@ -29,6 +29,7 @@ public final class GradleSource {
     }
 
     public Artifact resolve(String spec, boolean pre) throws IOException {
+        Http.requireSecure(base); // the index carries the checksum
         Release r = releases(pre).stream()
                 .filter(x -> x.version().matches(spec))
                 .findFirst()

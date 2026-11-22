@@ -22,7 +22,7 @@ final class CompletionCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         if (!shell.equals("bash") && !shell.equals("zsh")) {
-            throw new JkitException("no completion script for " + shell + " yet", "supported: bash, zsh");
+            throw new JkitException(CommandLine.ExitCode.USAGE, "no completion script for " + shell + " yet", "supported: bash, zsh");
         }
         System.out.print(script(spec.root().commandLine()));
         return 0;

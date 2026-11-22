@@ -63,6 +63,16 @@ class SourcesTest {
     }
 
     @Test
+    void muslPlatformResolvesMuslBuilds() throws IOException {
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/c", INFO)),
+                FoojaySource.DEFAULT_BASE);
+        Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64_MUSL, false, false);
+        assertThat(a.version().raw()).isEqualTo("21.0.13+9");
+        assertThat(Platform.LINUX_X64.withMusl()).isEqualTo(Platform.LINUX_X64_MUSL);
+        assertThat(Platform.LINUX_X64_MUSL.libc()).isEqualTo("musl");
+    }
+
+    @Test
     void noMatchNamesVendorsThatHaveTheMajor() {
         String index = "{\"result\":[" + pkg("z", "zulu", 22, "22.0.2+9", "glibc", "") + "]}";
         FoojaySource foojay = new FoojaySource(fake(Map.of(
@@ -103,10 +113,10 @@ class SourcesTest {
         String metadata = "<metadata><versioning><versions><version>3.9.11</version>"
                 + "<version>4.0.0-rc-7</version></versions></versioning></metadata>";
         MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata,
-                ".sha512", "deadbeef  apache-maven-3.9.11-bin.zip")), MavenSource.DEFAULT_BASE);
+                ".sha512", "d".repeat(128) + "  apache-maven-3.9.11-bin.zip")), MavenSource.DEFAULT_BASE);
         Artifact a = maven.resolve(null, false);
         assertThat(a.version().raw()).isEqualTo("3.9.11");
-        assertThat(a.checksum()).isEqualTo("deadbeef");
+        assertThat(a.checksum()).isEqualTo("d".repeat(128));
         assertThatThrownBy(() -> maven.resolve("4", false))
                 .hasMessageContaining("only pre-releases match maven@4: 4.0.0-rc-7");
     }
@@ -120,6 +130,23 @@ class SourcesTest {
         Artifact a = maven.resolve("3.8.8", false);
         assertThat(a.checksumAlgorithm()).isEqualTo("sha1");
         assertThat(a.checksum()).isEqualTo(sha1);
+    }
+
+    @Test
+    void newMavenDoesNotFallBackToSha1() {
+        // 3.9.1+ publishes .sha512; a mirror that lacks it must not downgrade the check to sha1
+        String metadata = "<metadata><versioning><versions><version>3.9.11</version></versions></versioning></metadata>";
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata,
+                "apache-maven-3.9.11-bin.zip.sha1", "a".repeat(40))), MavenSource.DEFAULT_BASE);
+        assertThatThrownBy(() -> maven.resolve("3.9.11", false)).hasMessageContaining("no .sha512");
+    }
+
+    @Test
+    void mavenMirrorOverPlainHttpIsRefused() {
+        String metadata = "<metadata><versioning><versions><version>3.9.11</version></versions></versioning></metadata>";
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata,
+                ".sha512", "b".repeat(128))), URI.create("http://nexus.example/maven2/"));
+        assertThatThrownBy(() -> maven.resolve("3.9.11", false)).hasMessageContaining("refusing to download over http");
     }
 
     @Test
@@ -149,6 +176,17 @@ class SourcesTest {
         assertThat(bsd).isEqualTo(new Checksum("md5", md5));
         Checksum many = Checksum.parse("e".repeat(64) + "  other.zip\n" + "f".repeat(64) + "  b.tar.gz\n", "b.tar.gz", null);
         assertThat(many.hash()).isEqualTo("f".repeat(64));
+        assertThat(Checksum.parse("f".repeat(64) + "\n", "b.tar.gz", null).hash()).isEqualTo("f".repeat(64));
+    }
+
+    @Test
+    void checksumFileWithoutAUsableHashIsAnError() {
+        // a proxy's plain-text block page must not turn into "no checksum, install unverified"
+        assertThatThrownBy(() -> Checksum.parse("Access denied by cafe proxy\n", "b.tar.gz", "sha256"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("holds no checksum");
+        // a list of other files' hashes: the first one would only fail later as a confusing mismatch
+        assertThatThrownBy(() -> Checksum.parse("e".repeat(64) + "  other.zip\n", "b.tar.gz", null))
+                .isInstanceOf(JkitException.class).hasMessageContaining("doesn't list b.tar.gz");
     }
 
     @Test

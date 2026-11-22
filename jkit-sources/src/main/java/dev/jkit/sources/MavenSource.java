@@ -46,15 +46,19 @@ public final class MavenSource {
                 .findFirst()
                 .orElseThrow(() -> noMatch(spec, pre));
         String file = "apache-maven-" + v.raw() + "-bin.zip";
-        URI url = base.resolve(PATH + v.raw() + "/" + file);
-        Checksum checksum = checksum(url, file);
+        URI url = Http.requireSecure(base.resolve(PATH + v.raw() + "/" + file));
+        Checksum checksum = checksum(url, file, v);
         return new Artifact(Tool.MAVEN, v, null, url, file, "zip",
                 checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
     }
 
-    /** .sha512 exists from Maven 3.9.1 on; older releases have only .sha1 (and .md5). */
-    private Checksum checksum(URI url, String file) throws IOException {
-        for (String ext : new String[] {"sha512", "sha1"}) {
+    /**
+     * .sha512 exists from Maven 3.9.1 on, so a mirror without it is not allowed to fall back to sha1;
+     * older releases have only .sha1 (and .md5).
+     */
+    private Checksum checksum(URI url, String file, Version v) throws IOException {
+        boolean hasSha512 = v.compareTo(Version.parse("3.9.1")) >= 0;
+        for (String ext : hasSha512 ? new String[] {"sha512"} : new String[] {"sha512", "sha1"}) {
             try {
                 Checksum c = Checksum.parse(http.get(URI.create(url + "." + ext)), file, ext);
                 if (c != null) {
@@ -65,6 +69,10 @@ public final class MavenSource {
                     throw e;
                 }
             }
+        }
+        if (hasSha512) {
+            throw new JkitException("no .sha512 next to " + url,
+                    "Maven " + v + " publishes one; check the mirror (JKIT_SOURCES_MAVEN_URL)");
         }
         return null;
     }

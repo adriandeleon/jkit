@@ -68,7 +68,15 @@ final class SyncCommand implements Callable<Integer> {
             if (pin == null) {
                 continue;
             }
-            Step step = sync(ctx, pin, s.pinInstall(), report);
+            Step step;
+            try {
+                step = sync(ctx, pin, s.pinInstall(), report);
+            } catch (Exception e) {
+                // what earlier pins installed stays installed: say so before the error
+                report.disk();
+                report.print(say);
+                throw new PartialFailure(Errors.describe(e), report.json());
+            }
             steps.add(step);
             say.println(StatusCommand.pinText(pin) + ": " + switch (step.status()) {
                 case "already-installed" -> step.label() + " (installed)";

@@ -16,7 +16,12 @@ final class UnixOs implements OsServices {
                 + "-" + Long.toHexString(System.nanoTime()));
         // relative, so moving the jkit folder keeps the link valid
         Files.createSymbolicLink(tmp, link.getParent().toAbsolutePath().relativize(target.toAbsolutePath()));
-        Files.move(tmp, link, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.move(tmp, link, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            Files.deleteIfExists(tmp); // e.g. link is a real folder someone made: don't leave .jdk.new-… behind
+            throw e;
+        }
     }
 
     @Override

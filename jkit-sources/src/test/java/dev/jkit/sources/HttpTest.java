@@ -163,6 +163,36 @@ class HttpTest {
                 });
         assertThat(down.get(uri)).isEqualTo("{\"result\":[]}");
         assertThat(warnings).singleElement().asString().contains("30 h ago");
+
+        // a server outage and a captive portal fall back to the old copy too; a 404 doesn't
+        Http outage = new Http() {
+            @Override
+            public String get(URI u) throws IOException {
+                throw new HttpStatusException(503, u);
+            }
+
+            @Override
+            public void download(URI u, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        assertThat(new CachingHttp(outage, dir, Duration.ofHours(24), clock, false, false).get(uri))
+                .isEqualTo("{\"result\":[]}");
+        assertThat(new CachingHttp(answering("<html>log in</html>", false), dir, Duration.ofHours(24), clock,
+                false, false).get(uri)).isEqualTo("{\"result\":[]}");
+        Http missing = new Http() {
+            @Override
+            public String get(URI u) throws IOException {
+                throw new HttpStatusException(404, u);
+            }
+
+            @Override
+            public void download(URI u, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        assertThatThrownBy(() -> new CachingHttp(missing, dir, Duration.ofHours(24), clock, false, false).get(uri))
+                .isInstanceOf(HttpStatusException.class);
     }
 
     @Test

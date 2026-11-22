@@ -302,12 +302,13 @@ final class DoctorCommand implements Callable<Integer> {
                 continue; // jkit doesn't manage this tool in this shell
             }
             String command = COMMANDS.get(tool);
-            Path expected = s.current().resolve("bin").resolve(command);
+            // compare folders: on Windows the command is java.exe or mvn.cmd, not plain java or mvn
+            Path expectedBin = s.current().resolve("bin");
             List<Path> found = which(r.ctx, command);
             if (found.isEmpty()) {
                 r.warn("'" + command + "' isn't on PATH, though " + tool.homeVariable() + " is set by jkit",
                         "open a new shell; if that doesn't help, load the jkit hook after other PATH changes");
-            } else if (!sameFile(found.getFirst(), expected)) {
+            } else if (!sameFile(found.getFirst().getParent(), expectedBin)) {
                 r.warn("'" + command + "' on PATH is " + tilde(found.getFirst()) + ", not $" + tool.homeVariable()
                                 + "/bin/" + command,
                         "load the jkit hook after other PATH changes in your shell profile, or remove the other " + command);

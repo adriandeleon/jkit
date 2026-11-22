@@ -71,6 +71,24 @@ class RobustnessTest {
     }
 
     @Test
+    void configWithAByteOrderMarkIsRead() throws IOException {
+        // Notepad writes a UTF-8 BOM, PowerShell 5's Out-File writes UTF-16LE with one
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Files.createDirectories(home.root());
+        String toml = "[jdk]\nvendor = \"zulu\"\n";
+        byte[] utf8 = toml.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] withBom = new byte[utf8.length + 3];
+        withBom[0] = (byte) 0xef;
+        withBom[1] = (byte) 0xbb;
+        withBom[2] = (byte) 0xbf;
+        System.arraycopy(utf8, 0, withBom, 3, utf8.length);
+        Files.write(home.config(), withBom);
+        assertThat(Config.load(home, Map.of()).defaultVendor(dev.jkit.model.Tool.JDK).name()).isEqualTo("zulu");
+        Files.writeString(home.config(), "﻿" + toml, java.nio.charset.StandardCharsets.UTF_16LE);
+        assertThat(Config.load(home, Map.of()).defaultVendor(dev.jkit.model.Tool.JDK).name()).isEqualTo("zulu");
+    }
+
+    @Test
     void autoSwitchIsOffByDefaultAndReadFromConfigOrEnvironment() throws IOException {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Files.createDirectories(home.root());

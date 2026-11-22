@@ -48,9 +48,15 @@ final class JsonOut {
         out.flush();
     }
 
-    /** {@code {"schemaVersion": 1, "error": {"message", "hints", "exitCode"}}}. */
+    /**
+     * {@code {"schemaVersion": 1, "error": {"message", "hints", "exitCode"}}}, plus {@code changes}
+     * when the command had already changed something before it failed.
+     */
     static ObjectNode error(JkitException e, int exitCode) {
         ObjectNode doc = doc();
+        if (e instanceof PartialFailure partial && !partial.changes().isEmpty()) {
+            doc.set("changes", toNode(partial.changes()));
+        }
         ObjectNode error = doc.putObject("error");
         error.put("message", e.getMessage());
         ArrayNode hints = error.putArray("hints");

@@ -1,5 +1,6 @@
 package dev.jkit.sources;
 
+import dev.jkit.model.JkitException;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -10,10 +11,13 @@ import java.util.regex.Pattern;
  */
 public record Checksum(String algorithm, String hash) {
     private static final Pattern BSD = Pattern.compile("^([A-Za-z0-9-]+)\\s*\\((.*)\\)\\s*=\\s*([0-9a-fA-F]+)$");
-    private static final Pattern HEX = Pattern.compile("[0-9a-fA-F]+");
+    /** md5 is the shortest hash anyone publishes; shorter hex words ("cafe") are text, not hashes. */
+    private static final Pattern HEX = Pattern.compile("[0-9a-fA-F]{32,}");
 
     /**
-     * The hash for {@code fileName} in a checksum file, or null when there is none. The algorithm
+     * The hash for {@code fileName} in a checksum file: the line naming it, or the first hash when
+     * no line names a file. A file with no hash, or whose lines name only other files, is an error,
+     * never "no checksum": that would install unverified when a proxy answers with a text page. The algorithm
      * comes from the hash's length when it is unambiguous; else from the file (BSD), else
      * {@code declared} (what the source says), else sha256.
      */
@@ -21,6 +25,7 @@ public record Checksum(String algorithm, String hash) {
         String bsdAlgorithm = null;
         String hash = null;
         String firstHash = null;
+        boolean namesFiles = false;
         for (String raw : text.split("\\R")) {
             String line = raw.strip();
             if (line.isEmpty() || line.startsWith("#")) {
@@ -42,6 +47,7 @@ public record Checksum(String algorithm, String hash) {
             if (!HEX.matcher(lineHash).matches()) {
                 continue;
             }
+            namesFiles |= lineFile != null && !lineFile.isBlank();
             if (firstHash == null) {
                 firstHash = lineHash;
                 bsdAlgorithm = lineAlgorithm;
@@ -52,11 +58,15 @@ public record Checksum(String algorithm, String hash) {
                 break;
             }
         }
-        if (hash == null) {
-            hash = firstHash;
+        if (hash == null && firstHash == null) {
+            throw new JkitException("the checksum file for " + fileName + " holds no checksum",
+                    "a proxy or captive portal may have answered instead; try again on another network");
         }
         if (hash == null) {
-            return null;
+            if (namesFiles && fileName != null) {
+                throw new JkitException("the checksum file doesn't list " + fileName);
+            }
+            hash = firstHash;
         }
         return of(hash, bsdAlgorithm != null ? bsdAlgorithm : declared);
     }

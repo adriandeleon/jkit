@@ -255,8 +255,8 @@ public final class JdkHttp implements Http {
                 fetchOnce(uri, sink, progress);
                 return;
             } catch (HttpStatusException e) {
-                if (e.status() < 500) {
-                    throw e;
+                if (e.status() < 500 && e.status() != 429) {
+                    throw e; // 429: too many requests, worth the same backoff as a 5xx
                 }
                 last = e;
             } catch (NetworkException e) {

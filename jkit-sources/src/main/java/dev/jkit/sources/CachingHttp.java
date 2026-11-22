@@ -51,6 +51,20 @@ public final class CachingHttp implements Http {
         this.listener = listener;
     }
 
+    /** The cached copy, however old, when the server is down or unreachable; else {@code failure}. */
+    private String staleOr(Path file, URI uri, String why, Exception failure) throws IOException {
+        if (Files.isRegularFile(file)) {
+            Duration age = Duration.between(Files.getLastModifiedTime(file).toInstant(), clock.instant());
+            listener.stale(why + "; using the version list from "
+                    + (age.toHours() > 0 ? age.toHours() + " h" : age.toMinutes() + " min") + " ago");
+            return Files.readString(file);
+        }
+        if (failure instanceof IOException io) {
+            throw io;
+        }
+        throw (RuntimeException) failure;
+    }
+
     @Override
     public String get(URI uri) throws IOException {
         Path file = dir.resolve(key(uri) + ".cache");
@@ -69,18 +83,18 @@ public final class CachingHttp implements Http {
         try {
             body = delegate.get(uri);
         } catch (NetworkException e) {
-            if (Files.isRegularFile(file)) {
-                Duration age = Duration.between(Files.getLastModifiedTime(file).toInstant(), clock.instant());
-                listener.stale("couldn't reach " + uri.getHost() + " (" + e.getMessage() + "); using the version list from "
-                        + (age.toHours() > 0 ? age.toHours() + " h" : age.toMinutes() + " min") + " ago");
-                return Files.readString(file);
+            return staleOr(file, uri, "couldn't reach " + uri.getHost() + " (" + e.getMessage() + ")", e);
+        } catch (HttpStatusException e) {
+            if (e.status() < 500 && e.status() != 429) {
+                throw e; // 404 and friends are answers, not outages
             }
-            throw e;
+            return staleOr(file, uri, uri.getHost() + " answered " + e.status(), e);
         }
         if (looksLikeHtml(body)) {
             // a captive portal or proxy error page: don't keep it for a day
-            throw new dev.jkit.model.JkitException("got a web page instead of data from " + uri.getHost()
-                    + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again");
+            return staleOr(file, uri, "got a web page instead of data from " + uri.getHost(),
+                    new dev.jkit.model.JkitException("got a web page instead of data from " + uri.getHost()
+                            + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again"));
         }
         Files.createDirectories(dir);
         boolean created = !Files.exists(file);
