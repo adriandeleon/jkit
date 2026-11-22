@@ -47,8 +47,10 @@ final class InstallCommand implements Callable<Integer> {
         java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
+            Changes changes = new Changes(ctx).disk();
+            changes.print(say);
             if (json.json) {
-                printJson(ctx, "already-installed", null, artifact.version(), artifact.vendor(), artifact.fx());
+                printJson(ctx, "already-installed", null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             }
             return 0;
         }
@@ -57,12 +59,13 @@ final class InstallCommand implements Callable<Integer> {
         if (!result.verified()) {
             ctx.err.println("warning: " + UNVERIFIED);
         }
-        say.println("installed " + artifact.label() + " → " + result.installed().home());
+        Changes changes = installed(ctx, result).note("no environment variables changed");
+        say.println("installed " + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
+        changes.print(say);
         if (json.json) {
-            printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx());
+            printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
-        ctx.out.println("  no environment variables or config files changed");
         if (!Files.exists(ctx.home.global(spec.tool()))) {
             ctx.out.println("make it the default: jkit use " + spec.tool() + "@" + artifact.version()
                     + (vendor == null ? "" : " " + vendor) + " --global");
@@ -70,9 +73,21 @@ final class InstallCommand implements Callable<Integer> {
         return 0;
     }
 
-    /** {@code {schemaVersion, status: installed|already-installed, verified, installed: {…}}}. */
+    /** What an install changed on disk: the home if new, leftovers it cleared, the install folder, cached lists. */
+    static Changes installed(Context ctx, Installer.Result result) {
+        Changes changes = new Changes(ctx).disk();
+        for (java.nio.file.Path leftover : result.removedLeftovers()) {
+            changes.folder(leftover, false);
+        }
+        if (result.fresh()) {
+            changes.folder(result.installed().home(), true);
+        }
+        return changes;
+    }
+
+    /** {@code {schemaVersion, status: installed|already-installed, verified, installed: {…}, changes: […]}}. */
     private void printJson(Context ctx, String status, Boolean verified, dev.jkit.model.Version version,
-                           Vendor vendor, boolean fxBuild) throws Exception {
+                           Vendor vendor, boolean fxBuild, Changes changes) throws Exception {
         java.util.Map<String, Object> doc = JsonOut.document();
         doc.put("status", status);
         doc.put("verified", verified);
@@ -81,6 +96,7 @@ final class InstallCommand implements Callable<Integer> {
                 doc.put("installed", JsonOut.installed(ctx, i));
             }
         }
+        doc.put("changes", changes.json());
         ctx.out.println(JsonOut.write(doc));
     }
 }

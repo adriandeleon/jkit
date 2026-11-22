@@ -20,8 +20,11 @@ import java.util.stream.Stream;
  */
 public final class Installer {
 
-    /** {@code verified} is false when the source published no checksum, or only an md5 or sha1 one. */
-    public record Result(Installed installed, boolean fresh, boolean verified) { }
+    /**
+     * @param verified false when the source published no checksum, or only an md5 or sha1 one
+     * @param removedLeftovers tmp/ folders of interrupted installs that this install deleted
+     */
+    public record Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers) { }
 
     private final JkitHome home;
     private final Http http;
@@ -49,10 +52,10 @@ public final class Installer {
                     throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
                             "move or delete that folder, then install again");
                 }
-                return new Result(installed, false, Store.verified(dest));
+                return new Result(installed, false, Store.verified(dest), List.of());
             }
             Files.createDirectories(home.tmp());
-            removeLeftovers(home.tmp());
+            List<Path> removed = removeLeftovers(home.tmp());
             Path work = Files.createTempDirectory(home.tmp(), "install-");
             IOException failure = null;
             try {
@@ -71,7 +74,7 @@ public final class Installer {
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
                 Files.createDirectories(dest.getParent());
                 Files.move(toolHome, dest, StandardCopyOption.ATOMIC_MOVE);
-                return new Result(installed, true, verified);
+                return new Result(installed, true, verified, removed);
             } catch (IOException | RuntimeException e) {
                 if (e instanceof IOException io) {
                     failure = io;
@@ -91,12 +94,14 @@ public final class Installer {
     }
 
     /** Folders an interrupted install (Ctrl-C skips finally blocks) left; only called with the lock held. */
-    private static void removeLeftovers(Path tmp) {
+    private static List<Path> removeLeftovers(Path tmp) {
+        List<Path> removed = new java.util.ArrayList<>();
         try (Stream<Path> children = Files.list(tmp)) {
             for (Path child : children.toList()) {
                 if (child.getFileName().toString().startsWith("install-")) {
                     try {
                         Fs.deleteRecursively(child);
+                        removed.add(child);
                     } catch (IOException ignored) {
                         // doctor reports what is left
                     }
@@ -105,6 +110,7 @@ public final class Installer {
         } catch (IOException ignored) {
             // nothing to clean
         }
+        return List.copyOf(removed);
     }
 
     /** The source's file name, without any folder part; a fixed name if it has none. */

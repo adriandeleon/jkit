@@ -31,6 +31,15 @@ final class Context {
     final PrintStream err = System.err;
     /** Why config.toml couldn't be read, for a lenient context (doctor); otherwise always null. */
     final String configError;
+    /** Whether the jkit home existed when the command started, so a command can say it created it. */
+    final boolean homeExisted;
+    /** Set once a {@link Changes} has reported creating the home. */
+    boolean homeReported;
+    /** Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}. */
+    final java.util.List<CacheWrite> cacheWrites = new java.util.ArrayList<>();
+
+    /** One cached version list written: {@code created} false when it replaced an older copy. */
+    record CacheWrite(URI source, java.nio.file.Path file, boolean created) { }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
         this(env, refresh, offline, out, false);
@@ -40,6 +49,7 @@ final class Context {
         this.env = env;
         this.out = out;
         this.home = JkitHome.fromEnv(env);
+        this.homeExisted = java.nio.file.Files.exists(home.root());
         this.platform = Platform.current();
         Config loaded;
         String error = null;
@@ -59,7 +69,17 @@ final class Context {
         this.http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
                 Duration.ofHours(24), Clock.systemUTC(), refresh,
                 offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
-                message -> System.err.println("warning: " + message));
+                new CachingHttp.Listener() {
+                    @Override
+                    public void stored(URI uri, java.nio.file.Path file, boolean created) {
+                        cacheWrites.add(new CacheWrite(uri, file, created));
+                    }
+
+                    @Override
+                    public void stale(String message) {
+                        System.err.println("warning: " + message);
+                    }
+                });
     }
 
     static String userAgent() {

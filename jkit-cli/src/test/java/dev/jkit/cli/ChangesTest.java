@@ -87,4 +87,34 @@ class ChangesTest {
         String out = print(new Changes(ctx).globalEffect(Tool.GRAALVM));
         assertThat(out).doesNotContain("PATH includes").contains("the jkit hook is not loaded");
     }
+
+    @Test
+    void foldersAndCachedListsAreReported() throws Exception {
+        Path jkit = home.resolve("fresh");
+        Map<String, String> env = new HashMap<>(Map.of("JKIT_HOME", jkit.toString()));
+        Context ctx = Context.forEnv(env);
+        java.nio.file.Files.createDirectories(jkit); // the command made the home
+        Path install = jkit.resolve("tools/jdk/21.0.9+10-temurin");
+        ctx.cacheWrites.add(new Context.CacheWrite(java.net.URI.create("https://api.foojay.io/a"), jkit.resolve("index/a.cache"), true));
+        ctx.cacheWrites.add(new Context.CacheWrite(java.net.URI.create("https://api.foojay.io/b"), jkit.resolve("index/b.cache"), false));
+
+        Changes changes = new Changes(ctx).disk().folder(install, true);
+
+        assertThat(print(changes)).isEqualTo("""
+                  folder %s created
+                  folder %s created
+                  cache  %s: 1 file saved, 1 file refreshed from api.foojay.io
+                """.formatted(jkit, install, jkit.resolve("index")));
+        assertThat(changes.json().stream().map(c -> String.valueOf(((Map<?, ?>) c).get("kind"))).toList())
+                .containsExactly("folder", "file", "file", "folder");
+        // reported once: a second Changes has nothing left to say
+        assertThat(new Changes(ctx).disk().isEmpty()).isTrue();
+    }
+
+    @Test
+    void deletedFolderIsReported() {
+        Context ctx = context(Map.of());
+        Path gone = home.resolve("tools/jdk/17-zulu");
+        assertThat(print(new Changes(ctx).folder(gone, false))).isEqualTo("  folder " + gone + " deleted\n");
+    }
 }

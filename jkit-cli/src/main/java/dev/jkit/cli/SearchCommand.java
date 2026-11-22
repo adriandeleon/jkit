@@ -52,7 +52,9 @@ final class SearchCommand implements Callable<Integer> {
     public Integer call() throws Exception {
         Context ctx = options.context();
         if (jsonFlag.json) {
-            ctx.out.println(JsonOut.write(json(ctx)));
+            Map<String, Object> doc = json(ctx);
+            doc.put("changes", new Changes(ctx).disk().json());
+            ctx.out.println(JsonOut.write(doc));
             return 0;
         }
         switch (spec.tool()) {
@@ -60,6 +62,8 @@ final class SearchCommand implements Callable<Integer> {
             case MAVEN -> grouped(ctx, ctx.maven().versions(pre));
             case GRADLE -> grouped(ctx, ctx.gradle().versions(pre));
         }
+        // stdout is the table; what the lookup wrote to disk goes to stderr
+        new Changes(ctx).disk().print(ctx.err);
         return 0;
     }
 
