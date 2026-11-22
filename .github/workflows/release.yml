@@ -1,14 +1,20 @@
 name: Release
 
 # Push a tag like v0.1.0 to publish a release. Each platform builds the native binary and runs
-# the tests; Linux packages a .deb, an .rpm and a tar.gz, macOS (arm64 and x64) a signed,
-# notarized binary in a tar.gz. The release job attaches them all
-# with a SHA256SUMS file. A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the
-# Vitrina apt repository skips.
+# the tests, then packs it as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and
+# an .rpm, and the macOS binaries (arm64 and x64) are signed and notarized. The release job
+# attaches them all with a SHA256SUMS file, then the homebrew job updates the formula in
+# adriandeleon/homebrew-tap and the winget job opens a pull request on microsoft/winget-pkgs.
+# A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the Vitrina apt repository,
+# Homebrew and winget all skip.
+#
+# Run it by hand (Actions → Release → Run workflow) to build and test every platform without
+# publishing anything.
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,8 +46,17 @@ jobs:
             platform: macos-x64
             arch: x86_64
             profiles: native
+          # No windows-aarch64: GraalVM has no native-image for Windows on ARM, and winget
+          # installs this x64 build there instead, which runs under emulation.
+          - runner: windows-2025
+            platform: windows-x64
+            exe: .exe
+            profiles: native
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,7 +73,11 @@ jobs:
 
       - name: Set the version from the tag
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-dev.$GITHUB_RUN_NUMBER"   # a manual run publishes nothing
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
@@ -152,29 +171,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jkit=jkit-cli/target/jkit
-          "$jkit" --version | grep -Fx "jkit $VERSION"
+          jkit=jkit-cli/target/jkit${{ matrix.exe }}
+          python=$(command -v python3 || command -v python)
+          "$jkit" --version | tr -d '\r' | grep -Fx "jkit $VERSION"
           # run each command to completion first, so a crash fails the step (a pipe into head would hide it)
           out=$("$jkit" search jdk --maintained)
           printf '%s\n' "$out" | head -3
           # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
           for cmd in "list --json" "status --json" "env --json --global" "doctor --json" "search maven --json"; do
             doc=$("$jkit" $cmd) || { echo "::error::jkit $cmd failed"; exit 1; }
-            printf '%s' "$doc" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
+            printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
               || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
           done
-          "$jkit" hook bash > /dev/null
-          file jkit-cli/target/jkit
+          if [ "$RUNNER_OS" = Windows ]; then "$jkit" hook pwsh > /dev/null; else "$jkit" hook bash > /dev/null; fi
+          if command -v file > /dev/null; then file "$jkit"; fi
           if [ "$RUNNER_OS" = macOS ]; then
             lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
             otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
             codesign -dv jkit-cli/target/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
           fi
 
+      # Each archive holds the bare binary at its root: jkit, or jkit.exe on Windows.
       - name: Collect the files
         run: |
           mkdir dist
-          tar -C jkit-cli/target -czf "dist/jkit-$VERSION-${{ matrix.platform }}.tar.gz" jkit
+          base="jkit-$VERSION-${{ matrix.platform }}"
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd jkit-cli/target && 7z a -tzip -bso0 "../../dist/$base.zip" jkit.exe)
+          else
+            tar -C jkit-cli/target -czf "dist/$base.tar.gz" jkit
+            (cd jkit-cli/target && zip -q -X "../../dist/$base.zip" jkit)
+          fi
           if [ "$RUNNER_OS" = Linux ]; then
             cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
           fi
@@ -189,6 +216,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -217,3 +245,76 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
               --title "jkit ${GITHUB_REF_NAME#v}" "${flags[@]}"
           fi
+
+  # Needs HOMEBREW_TAP_TOKEN: a fine-grained token with Contents read/write on
+  # adriandeleon/homebrew-tap. Users install with `brew install adriandeleon/tap/jkit`.
+  homebrew:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Update the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew formula was not updated"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/adriandeleon/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          packaging/homebrew-formula.sh "$version" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/tap/Formula/jkit.rb"
+          cat "$RUNNER_TEMP/tap/Formula/jkit.rb"
+          cd "$RUNNER_TEMP/tap"
+          git add Formula/jkit.rb
+          if git diff --cached --quiet; then
+            echo "the formula is already at $version"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "jkit $version"
+          git push origin HEAD
+
+  # Needs WINGET_TOKEN: a classic token with the public_repo scope, from an account that can fork
+  # microsoft/winget-pkgs (wingetcreate forks it and opens the pull request from that fork).
+  # Microsoft's reviewers merge it, usually within a day or two; users then `winget install jkit`.
+  winget:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Submit to winget-pkgs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::warning::WINGET_TOKEN is not set; no winget pull request was opened"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
+          packaging/winget-manifests.sh "$version" "$RUNNER_TEMP/SHA256SUMS" manifests
+          cat manifests/*.yaml
+          curl -fsSL -o "$RUNNER_TEMP/wingetcreate.exe" https://aka.ms/wingetcreate/latest
+          "$RUNNER_TEMP/wingetcreate.exe" submit --token "$WINGET_TOKEN" \
+            --prtitle "New version: AdrianDeLeon.jkit version $version" manifests

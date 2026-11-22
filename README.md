@@ -5,6 +5,29 @@ built with Java 25, picocli and GraalVM native-image. See the design spec for th
 
 Website: <https://jkit-project.dev>
 
+## Install
+
+```bash
+brew install adriandeleon/tap/jkit      # macOS (Apple Silicon, Intel) and Linux
+```
+
+```powershell
+winget install AdrianDeLeon.jkit        # Windows
+```
+
+Or download from the [releases](https://github.com/adriandeleon/jkit/releases) page, each with a
+`SHA256SUMS` file:
+
+| Platform | Files |
+| --- | --- |
+| Linux x64, arm64 | `jkit-<version>-linux-{x64,aarch64}.tar.gz` and `.zip`, `.deb`, `.rpm` |
+| macOS Apple Silicon, Intel | `jkit-<version>-macos-{aarch64,x64}.tar.gz` and `.zip` |
+| Windows x64 | `jkit-<version>-windows-x64.zip` |
+
+Each archive holds just the binary (`jkit`, or `jkit.exe`); put it anywhere on your `PATH`.
+Windows on ARM runs the x64 build under emulation, as GraalVM has no native-image for it yet.
+Pre-releases (versions with a hyphen) are on the releases page only.
+
 ## Build
 
 Maven, through the Maven Wrapper (Maven 3.9.16, checksum pinned in `.mvn/wrapper/maven-wrapper.properties`).
@@ -38,7 +61,7 @@ sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
 ### macOS
 
 Releases include `jkit-<version>-macos-aarch64.tar.gz` (Apple Silicon) and
-`jkit-<version>-macos-x64.tar.gz` (Intel): a single binary, signed with a Developer ID and
+`jkit-<version>-macos-x64.tar.gz` (Intel), and the same as `.zip`: a single binary, signed with a Developer ID and
 notarized by Apple, so Gatekeeper lets it run even when downloaded with a browser. They need
 macOS 15 (Sequoia) or newer.
 
@@ -98,7 +121,7 @@ Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index 
 ## Not yet
 
 switching on `cd` in PowerShell, signed packages and an apt/dnf repository, init, prune, config command, self update,
-Windows and Homebrew.
+Windows on ARM natively.
 
 ## Modules
 
