@@ -69,15 +69,19 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, remove, copyright, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, status, remove, copyright, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
-`--json` on list, search, install, upgrade, use and remove prints one JSON document for editors and
+`status` shows which version of each tool is active here and where it comes from (this shell, a
+project file, the global default, or something set outside jkit), with a hint when that isn't what
+jkit would pick. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) are
+read but not applied yet: see [docs/project-files.md](docs/project-files.md).
+`--json` on list, status, search, install, upgrade, use and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
 Sources: foojay, services.gradle.org, Maven Central. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
-pin/sync and project files, signed packages and an apt/dnf repository, status, env, doctor, init, prune, config command, self update,
+pin/sync (applying project files), signed packages and an apt/dnf repository, env, doctor, init, prune, config command, self update,
 Windows and Homebrew.
 
 ## Modules

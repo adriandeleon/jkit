@@ -73,6 +73,46 @@ Never uses the network.
 
 `installed` holds JDKs, then Maven, then Gradle, each newest first.
 
+## `jkit status --json`
+
+Never uses the network. Reads the project file found from the working directory (see
+[project-files.md](project-files.md)).
+
+```json
+{
+  "schemaVersion": 1,
+  "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
+  "projectError": null,
+  "tools": [
+    {
+      "tool": "jdk",
+      "source": "global",
+      "home": "/home/me/.jkit/global/jdk",
+      "installed": { "tool": "jdk", "id": "17.0.13+11-zulu", "...": "the install object" },
+      "version": "17.0.13+11",
+      "pin": { "version": "21", "vendor": null, "fx": false },
+      "pinInstalled": { "tool": "jdk", "id": "21.0.9+10-temurin", "...": "the install object" },
+      "wanted": { "source": "project", "home": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin" },
+      "global": { "target": "/home/me/.jkit/tools/jdk/17.0.13+11-zulu", "missing": false },
+      "matches": false,
+      "hint": "jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit use jdk@21.0.9+10 temurin"
+    }
+  ]
+}
+```
+
+- `tools` always has `jdk`, `maven`, `gradle`, `graalvm`, in that order.
+- `source` is what this shell has: `shell` (`jkit use`), `project`, `global`, `outside` (a
+  `*_HOME` jkit didn't set), `stale` (a jkit install nothing chooses any more) or `none`.
+- `wanted.source` is what jkit would pick (shell, then project, then global, else `none`);
+  `wanted.home` is null when nothing is picked or a pin has no matching install.
+- `home` is the tool's `*_HOME` as set in this environment. `installed` is null when it isn't a
+  jkit install; `version` then comes from a JDK's `release` file when it has one.
+- `pin` and `pinInstalled` are null without a project pin. `global` is null without a global link.
+- `project` is null without a project file. `projectError` is the error message when the
+  file can't be read.
+- `matches` is true when `source` is what jkit would pick; `hint` says what to do when it isn't.
+
 ## `jkit search <tool>[@version] [vendor] --json`
 
 ```json
