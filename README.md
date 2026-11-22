@@ -69,7 +69,7 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, remove, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, remove, copyright, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 `--json` on list, search, install, upgrade, use and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
