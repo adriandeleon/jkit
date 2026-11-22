@@ -17,13 +17,14 @@ final class Hooks {
                 # jkit shell hook (%1$s)
                 export JKIT_SHELL=%1$s
                 __jkit_g=%2$s
-                for __jkit_t in gradle maven jdk; do
+                for __jkit_t in sbt gradle maven jdk; do
                   case ":$PATH:" in *":$__jkit_g/$__jkit_t/bin:"*) ;; *) PATH="$__jkit_g/$__jkit_t/bin:$PATH" ;; esac
                 done
                 export PATH
                 [ -z "$JAVA_HOME" ] && [ -e "$__jkit_g/jdk" ] && export JAVA_HOME="$__jkit_g/jdk"
                 [ -z "$MAVEN_HOME" ] && [ -e "$__jkit_g/maven" ] && export MAVEN_HOME="$__jkit_g/maven"
                 [ -z "$GRADLE_HOME" ] && [ -e "$__jkit_g/gradle" ] && export GRADLE_HOME="$__jkit_g/gradle"
+                [ -z "$SBT_HOME" ] && [ -e "$__jkit_g/sbt" ] && export SBT_HOME="$__jkit_g/sbt"
                 [ -z "$GRAALVM_HOME" ] && [ -e "$__jkit_g/graalvm" ] && export GRAALVM_HOME="$__jkit_g/graalvm"
                 unset __jkit_t __jkit_g
                 jkit() {
@@ -44,12 +45,13 @@ final class Hooks {
                 # jkit shell hook (fish)
                 set -gx JKIT_SHELL fish
                 set -l __jkit_g %1$s
-                for t in gradle maven jdk
+                for t in sbt gradle maven jdk
                   contains -- $__jkit_g/$t/bin $PATH; or set -gx PATH $__jkit_g/$t/bin $PATH
                 end
                 if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end
                 if not set -q MAVEN_HOME; and test -e $__jkit_g/maven; set -gx MAVEN_HOME $__jkit_g/maven; end
                 if not set -q GRADLE_HOME; and test -e $__jkit_g/gradle; set -gx GRADLE_HOME $__jkit_g/gradle; end
+                if not set -q SBT_HOME; and test -e $__jkit_g/sbt; set -gx SBT_HOME $__jkit_g/sbt; end
                 if not set -q GRAALVM_HOME; and test -e $__jkit_g/graalvm; set -gx GRAALVM_HOME $__jkit_g/graalvm; end
                 set -e __jkit_g
                 function jkit
@@ -70,11 +72,11 @@ final class Hooks {
                 $env:JKIT_SHELL = 'pwsh'
                 $__jkitG = %1$s
                 $__jkitSep = [IO.Path]::PathSeparator
-                foreach ($t in 'gradle', 'maven', 'jdk') {
+                foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
                   $bin = Join-Path (Join-Path $__jkitG $t) 'bin'
                   if (($env:PATH -split [regex]::Escape($__jkitSep)) -notcontains $bin) { $env:PATH = $bin + $__jkitSep + $env:PATH }
                 }
-                foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('GRAALVM_HOME', 'graalvm'))) {
+                foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
                   $dir = Join-Path $__jkitG $pair[1]
                   if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
                     Set-Item -Path ("Env:" + $pair[0]) -Value $dir

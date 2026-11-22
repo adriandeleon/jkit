@@ -80,7 +80,7 @@ class ProjectFileTest {
         assertThat(spec.get(Tool.MAVEN)).isEqualTo(new PinnedTool(Tool.MAVEN, "3.9", null, false));
         assertThat(spec.warnings()).containsExactly(
                 file + ":1: unknown key 'name', skipped",
-                file + ":4: unknown tool 'kotlin', skipped (tools: jdk, maven, gradle, graalvm)",
+                file + ":4: unknown tool 'kotlin', skipped (tools: jdk, maven, gradle, sbt, graalvm)",
                 file + ":5: maven has no vendors; vendor 'apache' ignored",
                 file + ":5: maven has no JavaFX builds; fx ignored",
                 file + ":6: gradle = 'eight' is not a version, skipped",

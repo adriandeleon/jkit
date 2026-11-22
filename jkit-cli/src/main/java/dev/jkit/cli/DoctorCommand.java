@@ -13,6 +13,7 @@ import dev.jkit.sources.FoojaySource;
 import dev.jkit.sources.GradleSource;
 import dev.jkit.sources.JdkHttp;
 import dev.jkit.sources.MavenSource;
+import dev.jkit.sources.SbtSource;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -287,7 +288,7 @@ final class DoctorCommand implements Callable<Integer> {
         }
     }
 
-    private static final Map<Tool, String> COMMANDS = Map.of(Tool.JDK, "java", Tool.MAVEN, "mvn", Tool.GRADLE, "gradle");
+    private static final Map<Tool, String> COMMANDS = Map.of(Tool.JDK, "java", Tool.MAVEN, "mvn", Tool.GRADLE, "gradle", Tool.SBT, "sbt");
 
     static void pathOrder(Report r) throws IOException {
         ToolStates.Result states = r.states();
@@ -295,7 +296,7 @@ final class DoctorCommand implements Callable<Integer> {
             return;
         }
         List<String> good = new ArrayList<>();
-        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
+        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             ToolState s = states.get(tool);
             if (s.current() == null || !(s.source() == Source.SHELL || s.source() == Source.PROJECT || s.source() == Source.GLOBAL)) {
                 continue; // jkit doesn't manage this tool in this shell
@@ -323,7 +324,7 @@ final class DoctorCommand implements Callable<Integer> {
         Store store = r.ctx.store;
         int installs = 0;
         boolean any = false;
-        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
+        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             installs += store.list(tool).size();
             Path dir = r.ctx.home.tools(tool);
             if (!Files.isDirectory(dir)) {
@@ -463,7 +464,8 @@ final class DoctorCommand implements Callable<Integer> {
         List<URI> uris = List.of(
                 r.ctx.url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE).resolve("distributions?include_versions=false"),
                 r.ctx.url("JKIT_SOURCES_GRADLE_URL", GradleSource.DEFAULT_BASE).resolve("versions/current"),
-                r.ctx.url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE).resolve("org/apache/maven/apache-maven/maven-metadata.xml"));
+                r.ctx.url("JKIT_SOURCES_MAVEN_URL", MavenSource.DEFAULT_BASE).resolve("org/apache/maven/apache-maven/maven-metadata.xml"),
+                r.ctx.url("JKIT_SOURCES_SBT_URL", SbtSource.DEFAULT_DOWNLOADS).resolve("v1.13.1/sbt-1.13.1.zip.sha256"));
         for (URI uri : uris) {
             long start = System.nanoTime();
             try {

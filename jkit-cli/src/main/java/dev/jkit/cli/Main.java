@@ -8,7 +8,7 @@ import picocli.CommandLine.Command;
         mixinStandardHelpOptions = true,
         scope = CommandLine.ScopeType.INHERIT, // --help and --version on every subcommand too
         versionProvider = VersionProvider.class,
-        description = "Installs and switches JDKs, Maven and Gradle.",
+        description = "Installs and switches JDKs, Maven, Gradle and sbt.",
         subcommands = {
             SearchCommand.class,
             InstallCommand.class,

@@ -25,7 +25,7 @@ final class ListCommand implements Callable<Integer> {
             return 0;
         }
         boolean any = false;
-        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
+        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             List<Installed> installed = ctx.store.list(tool);
             String label = tool.id();
             for (Installed i : installed) {
@@ -43,19 +43,19 @@ final class ListCommand implements Callable<Integer> {
     }
 
     /**
-     * {@code home}, {@code global} (tool → install folder or null, for jdk, maven, gradle and graalvm)
+     * {@code home}, {@code global} (tool → install folder or null, for jdk, maven, gradle, sbt and graalvm)
      * and {@code installed}: one object per install ({@link JsonOut#installed}), newest first within a tool.
      */
     static Map<String, Object> json(Context ctx) throws Exception {
         Map<String, Object> doc = JsonOut.document();
         doc.put("home", ctx.home.root());
         Map<String, Object> global = JsonOut.fields();
-        for (Tool t : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.GRAALVM)) {
+        for (Tool t : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT, Tool.GRAALVM)) {
             global.put(t.id(), ctx.os.readLink(ctx.home.global(t)));
         }
         doc.put("global", global);
         List<Object> installed = new ArrayList<>();
-        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE)) {
+        for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             for (Installed i : ctx.store.list(tool)) {
                 installed.add(JsonOut.installed(ctx, i));
             }

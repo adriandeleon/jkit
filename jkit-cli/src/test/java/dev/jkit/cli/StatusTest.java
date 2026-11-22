@@ -122,6 +122,6 @@ class StatusTest {
         assertThat(jdk.path("global").path("missing").asBoolean()).isFalse();
         assertThat(jdk.path("matches").asBoolean()).isFalse();
         assertThat(jdk.path("hint").asText()).contains("jkit use jdk@21.0.9+10 temurin");
-        assertThat(doc.path("tools")).hasSize(4);
+        assertThat(doc.path("tools")).hasSize(5);
     }
 }

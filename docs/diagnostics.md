@@ -10,7 +10,7 @@ version I expected":
 
 | Command | Question | Main audience |
 |---|---|---|
-| `jkit status` | Which JDK/Maven/Gradle/GraalVM is active here, and why? | people, daily |
+| `jkit status` | Which JDK/Maven/Gradle/sbt/GraalVM is active here, and why? | people, daily |
 | `jkit env` | What environment should a process here get? | CI, IDEs, Docker, scripts without the hook |
 | `jkit doctor` | Is anything in my setup broken or fighting jkit? | people, when stuck; bug reports |
 
@@ -138,15 +138,15 @@ ok    active jdk runs: openjdk 21.0.9 (x64)
 | `home` | jkit version, platform, `JKIT_HOME` exists and is writable | fail if not writable |
 | `hook` | `JKIT_SHELL` set (hook loaded); wrapper active (`JKIT_ENV_FILE` set when run through it) | warn |
 | `binary` | more than one `jkit` on PATH, or the hook's `jkit` isn't the first one | warn |
-| `outside-vars` | `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `GRAALVM_HOME` point outside `~/.jkit` while jkit has a choice for that tool (same rule as `Changes.globalEffect`) | warn |
-| `path-order` | `java`, `mvn`, `gradle` on PATH resolve to the active jkit tool's `bin` | warn |
+| `outside-vars` | `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME`, `GRAALVM_HOME` point outside `~/.jkit` while jkit has a choice for that tool (same rule as `Changes.globalEffect`) | warn |
+| `path-order` | `java`, `mvn`, `gradle`, `sbt` on PATH resolve to the active jkit tool's `bin` | warn |
 | `links` | global links and `JKIT_SHELL_*` point at installs that still exist | fail |
 | `store` | install folders without a marker (interrupted install); leftovers in `~/.jkit/tmp` with their size | warn |
 | `config` | `config.toml` parses; default vendors are known (cached index only) | fail / warn |
 | `project` | the project file's warnings; pins with no matching install; auto-switch off while a project is present | warn |
 | `index` | age of the cached version index; offline mode on | info only |
 | `java-runs` | runs `<active jdk>/bin/java -version` (10 s timeout): catches wrong-architecture or damaged installs | fail |
-| `network` | only with `--network`: reaches foojay, services.gradle.org and Maven Central (one small request each, honouring proxy settings) | fail |
+| `network` | only with `--network`: reaches foojay, services.gradle.org, Maven Central and GitHub (sbt releases) (one small request each, honouring proxy settings) | fail |
 
 `--json`: `{schemaVersion, checks: [{id, level, message, fix}], summary: {ok, warn, fail}}`.
 The ids are stable so scripts can filter on them.

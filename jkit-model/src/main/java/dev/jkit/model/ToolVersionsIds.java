@@ -24,6 +24,7 @@ public final class ToolVersionsIds {
             case "java" -> Tool.JDK;
             case "maven" -> Tool.MAVEN;
             case "gradle" -> Tool.GRADLE;
+            case "sbt" -> Tool.SBT;
             default -> null;
         };
     }

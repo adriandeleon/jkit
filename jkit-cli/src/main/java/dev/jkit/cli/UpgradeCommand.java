@@ -161,7 +161,7 @@ final class UpgradeCommand implements Callable<Integer> {
 
     /** Installed builds grouped by release line, each newest first, lines in store order. */
     Map<Line, List<Installed>> lines(Context ctx) throws Exception {
-        List<Tool> tools = spec == null ? List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE) : List.of(spec.tool());
+        List<Tool> tools = spec == null ? List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT) : List.of(spec.tool());
         Vendor vendor = spec == null
                 ? (vendorText == null ? null : Vendor.of(vendorText))
                 : (vendorText == null ? null : Resolve.vendor(ctx, spec, vendorText));
@@ -191,6 +191,7 @@ final class UpgradeCommand implements Callable<Integer> {
             case JDK, GRAALVM -> ctx.foojay().resolve(line.userTool(), major, line.vendor(), ctx.platform, line.fx(), pre);
             case MAVEN -> ctx.maven().resolve(major, pre);
             case GRADLE -> ctx.gradle().resolve(major, pre);
+            case SBT -> ctx.sbt().resolve(major, pre);
         };
     }
 

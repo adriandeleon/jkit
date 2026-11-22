@@ -32,6 +32,7 @@ class ProjectIdsTest {
     @Test
     void readsSdkmanBuildToolIds() {
         assertThat(SdkmanIds.tool("maven")).isEqualTo(Tool.MAVEN);
+        assertThat(SdkmanIds.tool("sbt")).isEqualTo(Tool.SBT);
         assertThat(SdkmanIds.tool("kotlin")).isNull();
         assertThat(SdkmanIds.parse(Tool.GRADLE, "8.10")).isEqualTo(new PinnedTool(Tool.GRADLE, "8.10", null, false));
     }
@@ -70,6 +71,7 @@ class ProjectIdsTest {
         assertThatThrownBy(() -> ToolVersionsIds.parse(Tool.JDK, "ref:main")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ToolVersionsIds.parse(Tool.MAVEN, "path:/opt/mvn")).isInstanceOf(IllegalArgumentException.class);
         assertThat(ToolVersionsIds.tool("nodejs")).isNull();
+        assertThat(ToolVersionsIds.tool("sbt")).isEqualTo(Tool.SBT);
     }
 
     @Test
