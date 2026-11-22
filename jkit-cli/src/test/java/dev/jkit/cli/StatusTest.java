@@ -75,9 +75,9 @@ class StatusTest {
         env.put("JAVA_HOME", home.resolve("global/jdk").toString());
         String out = text();
         assertThat(out).contains("jdk      17.0.13+11 zulu         global\n"
-                + "         jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit use jdk@21.0.9+10 temurin\n");
+                + "         jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit sync\n");
         assertThat(out).contains("maven    -                       not set\n"
-                + "         jkit.toml wants maven 4.0, not installed: jkit install maven@4.0\n");
+                + "         jkit.toml wants maven 4.0, not installed: jkit sync\n");
         assertThat(out).contains("project: " + project + " (jkit.toml)\n  warning: ");
         assertThat(out).contains("unknown tool 'kotlin'");
     }
@@ -121,7 +121,7 @@ class StatusTest {
         assertThat(jdk.path("wanted").path("source").asText()).isEqualTo("project");
         assertThat(jdk.path("global").path("missing").asBoolean()).isFalse();
         assertThat(jdk.path("matches").asBoolean()).isFalse();
-        assertThat(jdk.path("hint").asText()).contains("jkit use jdk@21.0.9+10 temurin");
+        assertThat(jdk.path("hint").asText()).contains("jkit sync");
         assertThat(doc.path("tools")).hasSize(5);
     }
 }

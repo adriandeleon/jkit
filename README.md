@@ -70,25 +70,26 @@ jkit remove jdk@17 zulu
 
 ## In the prototype
 
-search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested),
+search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, pin, unpin, sync, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested),
 and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
 `status` shows which version of each tool is active here and where it comes from (this shell, a
 project file, the global default, or something set outside jkit), with a hint when that isn't what
 jkit would pick. `env` prints the environment for a new process here, for CI and IDEs
 without the hook (`eval "$(jkit env)"`). `doctor` checks the setup (shell hook, PATH order, `JAVA_HOME`
 set outside jkit, broken links, leftovers, whether the active JDK runs; `--network` for the
-sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) are
-read by status and env, but shells don't switch to them on their own yet: see [docs/project-files.md](docs/project-files.md).
+sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) record a project's versions:
+`jkit pin jdk@21` writes `jkit.toml`, and `jkit sync` installs what it asks for and switches this
+shell to it. Shells don't switch on `cd` yet: see [docs/project-files.md](docs/project-files.md).
 `exec` runs one command with the versions jkit picks (`jkit exec jdk@17 -- mvn test`), with no
 shell hook: for scripts, CI and AI agents, whose commands each start a new shell; see
 [docs/agents.md](docs/agents.md).
-`--json` on list, status, env, doctor, search, install, upgrade, use and remove prints one JSON document for editors and
+`--json` on list, status, env, doctor, search, install, upgrade, use, pin, unpin, sync and remove prints one JSON document for editors and
 scripts: see [docs/json.md](docs/json.md).
 Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
-pin/sync (applying project files), signed packages and an apt/dnf repository, init, prune, config command, self update,
+switching to project versions on `cd`, signed packages and an apt/dnf repository, init, prune, config command, self update,
 Windows and Homebrew.
 
 ## Modules

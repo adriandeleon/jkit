@@ -39,12 +39,7 @@ final class InstallCommand implements Callable<Integer> {
     public Integer call() throws Exception {
         Context ctx = options.context();
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
-        Artifact artifact = switch (spec.tool()) {
-            case JDK, GRAALVM -> ctx.foojay().resolve(spec.tool(), spec.version(), vendor, ctx.platform, fx, pre);
-            case MAVEN -> ctx.maven().resolve(spec.version(), pre);
-            case GRADLE -> ctx.gradle().resolve(spec.version(), pre);
-            case SBT -> ctx.sbt().resolve(spec.version(), pre);
-        };
+        Artifact artifact = artifact(ctx, spec, vendor, fx, pre);
         java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
@@ -72,6 +67,16 @@ final class InstallCommand implements Callable<Integer> {
                     + (vendor == null ? "" : " " + vendor) + " --global");
         }
         return 0;
+    }
+
+    /** The download for {@code spec}: from foojay for JDKs and GraalVM, else the tool's own source. */
+    static Artifact artifact(Context ctx, ToolSpec spec, Vendor vendor, boolean fx, boolean pre) throws Exception {
+        return switch (spec.tool()) {
+            case JDK, GRAALVM -> ctx.foojay().resolve(spec.tool(), spec.version(), vendor, ctx.platform, fx, pre);
+            case MAVEN -> ctx.maven().resolve(spec.version(), pre);
+            case GRADLE -> ctx.gradle().resolve(spec.version(), pre);
+            case SBT -> ctx.sbt().resolve(spec.version(), pre);
+        };
     }
 
     /** What an install changed on disk: the home if new, leftovers it cleared, the install folder, cached lists. */

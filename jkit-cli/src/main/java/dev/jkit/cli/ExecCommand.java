@@ -120,6 +120,7 @@ final class ExecCommand implements Callable<Integer> {
         Path tools = ctx.home.root().resolve("tools").toAbsolutePath().normalize();
         for (Tool t : Tool.values()) {
             variables.put(ShellEnv.stateVariable(t), null); // this shell's jkit use doesn't apply in there
+            variables.put(ShellEnv.projectVariable(t), null); // nor what jkit sync applied to it
             String current = ctx.env.get(t.homeVariable());
             if (!variables.containsKey(t.homeVariable()) && current != null
                     && Path.of(current).toAbsolutePath().normalize().startsWith(tools)) {

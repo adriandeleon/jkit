@@ -25,7 +25,7 @@ final class Changes {
     /**
      * {@code kind} env: {@code action} set, unset, add or remove (PATH entries). link: set or remove.
      * folder: create or delete. file: a cached version list or checksum, create or update
-     * ({@code value} is where its content came from).
+     * ({@code value} is where its content came from), or a project file jkit wrote (no {@code value}).
      */
     record Change(String kind, String name, String action, String value) { }
 
@@ -106,6 +106,12 @@ final class Changes {
         return this;
     }
 
+    /** A project file this command wrote (pin, unpin). */
+    Changes file(Path file, boolean created) {
+        changes.add(new Change("file", file.toAbsolutePath().toString(), created ? "create" : "update", null));
+        return this;
+    }
+
     Changes note(String note) {
         notes.add(note);
         return this;
@@ -152,7 +158,7 @@ final class Changes {
         int listsUpdated = 0;
         Set<String> hosts = new LinkedHashSet<>();
         for (Change c : changes) {
-            if (c.kind().equals("file")) {
+            if (c.kind().equals("file") && c.value() != null) {
                 if (c.action().equals("create")) {
                     listsCreated++;
                 } else {
@@ -170,6 +176,8 @@ final class Changes {
                 case "link remove" -> "link   " + tilde(c.name()) + " removed";
                 case "folder create" -> "folder " + tilde(c.name()) + " created";
                 case "folder delete" -> "folder " + tilde(c.name()) + " deleted";
+                case "file create" -> "file   " + tilde(c.name()) + " created";
+                case "file update" -> "file   " + tilde(c.name()) + " updated";
                 default -> c.toString();
             });
         }

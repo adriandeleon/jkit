@@ -1,6 +1,6 @@
 # Project files (pin and sync)
 
-Status: draft design, not implemented.
+Status: phases 1 and 2 implemented (see the end).
 
 ## Goal
 
@@ -255,4 +255,20 @@ mvn -B verify
    elsewhere.
 
 Status: phase 1 (parsing and discovery) is implemented in `ProjectFile`, `SdkmanIds` and
-`ToolVersionsIds`, with tests in `ProjectFileTest` and `ProjectIdsTest`.
+`ToolVersionsIds`, with tests in `ProjectFileTest` and `ProjectIdsTest`. Phase 2 (`pin`, `unpin`,
+`sync`) is implemented in `PinCommand`, `UnpinCommand`, `SyncCommand` and `ProjectWriter`, with
+part of phase 3: `ShellEnv` has the project layer (`JKIT_PROJECT_<TOOL>`, shell > project >
+global) and `reset` goes back to the project. Tests: `ProjectWriterTest`, `ShellEnvTest`,
+`PinSyncTest`. Still to do: `JKIT_PROJECT`, `hook-env` and the `cd` hooks (phase 3), and phase 4.
+
+Phase 2 notes, where it differs from or adds to the text above:
+
+- `pin` without a version pins what this shell uses: the feature release for jdk and graalvm
+  (`"21"`), the full version for the others. `--exact` writes the full version and vendor.
+- `pin` checks a version that isn't installed against the tool's version list, which `--offline`
+  reads from the cache instead of the network.
+- `pin` reads every edit back and refuses one that would change anything but that tool's line
+  (a `[tools.jdk]` table, a dotted `tools.jdk` key), asking for a hand edit instead.
+- `reset <tool>` goes back to the project's install only while the project found from the current
+  folder still pins the tool; otherwise it also drops the project state and goes back to global.
+  This is how to leave a project's versions until the `cd` hooks land.
