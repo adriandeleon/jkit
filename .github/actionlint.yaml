@@ -1,0 +1,4 @@
+# actionlint's settings (the workflows job in ci.yml)
+self-hosted-runner:
+  # GitHub-hosted, but newer than the label list actionlint 1.7.7 knows
+  labels: [macos-15-intel]

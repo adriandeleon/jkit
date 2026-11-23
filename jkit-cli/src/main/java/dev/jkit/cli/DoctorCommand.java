@@ -349,10 +349,13 @@ final class DoctorCommand implements Callable<Integer> {
             }
             try (Stream<Path> children = Files.list(dir)) {
                 for (Path child : children.sorted().toList()) {
-                    if (Files.isDirectory(child) && !Files.isSymbolicLink(child)
-                            && !Files.isRegularFile(child.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    // a .name.partial folder is a copy from another disk that never finished, marker or not
+                    boolean partial = child.getFileName().toString().startsWith(".");
+                    if (Files.isDirectory(child) && !Files.isSymbolicLink(child) && (partial
+                            || !Files.isRegularFile(child.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS))) {
                         any = true;
-                        r.warn("unfinished install (no " + Store.MARKER + "): " + tilde(child),
+                        r.warn("unfinished install (" + (partial ? "a copy that never finished" : "no " + Store.MARKER)
+                                + "): " + tilde(child),
                                 "remove it: " + removeAll(arg(child)));
                     }
                 }
@@ -452,23 +455,35 @@ final class DoctorCommand implements Callable<Integer> {
             r.fail("the active JDK " + tilde(home) + " has no " + tilde(java), reinstall);
             return;
         }
+        // to a file, not a pipe: a pipe that fills up stalls the JDK, and one a child process keeps
+        // open would hang the read after java has exited
+        Path log = Files.createTempFile("jkit-java-version", ".txt");
+        String output;
         Process process;
         try {
-            process = new ProcessBuilder(java.toString(), "-version").redirectErrorStream(true).start();
-        } catch (IOException e) {
-            r.fail("the active JDK " + tilde(home) + " can't start: " + e.getMessage()
-                    + " (often a JDK for another CPU architecture)", reinstall);
-            return;
-        }
-        process.getOutputStream().close();
-        if (!process.waitFor(10, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            r.fail("the active JDK " + tilde(home) + " didn't finish java -version within 10 s", reinstall);
-            return;
-        }
-        String output;
-        try (InputStream in = process.getInputStream()) {
-            output = new String(in.readAllBytes(), StandardCharsets.UTF_8).strip();
+            try {
+                process = new ProcessBuilder(java.toString(), "-version").redirectErrorStream(true)
+                        .redirectOutput(log.toFile()).redirectInput(ProcessBuilder.Redirect.PIPE).start();
+            } catch (IOException e) {
+                r.fail("the active JDK " + tilde(home) + " can't start: " + e.getMessage()
+                        + " (often a JDK for another CPU architecture)", reinstall);
+                return;
+            }
+            process.getOutputStream().close();
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                r.fail("the active JDK " + tilde(home) + " didn't finish java -version within 10 s", reinstall);
+                return;
+            }
+            try (InputStream in = Files.newInputStream(log)) {
+                output = new String(in.readNBytes(64 * 1024), StandardCharsets.UTF_8).strip();
+            }
+        } finally {
+            try {
+                Files.deleteIfExists(log);
+            } catch (IOException e) {
+                // Windows: a child of java may still hold it; the temp folder's cleanup gets it
+            }
         }
         String first = output.isEmpty() ? "(no output)" : output.lines().findFirst().orElse("");
         if (process.exitValue() == 0) {

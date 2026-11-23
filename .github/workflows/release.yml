@@ -14,7 +14,8 @@ name: Release
 #
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
 # publishing anything: signing, release, homebrew and winget only run for a pushed tag, so the
-# macOS archives of a manual run are unsigned.
+# macOS archives of a manual run are unsigned. A pull request that changes the build or the
+# packaging gets the same dry run, so a plugin bump fails there and not on the release tag.
 #
 # If homebrew or winget fails after the release is published (a missing token, an outage), fix
 # the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
@@ -25,6 +26,8 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  pull_request:
+    paths: ['pom.xml', '*/pom.xml', '.mvn/**', 'packaging/**', '.github/workflows/release.yml']
 
 permissions:
   contents: read
@@ -149,6 +152,8 @@ jobs:
       # The notices must list exactly the libraries compiled in; CI checks this on every PR too.
       - name: Check THIRD-PARTY-NOTICES and make the SBOM
         if: matrix.platform == 'linux-x64'
+        env:
+          GRAALVM_URL: ${{ matrix.graalvm_url }}
         run: |
           packaging/third-party-notices.sh --check
           # per module, not aggregate: jkit-cli's SBOM has jkit-cli as its subject and everything it ships
@@ -156,7 +161,7 @@ jobs:
             -DoutputFormat=json -DoutputName=sbom -DprojectType=application
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["metadata"]["component"]["name"] == "jkit-cli"; print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' jkit-cli/target/sbom.json
           # the Java runtime compiled into the binary isn't a Maven dependency: add it by hand
-          python3 packaging/sbom-runtime.py jkit-cli/target/sbom.json
+          python3 packaging/sbom-runtime.py jkit-cli/target/sbom.json "$GRAALVM_HOME" "$GRAALVM_URL"
 
       - name: Check the glibc the binary needs
         if: runner.os == 'Linux'
@@ -409,7 +414,9 @@ jobs:
           # a tag ships what macos-sign signed: check it really is, not the linker's ad-hoc signature
           if [ "${{ needs.macos-sign.result }}" = success ]; then
             codesign --verify --strict stage/jkit
-            if codesign -dvv stage/jkit 2>&1 | grep -q 'Authority=Developer ID Application'; then
+            # captured first: grep -q stops reading early, and codesign's SIGPIPE would fail pipefail
+            details=$(codesign -dvv stage/jkit 2>&1)
+            if grep -q 'Authority=Developer ID Application' <<< "$details"; then
               echo "signed with a Developer ID"
             else
               case "$GITHUB_REF_NAME" in
@@ -519,7 +526,10 @@ jobs:
           tag="$GITHUB_REF_NAME"
           flags=()
           case "$tag" in *-*) flags+=(--prerelease) ;; esac
-          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
+          # only "not found" means there's no release yet: any other failure (an API hiccup on a
+          # re-run) must stop here, not create a second draft next to the first
+          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>view.err); then
+            rm -f view.err
             if [ "$draft" != true ]; then
               echo "::error::release $tag is already published; refusing to replace its files." \
                 "Push a new tag, or delete the release by hand first if it really must be rebuilt."
@@ -528,6 +538,12 @@ jobs:
             echo "re-run: replacing the files of the draft release $tag"
             gh release upload "$tag" * --repo "$GITHUB_REPOSITORY" --clobber
           else
+            if ! grep -qi 'release not found' view.err; then
+              cat view.err >&2
+              echo "::error::couldn't tell whether release $tag exists; re-run the job"
+              exit 1
+            fi
+            rm -f view.err
             gh release create "$tag" * --draft \
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
               --title "jkit ${tag#v}" "${flags[@]}"

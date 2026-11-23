@@ -561,6 +561,10 @@ public final class ProjectFile {
      * writes UTF-16), else UTF-8, else Latin-1. Never a decoding error.
      */
     public static String text(Path file) throws IOException {
+        if (Files.exists(file) && !Files.isRegularFile(file)) {
+            // a named pipe would block every cd, waiting for a writer
+            throw new JkitException(file + " is not a regular file");
+        }
         byte[] bytes;
         try (var in = Files.newInputStream(file)) {
             bytes = in.readNBytes(MAX_SIZE + 1);

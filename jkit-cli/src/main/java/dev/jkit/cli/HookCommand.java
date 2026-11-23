@@ -123,6 +123,7 @@ final class HookCommand implements Callable<Integer> {
         String text = exists ? Files.readString(file, charset) : "";
         String shown = Changes.tilde(file.toString());
         int manual = ShellRc.manualLine(text);
+        String self = self(ctx);
         Changes report = new Changes(ctx);
         boolean added = false;
         if (ShellRc.hasBlock(text)) {
@@ -134,11 +135,11 @@ final class HookCommand implements Callable<Integer> {
             if (!exists) {
                 Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
             }
-            Files.writeString(file, ShellRc.add(text, shell).text(), charset);
+            Files.writeString(file, ShellRc.add(text, shell, self, ctx.home.root()).text(), charset);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
-            for (String line : ShellRc.block(shell)) {
+            for (String line : ShellRc.block(shell, self, ctx.home.root())) {
                 ctx.out.println("    " + line);
             }
             if (Files.isSymbolicLink(file)) {
@@ -149,7 +150,8 @@ final class HookCommand implements Callable<Integer> {
             }
         }
         boolean switched = autoSwitch && turnOnAutoSwitch(ctx, report);
-        String reload = shell.equals("fish") ? "jkit hook fish | source" : "eval \"$(jkit hook " + shell + ")\"";
+        String jkit = self == null ? "jkit" : dev.jkit.model.ShellQuote.quote(shell, self);
+        String reload = shell.equals("fish") ? jkit + " hook fish | source" : "eval \"$(" + jkit + " hook " + shell + ")\"";
         if (added) {
             report.note("new " + shell + " shells load it; for this one: " + reload);
         } else if (switched) {

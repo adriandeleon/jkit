@@ -145,6 +145,34 @@ class HttpTest {
     }
 
     @Test
+    void aServerThatNeverAnswersIsNotAskedAgain() throws Exception {
+        // header waits per redirect, times three tries, once added up to about 18 minutes
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.createContext("/", exchange -> {
+            calls.incrementAndGet();
+            try {
+                Thread.sleep(3_000); // no headers within the 500 ms limit
+            } catch (InterruptedException ignored) {
+                // server stopping
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofMillis(500), 3);
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/");
+            long start = System.nanoTime();
+            assertThatThrownBy(() -> http.get(uri)).isInstanceOf(NetworkException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
+            assertThat(calls.get()).isEqualTo(1);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void serverErrorsAreRetried() throws Exception {
         List<Integer> statuses = new ArrayList<>(List.of(503, 200));
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

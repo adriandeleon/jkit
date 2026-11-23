@@ -33,7 +33,8 @@ public final class Store {
         }
         try (Stream<Path> children = Files.list(dir)) {
             for (Path child : children.toList()) {
-                if (Files.isSymbolicLink(child) || !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
+                if (child.getFileName().toString().startsWith(".") // an install still being copied in (.name.partial)
+                        || Files.isSymbolicLink(child) || !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
                     continue; // stable aliases are links
                 }
                 Path marker = child.resolve(MARKER);

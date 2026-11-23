@@ -99,6 +99,9 @@ final class SearchCommand implements Callable<Integer> {
                 if (spec.tool() == Tool.GRAALVM) {
                     pkgs.removeIf(p -> !p.vendor().isGraalVmBased());
                 }
+                if (vendorText != null) {
+                    pkgs.removeIf(p -> !p.vendor().equals(vendor)); // jdk zulu: that vendor's majors only
+                }
                 if (spec.version() != null) {
                     pkgs = newestMatchingPerVendor(ctx, foojay, pkgs);
                 }
@@ -330,6 +333,8 @@ final class SearchCommand implements Callable<Integer> {
      */
     private List<Pkg> newestMatchingPerVendor(Context ctx, FoojaySource foojay, List<Pkg> index) throws Exception {
         List<Pkg> out = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+        Exception last = null;
         for (Pkg p : index) {
             if (p.major() != spec.major()) {
                 continue;
@@ -338,10 +343,23 @@ final class SearchCommand implements Callable<Integer> {
                 out.add(p);
                 continue;
             }
-            foojay.builds(spec.major(), p.vendor(), ctx.platform, fx, pre).stream()
-                    .filter(b -> b.version().matches(spec.version()))
-                    .max(java.util.Comparator.comparing(Pkg::version))
-                    .ifPresent(out::add);
+            try {
+                foojay.builds(spec.major(), p.vendor(), ctx.platform, fx, pre).stream()
+                        .filter(b -> b.version().matches(spec.version()))
+                        .max(java.util.Comparator.comparing(Pkg::version))
+                        .ifPresent(out::add);
+            } catch (java.io.IOException | dev.jkit.model.JkitException e) {
+                // one vendor's list failing mustn't hide every other vendor's builds
+                failed.add(p.vendor().name());
+                last = e;
+            }
+        }
+        if (!failed.isEmpty()) {
+            if (out.isEmpty()) {
+                throw last;
+            }
+            ctx.err.println("warning: couldn't list " + String.join(", ", failed) + " builds ("
+                    + last.getMessage() + "), so they're left out");
         }
         return out;
     }

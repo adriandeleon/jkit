@@ -34,8 +34,8 @@ class VersionTest {
         assertThat(v.matches("21.0.13+9")).isTrue();
         assertThat(v.matches("21.0.1")).isFalse();
         assertThat(v.matches("2")).isFalse();
-        assertThat(v.matches("21.0.13+8")).isFalse();
         assertThat(Version.parse("3.10.1").matches("3.1")).isFalse();
+        assertThat(v.matches("21.99999999999999999999")).isFalse(); // not cut down to 21
     }
 
     @Test

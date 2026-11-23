@@ -87,8 +87,8 @@ class HooksTest {
     @Test
     void autoSwitchHooksForZshAndFishAndNoneForPowerShell() {
         assertThat(Hooks.autoSwitch("zsh")).contains("add-zsh-hook chpwd __jkit_hook_env")
-                .contains("command jkit hook-env zsh");
-        assertThat(Hooks.autoSwitch("fish")).contains("--on-variable PWD").contains("command jkit hook-env fish | source");
+                .contains("__jkit_run hook-env zsh");
+        assertThat(Hooks.autoSwitch("fish")).contains("--on-variable PWD").contains("__jkit_run hook-env fish | source");
         assertThat(Hooks.autoSwitch("pwsh")).isNull();
     }
 
@@ -97,12 +97,39 @@ class HooksTest {
         // a JDK's bin/jkit, first on PATH in a project, must not be what runs on cd
         String self = "/opt/jk it's/bin/jkit";
         assertThat(Hooks.posix("bash", Path.of("/home/u/.jkit"), self))
-                .contains("command '/opt/jk it'\\''s/bin/jkit' \"$@\"").doesNotContain("command jkit");
-        assertThat(Hooks.autoSwitch("bash", self)).contains("eval \"$(command '/opt/jk it'\\''s/bin/jkit' hook-env bash)\"");
-        assertThat(Hooks.autoSwitch("zsh", self)).contains("command '/opt/jk it'\\''s/bin/jkit' hook-env zsh");
-        assertThat(Hooks.fish(Path.of("/home/u/.jkit"), self)).contains("env JKIT_ENV_FILE=$envfile '/opt/jk it\\'s/bin/jkit' $argv");
-        assertThat(Hooks.autoSwitch("fish", self)).contains("command '/opt/jk it\\'s/bin/jkit' hook-env fish | source");
-        assertThat(Hooks.powershell(Path.of("/home/u/.jkit"), self)).contains("& '/opt/jk it''s/bin/jkit' @args");
+                .contains("__jkit_bin='/opt/jk it'\\''s/bin/jkit'")
+                .contains("JKIT_ENV_FILE=\"$__jkit_env\" __jkit_run \"$@\"");
+        assertThat(Hooks.posix("bash", Path.of("/home/u/.jkit"))).contains("__jkit_bin=''");
+        assertThat(Hooks.autoSwitch("bash", self)).contains("eval \"$(__jkit_run hook-env bash)\"");
+        assertThat(Hooks.fish(Path.of("/home/u/.jkit"), self)).contains("set -g __jkit_bin '/opt/jk it\\'s/bin/jkit'")
+                .contains("set -lx JKIT_ENV_FILE $envfile");
+        assertThat(Hooks.powershell(Path.of("/home/u/.jkit"), self)).contains("$global:__jkit_bin = '/opt/jk it''s/bin/jkit'");
+    }
+
+    /** The saved path runs while it exists; once it's gone (Scoop moved it), jkit on PATH does. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookFallsBackToPathWhenItsJkitIsGone() throws Exception {
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path saved = Files.createDirectories(tmp.resolve("saved")).resolve("jkit");
+        Path tool = Files.createDirectories(tmp.resolve("home/tools/jdk/21/bin"));
+        for (Path p : new Path[] {bin.resolve("jkit"), saved, tool.resolve("jkit")}) {
+            Files.writeString(p, "#!/bin/sh\necho \"" + p.getParent().getFileName() + " $JKIT_ENV_FILE\"\n");
+            p.toFile().setExecutable(true);
+        }
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, Hooks.posix("bash", tmp.resolve("home"), saved.toString())
+                + "jkit a\nrm '" + saved + "'\njkit b\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString()).redirectErrorStream(true);
+        withoutToolHomes(pb);
+        // a project's JDK first on PATH: its bin/jkit is never the fallback
+        pb.environment().put("PATH", tool + ":" + bin + ":" + pb.environment().get("PATH"));
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out.lines().toList()).as(out).hasSize(2);
+        assertThat(out.lines().toList().get(0)).startsWith("saved ").contains("jkit-env.");
+        assertThat(out.lines().toList().get(1)).startsWith("bin ").contains("jkit-env.");
     }
 
     @Test

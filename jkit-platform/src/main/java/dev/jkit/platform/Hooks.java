@@ -12,11 +12,13 @@ final class Hooks {
     private Hooks() { }
 
     /**
-     * How the hook calls jkit: its absolute path when known, so a {@code bin/jkit} in a JDK or build
-     * tool that a project puts first on PATH is never what runs on {@code cd}; else a PATH lookup.
+     * How the hook calls jkit: {@code __jkit_run}, which runs the binary at its absolute path when
+     * known, so a {@code bin/jkit} in a JDK or build tool that a project puts first on PATH is never
+     * what runs on {@code cd}; else, or once that path is gone (a package manager moved it), a PATH
+     * lookup.
      */
     static String self(String shell, String self) {
-        return self == null ? "jkit" : ShellQuote.quote(shell, self);
+        return self == null ? "''" : ShellQuote.quote(shell, self);
     }
 
     static String posix(String shell, Path root) {
@@ -39,16 +41,29 @@ final class Hooks {
                 [ -z "${SBT_HOME-}" ] && [ -e "$__jkit_g/sbt" ] && export SBT_HOME="$__jkit_g/sbt"
                 [ -z "${GRAALVM_HOME-}" ] && [ -e "$__jkit_g/graalvm" ] && export GRAALVM_HOME="$__jkit_g/graalvm"
                 unset __jkit_t __jkit_g
+                __jkit_bin=%3$s
+                __jkit_root=%4$s
+                __jkit_run() {
+                  if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
+                    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin;
+                    # (pattern) because bash 3.2 (macOS) ends $( ) at a case pattern's lone )
+                    __jkit_bin=$(printf '%%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
+                      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%%s\n' "$__jkit_d/jkit"; break; fi ;; esac
+                    done)
+                  fi
+                  if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi
+                }
                 jkit() {
                   local __jkit_env __jkit_rc
                   __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
-                  JKIT_ENV_FILE="$__jkit_env" command %3$s "$@"
+                  JKIT_ENV_FILE="$__jkit_env" __jkit_run "$@"
                   __jkit_rc=$?
                   [ -s "$__jkit_env" ] && . "$__jkit_env"
                   rm -f "$__jkit_env"
                   return $__jkit_rc
                 }
-                """.formatted(shell, ShellQuote.quote(shell, g), self(shell, self));
+                """.formatted(shell, ShellQuote.quote(shell, g), self(shell, self),
+                ShellQuote.quote(shell, root.toAbsolutePath().normalize().toString()));
     }
 
     /**
@@ -61,7 +76,6 @@ final class Hooks {
     }
 
     static String autoSwitch(String shell, String self) {
-        String jkit = self(shell, self);
         String hook = switch (shell) {
             case "bash" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
@@ -69,7 +83,7 @@ final class Hooks {
                       local __jkit_rc=$?
                       if [ "$PWD" != "${__jkit_pwd-}" ]; then
                         __jkit_pwd=$PWD
-                        eval "$(command @JKIT@ hook-env bash)"
+                        eval "$(__jkit_run hook-env bash)"
                       fi
                       return $__jkit_rc
                     }
@@ -81,7 +95,7 @@ final class Hooks {
                     """;
             case "zsh" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
-                    __jkit_hook_env() { eval "$(command @JKIT@ hook-env zsh)"; }
+                    __jkit_hook_env() { eval "$(__jkit_run hook-env zsh)"; }
                     autoload -Uz add-zsh-hook
                     add-zsh-hook chpwd __jkit_hook_env
                     __jkit_hook_env
@@ -89,13 +103,13 @@ final class Hooks {
             case "fish" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
                     function __jkit_hook_env --on-variable PWD
-                      command @JKIT@ hook-env fish | source
+                      __jkit_run hook-env fish | source
                     end
                     __jkit_hook_env
                     """;
             default -> null;
         };
-        return hook == null ? null : hook.replace("@JKIT@", jkit);
+        return hook;
     }
 
     static String fish(Path root) {
@@ -117,15 +131,36 @@ final class Hooks {
                 if not set -q SBT_HOME; and test -e $__jkit_g/sbt; set -gx SBT_HOME $__jkit_g/sbt; end
                 if not set -q GRAALVM_HOME; and test -e $__jkit_g/graalvm; set -gx GRAALVM_HOME $__jkit_g/graalvm; end
                 set -e __jkit_g
+                set -g __jkit_bin %2$s
+                set -g __jkit_root %3$s
+                function __jkit_run
+                  if test -z "$__jkit_bin"; or not test -x "$__jkit_bin"
+                    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin
+                    set -g __jkit_bin ''
+                    for d in $PATH
+                      if test (string sub -l (string length -- "$__jkit_root/") -- "$d/") != "$__jkit_root/"; and test -x $d/jkit
+                        set -g __jkit_bin $d/jkit
+                        break
+                      end
+                    end
+                  end
+                  if test -n "$__jkit_bin"
+                    command $__jkit_bin $argv
+                  else
+                    echo "jkit: not found on PATH" >&2
+                    return 127
+                  end
+                end
                 function jkit
                   set -l envfile (mktemp)
-                  env JKIT_ENV_FILE=$envfile %2$s $argv
+                  set -lx JKIT_ENV_FILE $envfile
+                  __jkit_run $argv
                   set -l rc $status
                   test -s $envfile; and source $envfile
                   rm -f $envfile
                   return $rc
                 end
-                """.formatted(g, self("fish", self));
+                """.formatted(g, self("fish", self), ShellQuote.quote("fish", root.toAbsolutePath().normalize().toString()));
     }
 
     static String powershell(Path root) {
@@ -133,8 +168,7 @@ final class Hooks {
     }
 
     static String powershell(Path root, String self) {
-        String jkit = self == null ? "(Get-Command jkit -CommandType Application | Select-Object -First 1)"
-                : ShellQuote.quote("pwsh", self);
+        String jkit = self("pwsh", self);
         String g = ShellQuote.quote("pwsh", root.resolve("global").toString());
         return """
                 # jkit shell hook (PowerShell)
@@ -154,12 +188,21 @@ final class Hooks {
                     }
                   }
                 }
+                $global:__jkit_bin = %2$s
+                $global:__jkit_root = %3$s
                 function jkit {
                   # dot-sourcing needs a .ps1 extension
                   $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
                   $env:JKIT_ENV_FILE = $envFile
                   try {
-                    & %2$s @args
+                    if (-not ($global:__jkit_bin -and (Test-Path -LiteralPath $global:__jkit_bin))) {
+                      # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin
+                      $root = $global:__jkit_root.TrimEnd('\\', '/') + [IO.Path]::DirectorySeparatorChar
+                      $global:__jkit_bin = Get-Command jkit -CommandType Application -All -ErrorAction SilentlyContinue |
+                        Where-Object { -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+                        Select-Object -First 1 -ExpandProperty Source
+                    }
+                    & $global:__jkit_bin @args
                     $rc = $LASTEXITCODE
                   } finally {
                     # also after Ctrl-C: later jkit runs outside this function must not write to it
@@ -169,6 +212,6 @@ final class Hooks {
                   Remove-Item $envFile -ErrorAction SilentlyContinue
                   $global:LASTEXITCODE = $rc
                 }
-                """.formatted(g, jkit);
+                """.formatted(g, jkit, ShellQuote.quote("pwsh", root.toAbsolutePath().normalize().toString()));
     }
 }
