@@ -92,7 +92,7 @@ class EnvTest {
                     assertThat(e.exitCode()).isEqualTo(JkitException.NOT_INSTALLED);
                     assertThat(e.getMessage()).isEqualTo("jkit.toml wants jdk 11, gradle 8, not installed");
                     assertThat(e.hints()).containsExactly("install it: jkit install jdk@11",
-                            "install it: jkit install gradle@8", "or ignore the project file: jkit env --global");
+                            "install it: jkit install gradle@8", "or ignore the project file: jkit env --no-project");
                 });
     }
 

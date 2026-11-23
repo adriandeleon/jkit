@@ -6,7 +6,7 @@ import java.nio.file.Path;
 
 /**
  * Where one tool comes from in a shell: what jkit would pick ({@link #wanted}) and what the
- * shell actually has ({@link #source}). Read by {@link ToolStates#read}; see docs/diagnostics.md.
+ * shell actually has ({@link #source}). Read by {@link ToolStates#read}; see docs/design/diagnostics.md.
  *
  * @param shellChoice  {@code jkit use} in this shell (JKIT_SHELL_TOOL), or null
  * @param pin          the project's pin, or null

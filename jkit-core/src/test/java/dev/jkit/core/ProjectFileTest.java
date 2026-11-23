@@ -228,6 +228,28 @@ class ProjectFileTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aFolderOthersCanWriteStopsTheSearch() throws IOException {
+        // like /tmp: another user's jkit.toml there must not apply to folders below it
+        write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
+        dir("shared/mine/repo");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThat(ProjectFile.find(tmp.resolve("shared/mine/repo"), env)).isEqualTo(Optional.empty());
+        assertThat(ProjectFile.trusted(tmp.resolve("shared/mine"))).isTrue();
+    }
+
+    @Test
+    void pinsWithControlCharactersAreSkipped() throws IOException {
+        write("home/p/jkit.toml", "[tools]\njdk = { version = \"21\", vendor = \"zulu\\u001b]0;x\\u0007\" }\n"
+                + "maven = \"3.9\\u001b[2J\"\ngradle = \"8.14\"\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.tools()).containsOnlyKeys(Tool.GRADLE);
+        assertThat(spec.warnings()).anyMatch(w -> w.contains("jdk pins a vendor with characters jkit doesn't accept"))
+                .anyMatch(w -> w.contains("maven pins a version"));
+        assertThat(String.join("", spec.warnings())).doesNotContain("\u001b");
+    }
+
+    @Test
     void overrideVariablePicksAFileOrTurnsProjectsOff() throws IOException {
         write("home/p/jkit.toml", "[tools]\njdk = \"21\"\n");
         Path other = write("elsewhere/.sdkmanrc", "java=17.0.13-zulu\n");

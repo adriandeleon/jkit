@@ -77,6 +77,8 @@ final class JsonOut {
         node.put("graalvm", i.vendor() != null && i.vendor().isGraalVmBased());
         node.put("preRelease", i.version().isPreRelease());
         node.put("home", i.home().toAbsolutePath().toString());
+        // checked against a sha256/384/512 checksum when it was installed (see docs/json.md)
+        node.put("verified", dev.jkit.core.Store.verified(i.home()));
         ArrayNode global = node.putArray("global");
         ArrayNode shell = node.putArray("activeInShell");
         for (Tool t : Tool.values()) {

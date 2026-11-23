@@ -9,6 +9,11 @@ public interface Http {
 
     String get(URI uri) throws IOException;
 
+    /** Like {@link #get}, never from or into a cache: for checksum files, read once per install. */
+    default String getFresh(URI uri) throws IOException {
+        return get(uri);
+    }
+
     void download(URI uri, Path target, Progress progress) throws IOException;
 
     /**

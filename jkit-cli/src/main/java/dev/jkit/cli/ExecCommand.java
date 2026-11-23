@@ -30,14 +30,20 @@ import picocli.CommandLine.Parameters;
                 "  jkit exec jdk@17 zulu maven@3.9 -- mvn -v",
                 "",
                 "Exits with the command's exit code (126: can't start it, 127: not found).",
-                "Never uses the network and installs nothing: a missing version exits 3."})
+                "Never uses the network and installs nothing: a missing version exits 3.",
+                "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits); to stop it",
+                "from another process, send jkit SIGTERM."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",
             completionCandidates = Candidates.Tools.class)
     List<String> args = new ArrayList<>();
 
-    @Option(names = "--global", description = "Ignore project files; start from the global versions only.")
+    @Option(names = "--no-project", description = "Ignore project files; start from the global versions only.")
+    boolean noProject;
+
+    /** The old name of --no-project, kept so scripts keep working. */
+    @Option(names = "--global", hidden = true)
     boolean global;
 
     @Option(names = "--dir", paramLabel = "<path>", description = "Run in this folder, and look for a project file from it.")
@@ -68,7 +74,8 @@ final class ExecCommand implements Callable<Integer> {
         List<String> command = args.subList(args.size() - tail, args.size());
         Context ctx = Context.readOnly();
         Path cwd = Path.of("").toAbsolutePath();
-        Plan plan = plan(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), global, choices(before), command);
+        Plan plan = plan(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), noProject || global, choices(before),
+                command);
         return run(plan, ctx.env);
     }
 
@@ -107,13 +114,14 @@ final class ExecCommand implements Callable<Integer> {
         java.util.Set<Tool> named = java.util.EnumSet.noneOf(Tool.class);
         choices.forEach(c -> named.add(c.spec().tool()));
         EnvCommand.Result base = EnvCommand.compute(ctx, dir, ignoreProject, named,
-                "jkit exec --global " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
+                "jkit exec --no-project " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
         Map<Tool, Path> homes = new EnumMap<>(Tool.class);
         homes.putAll(base.homes());
         boolean jdkIsGraalVm = EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK));
         for (Choice c : choices) {
-            Vendor vendor = Resolve.vendor(ctx, c.spec(), c.vendor());
-            Installed chosen = Resolve.installed(ctx, c.spec(), vendor, c.vendor(), false).getFirst();
+            ToolSpec cs = Resolve.lts(ctx, c.spec(), false);
+            Vendor vendor = Resolve.vendor(ctx, cs, c.vendor());
+            Installed chosen = Resolve.installed(ctx, cs, vendor, c.vendor(), false).getFirst();
             homes.put(c.spec().tool(), chosen.home());
             if (c.spec().tool() == Tool.JDK) {
                 jdkIsGraalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();

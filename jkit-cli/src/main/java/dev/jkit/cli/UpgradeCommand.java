@@ -25,7 +25,11 @@ import picocli.CommandLine.Parameters;
  * installed; a global link that pointed at the line's newest build moves to the new one.
  */
 @Command(name = "upgrade",
-        description = "Installs the newest build within each installed major version and moves --global to it.")
+        description = {"Installs the newest build within each installed major version, and moves the global",
+                "default along when it pointed at the old build. Old builds stay (jkit remove them).",
+                "",
+                "  jkit upgrade --dry-run           what would change (21.0.5 → 21.0.9, maven 3.9.11 → 3.10.2)",
+                "  jkit upgrade jdk"})
 final class UpgradeCommand implements Callable<Integer> {
 
     /** One release line: a store tool, a major version and (for JDKs) a vendor and JavaFX or not. */
@@ -45,11 +49,15 @@ final class UpgradeCommand implements Callable<Integer> {
             completionCandidates = Candidates.Tools.class, description = "Only this tool (and major). Default: everything.")
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--fx", description = "Treat JDKs as JavaFX builds. Only needed for installs made before jkit recorded JavaFX.")
     boolean fx;
+
+    @Option(names = "--allow-unverified",
+            description = "Install upgrades even when the source publishes no checksum for the download.")
+    boolean allowUnverified;
 
     @Option(names = "--pre", description = "Allow pre-releases.")
     boolean pre;
@@ -66,6 +74,7 @@ final class UpgradeCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
+        spec = Resolve.lts(ctx, spec, false);
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
         java.io.PrintStream say = json ? ctx.err : ctx.out;
@@ -134,11 +143,8 @@ final class UpgradeCommand implements Callable<Integer> {
                 say.println(line + ": " + newest.version() + " → " + artifact.version());
                 return row;
             }
-            ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-            Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-            if (!result.verified()) {
-                ctx.err.println("warning: " + InstallCommand.UNVERIFIED);
-            }
+            Installer.Result result = InstallCommand.download(ctx, artifact, allowUnverified,
+                    "jkit upgrade " + line.userTool() + " --allow-unverified");
             row.put("status", "upgraded");
             row.put("verified", result.verified());
             row.put("path", result.installed().home());

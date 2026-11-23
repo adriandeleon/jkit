@@ -14,10 +14,15 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "hook", description = {"Prints the shell hook, e.g. eval \"$(jkit hook bash)\" in ~/.bashrc,",
-        "or adds that line for you with --install (and takes it out with --uninstall).",
-        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1), it also switches",
-        "to a project's versions on cd, and says what it changed."})
+@Command(name = "hook", description = {"Prints the shell hook, or adds it to your shell's startup file.",
+        "The hook puts the global versions on PATH and lets jkit use change this shell.",
+        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1), it also",
+        "switches to a project's versions on cd, and says what it changed.",
+        "",
+        "  jkit hook --install                 add it for your login shell ($SHELL)",
+        "  jkit hook --install --auto-switch   and switch on cd",
+        "  eval \"$(jkit hook bash)\"           load it by hand (zsh alike; fish: jkit hook fish | source)",
+        "  jkit hook --uninstall               take it out again"})
 final class HookCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<shell>", completionCandidates = Candidates.Shells.class,
@@ -115,7 +120,7 @@ final class HookCommand implements Callable<Integer> {
         } else if (manual > 0) {
             ctx.out.println("line " + manual + " of " + shown + " already loads the jkit hook; nothing changed there");
         } else {
-            createParent(file, report);
+            createParent(ctx, file, report);
             Files.writeString(file, ShellRc.add(text, shell).text());
             report.file(file, !exists);
             added = true;
@@ -144,10 +149,14 @@ final class HookCommand implements Callable<Integer> {
         return 0;
     }
 
-    private static void createParent(Path file, Changes report) throws java.io.IOException {
+    private static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
         Path dir = file.toAbsolutePath().getParent();
         if (!Files.isDirectory(dir)) {
-            Files.createDirectories(dir);
+            if (dir.equals(ctx.home.root())) {
+                ctx.home.create();
+            } else {
+                Files.createDirectories(dir);
+            }
             report.folder(dir, true);
         }
     }
@@ -162,7 +171,7 @@ final class HookCommand implements Callable<Integer> {
         if (!edit.changed()) {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
-            createParent(config, report);
+            createParent(ctx, config, report);
             Files.writeString(config, edit.text());
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "

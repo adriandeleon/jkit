@@ -22,7 +22,11 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "search", description = "Lists available versions.")
+@Command(name = "search", description = {"Lists available versions (online; cached 24 h, --offline uses the cache).",
+        "",
+        "  jkit search jdk                  newest build per vendor and release",
+        "  jkit search jdk@21 zulu          every Zulu 21 build",
+        "  jkit search maven@3.9"})
 final class SearchCommand implements Callable<Integer> {
     private static final String INSTALLED = " ●";
 
@@ -30,7 +34,7 @@ final class SearchCommand implements Callable<Integer> {
             description = "jdk, maven, gradle, sbt or graalvm, optionally with a version prefix.")
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class, description = "JDK vendor, e.g. temurin.")
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class, description = "JDK vendor, e.g. temurin.")
     String vendorText;
 
     @Option(names = "--fx", description = "JavaFX builds.")
@@ -51,6 +55,7 @@ final class SearchCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
+        spec = Resolve.lts(ctx, spec, true);
         if (jsonFlag.json) {
             Map<String, Object> doc = json(ctx);
             doc.put("changes", new Changes(ctx).disk().json());

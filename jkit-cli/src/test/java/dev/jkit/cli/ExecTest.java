@@ -100,7 +100,7 @@ class ExecTest {
         assertThatThrownBy(() -> plan("maven"))
                 .isInstanceOf(JkitException.class)
                 .satisfies(e -> assertThat(((JkitException) e).hints()).contains(
-                        "or ignore the project file: jkit exec --global <tools> -- <command>"));
+                        "or ignore the project file: jkit exec --no-project <tools> -- <command>"));
     }
 
     @Test

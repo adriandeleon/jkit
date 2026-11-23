@@ -213,7 +213,7 @@ class DoctorTest {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         DoctorCommand.print(findings, new PrintStream(bytes, true, StandardCharsets.UTF_8));
         String text = bytes.toString(StandardCharsets.UTF_8);
-        assertThat(text).contains("warn  shell hook not loaded").contains("      fix: jkit hook bash --install")
+        assertThat(text).contains("warn  shell hook not loaded").contains("      fix: jkit hook --install")
                 .endsWith("1 warning, 1 problem\n");
 
         JsonNode doc = JSON.readTree(JsonOut.write(DoctorCommand.json(findings)));

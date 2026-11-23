@@ -35,6 +35,18 @@ class ResolveTest {
     }
 
     @Test
+    void ltsOfflineIsTheNewestLtsReleaseInstalled() throws Exception {
+        Context ctx = Context.forEnv(Map.of("JKIT_HOME", home.toString()));
+        assertThatThrownBy(() -> Resolve.lts(ctx, ToolSpec.parse("jdk@lts"), false))
+                .isInstanceOf(JkitException.class).hasMessageContaining("no LTS jdk is installed");
+        install("17.0.13+11", false);
+        install("21.0.9+10", false);
+        install("23.0.2+7", false); // newer, but not LTS
+        assertThat(Resolve.lts(ctx, ToolSpec.parse("jdk@lts"), false).version()).isEqualTo("21");
+        assertThat(Resolve.lts(ctx, ToolSpec.parse("jdk@21"), false).version()).isEqualTo("21"); // others untouched
+    }
+
+    @Test
     void plainBuildsWinUnlessFxIsAsked() throws Exception {
         install("21.0.5+11", false);
         install("21.0.9+10", true);

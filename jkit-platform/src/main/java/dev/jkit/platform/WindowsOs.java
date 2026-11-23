@@ -27,28 +27,43 @@ final class WindowsOs implements OsServices {
         // recreate the link in between, and antivirus or the indexer can hold it briefly: retry, and if
         // it still fails put the old link back, so a failed switch never leaves no global version.
         Path old = readLink(link);
+        if (old != null && old.toAbsolutePath().normalize().equals(link.toAbsolutePath().normalize())) {
+            old = null; // a broken link with no recorded target: nothing to put back (not a loop onto itself)
+        }
         IOException last = null;
-        for (int attempt = 1; attempt <= 5; attempt++) {
+        boolean moved = false;
+        for (int attempt = 1; attempt <= 5 && !moved; attempt++) {
             try {
                 removeLink(link);
                 Files.move(tmp, link);
-                Files.writeString(targetFile(link), target.toAbsolutePath().toString(), StandardCharsets.UTF_8);
-                return;
+                moved = true;
             } catch (IOException e) {
                 last = e;
                 sleep(100L * attempt);
             }
         }
-        Files.deleteIfExists(tmp);
-        if (old != null && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+        if (!moved) {
+            Files.deleteIfExists(tmp);
+            if (old != null && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+                try {
+                    mklink(link, old);
+                    Files.writeString(targetFile(link), old.toString(), StandardCharsets.UTF_8);
+                } catch (IOException restore) {
+                    last.addSuppressed(restore);
+                }
+            }
+            throw last;
+        }
+        // The switch is done. The .target file only helps report a link whose target is gone later,
+        // so a file held open by antivirus is retried briefly, then left out: never undo the switch.
+        for (int attempt = 1; attempt <= 5; attempt++) {
             try {
-                mklink(link, old);
-                Files.writeString(targetFile(link), old.toString(), StandardCharsets.UTF_8);
-            } catch (IOException restore) {
-                last.addSuppressed(restore);
+                Files.writeString(targetFile(link), target.toAbsolutePath().toString(), StandardCharsets.UTF_8);
+                return;
+            } catch (IOException e) {
+                sleep(100L * attempt);
             }
         }
-        throw last;
     }
 
     private static void sleep(long millis) throws IOException {

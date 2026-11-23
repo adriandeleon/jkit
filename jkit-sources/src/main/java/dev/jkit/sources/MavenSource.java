@@ -53,14 +53,16 @@ public final class MavenSource {
     }
 
     /**
-     * .sha512 exists from Maven 3.9.1 on, so a mirror without it is not allowed to fall back to sha1;
-     * older releases have only .sha1 (and .md5).
+     * .sha512 exists from Maven 3.9.1 on (and 4.0.0-alpha-5 on: alpha-2 to -4 have only .sha1), so
+     * a mirror without it is not allowed to fall back to sha1; older releases have only .sha1.
+     * Fetched fresh each time: a cached proxy error page would fail every install for a day.
      */
     private Checksum checksum(URI url, String file, Version v) throws IOException {
-        boolean hasSha512 = v.compareTo(Version.parse("3.9.1")) >= 0;
+        boolean hasSha512 = v.compareTo(Version.parse("3.9.1")) >= 0
+                && !(v.part(0) == 4 && v.compareTo(Version.parse("4.0.0-alpha-5")) < 0);
         for (String ext : hasSha512 ? new String[] {"sha512"} : new String[] {"sha512", "sha1"}) {
             try {
-                Checksum c = Checksum.parse(http.get(URI.create(url + "." + ext)), file, ext);
+                Checksum c = Checksum.parse(http.getFresh(URI.create(url + "." + ext)), file, ext);
                 if (c != null) {
                     return c;
                 }

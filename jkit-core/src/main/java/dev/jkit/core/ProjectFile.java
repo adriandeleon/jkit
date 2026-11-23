@@ -77,12 +77,61 @@ public final class ProjectFile {
         Path home = home(env);
         boolean belowHome = home != null && dir.startsWith(home);
         for (; dir != null; dir = dir.getParent()) {
+            if (!trusted(dir)) {
+                return List.of(); // like git's safe.directory: someone else's folder can't steer this shell
+            }
             List<Path> found = filesIn(dir);
             if (!found.isEmpty() || (belowHome && dir.equals(home))) {
                 return found;
             }
         }
         return List.of();
+    }
+
+    /**
+     * Whether project files in {@code dir} may apply: it belongs to this user or root, and others
+     * can't write to it. A {@code /tmp/jkit.toml} from another user must not change versions, or print
+     * text, in every shell that visits {@code /tmp/...}. Always true where there are no POSIX owners.
+     */
+    static boolean trusted(Path dir) {
+        if (!POSIX) {
+            return true;
+        }
+        try {
+            String owner = Files.getOwner(dir).getName();
+            if (!owner.equals("root") && !owner.equals(System.getProperty("user.name"))) {
+                return false;
+            }
+            return !Files.getPosixFilePermissions(dir).contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE);
+        } catch (IOException | UnsupportedOperationException e) {
+            return false;
+        }
+    }
+
+    private static final boolean POSIX =
+            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    private static final java.util.regex.Pattern SAFE_VERSION = java.util.regex.Pattern.compile("[0-9A-Za-z.+_-]{1,64}");
+    private static final java.util.regex.Pattern SAFE_VENDOR = java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,64}");
+
+    /**
+     * Drops pins whose version or vendor isn't plain text: project files come with cloned repos and
+     * their values are printed on every {@code cd}, so escape sequences must never get that far.
+     */
+    static ProjectSpec checked(ProjectSpec spec) {
+        Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
+        List<String> warnings = new ArrayList<>(spec.warnings());
+        spec.tools().forEach((tool, pin) -> {
+            boolean versionOk = pin.version() == null || SAFE_VERSION.matcher(pin.version()).matches();
+            boolean vendorOk = pin.vendor() == null || SAFE_VENDOR.matcher(pin.vendor().name()).matches();
+            if (versionOk && vendorOk) {
+                tools.put(tool, pin);
+            } else {
+                warnings.add(spec.files().getFirst() + ": " + tool + " pins a "
+                        + (versionOk ? "vendor" : "version") + " with characters jkit doesn't accept, skipped");
+            }
+        });
+        return new ProjectSpec(spec.files(), tools, warnings);
     }
 
     private static List<Path> filesIn(Path dir) {
@@ -131,14 +180,14 @@ public final class ProjectFile {
         Path toml = dir.resolve(JKIT_TOML);
         Path hidden = dir.resolve(HIDDEN_TOML);
         if (Files.isRegularFile(toml)) {
-            ProjectSpec spec = readToml(toml);
+            ProjectSpec spec = checked(readToml(toml));
             if (Files.isRegularFile(hidden)) {
                 spec = withWarning(spec, hidden + ": ignored, " + JKIT_TOML + " in the same folder wins");
             }
             return Optional.of(spec);
         }
         if (Files.isRegularFile(hidden)) {
-            return Optional.of(readToml(hidden));
+            return Optional.of(checked(readToml(hidden)));
         }
         List<ProjectSpec> found = new ArrayList<>();
         for (String name : List.of(SDKMANRC, TOOL_VERSIONS, JAVA_VERSION)) {
@@ -153,12 +202,12 @@ public final class ProjectFile {
     /** Reads one file, choosing the format by its name ({@code jkit.toml} for anything else). */
     public static ProjectSpec read(Path file) {
         String name = file.getFileName().toString();
-        return switch (name) {
+        return checked(switch (name) {
             case SDKMANRC -> readSdkmanrc(file);
             case TOOL_VERSIONS -> readToolVersions(file);
             case JAVA_VERSION -> readJavaVersion(file);
             default -> readToml(file);
-        };
+        });
     }
 
     /** Earlier specs win where several pin the same tool. */

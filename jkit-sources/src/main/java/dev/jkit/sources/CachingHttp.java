@@ -66,6 +66,15 @@ public final class CachingHttp implements Http {
     }
 
     @Override
+    public String getFresh(URI uri) throws IOException {
+        if (offline) {
+            throw new dev.jkit.model.JkitException("--offline, but " + uri.getHost() + " has to be asked for a checksum",
+                    "run the command without --offline");
+        }
+        return delegate.get(uri);
+    }
+
+    @Override
     public String get(URI uri) throws IOException {
         Path file = dir.resolve(key(uri) + ".cache");
         if (Files.isRegularFile(file)) {
@@ -76,8 +85,17 @@ public final class CachingHttp implements Http {
             }
         }
         if (offline) {
-            throw new dev.jkit.model.JkitException("--offline, but there is no cached version list from "
-                    + uri.getHost() + " yet", "run the command once without --offline");
+            boolean anyCached;
+            try (var files = Files.list(dir)) {
+                anyCached = files.anyMatch(f -> f.getFileName().toString().endsWith(".cache"));
+            } catch (IOException e) {
+                anyCached = false;
+            }
+            throw new dev.jkit.model.JkitException(anyCached
+                    ? "--offline, but this lookup on " + uri.getHost() + " isn't cached (the cache only holds "
+                            + "what earlier commands asked for)"
+                    : "--offline, but there is no cached version list from " + uri.getHost() + " yet",
+                    "run the command once without --offline");
         }
         String body;
         try {

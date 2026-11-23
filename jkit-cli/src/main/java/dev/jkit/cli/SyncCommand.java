@@ -26,6 +26,10 @@ import picocli.CommandLine.Option;
                 "Without the shell hook it only installs; then use jkit exec or eval \"$(jkit env)\"."})
 final class SyncCommand implements Callable<Integer> {
 
+    @Option(names = "--allow-unverified",
+            description = "Install pins even when the source publishes no checksum for the download.")
+    boolean allowUnverified;
+
     @Option(names = "--dry-run", description = "Only list what would be installed.")
     boolean dryRun;
 
@@ -119,11 +123,7 @@ final class SyncCommand implements Callable<Integer> {
         if (dryRun) {
             return new Step(pin, "would-install", artifact.label(), null);
         }
-        ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-        Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-        if (!result.verified()) {
-            ctx.err.println("warning: " + InstallCommand.UNVERIFIED);
-        }
+        Installer.Result result = InstallCommand.download(ctx, artifact, allowUnverified, "jkit sync --allow-unverified");
         report.disk();
         for (Path leftover : result.removedLeftovers()) {
             report.folder(leftover, false);

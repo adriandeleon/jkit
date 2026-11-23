@@ -98,7 +98,9 @@ public final class FoojaySource {
         String what = source.isEmpty() ? "unknown JDK vendor '" + typed + "'"
                 : source + " '" + typed + "' is not a known JDK vendor";
         List<String> hints = new ArrayList<>();
-        if (guess != null) {
+        if (Version.looksLikeVersion(typed)) {
+            hints.add("a version goes after @, not a space: jdk@" + typed.trim());
+        } else if (guess != null) {
             hints.add("did you mean: " + guess + "?");
         }
         hints.add("vendors: " + String.join(", ", names));
@@ -156,7 +158,7 @@ public final class FoojaySource {
             String checksumUri = Json.text(info, "checksum_uri");
             if (checksum == null && !checksumUri.isEmpty()) {
                 URI uri = Http.requireSecure(URI.create(checksumUri));
-                checksum = Checksum.parse(http.get(uri), pkg.fileName(), Json.text(info, "checksum_type"));
+                checksum = Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
             return new Artifact(tool, pkg.version(), pkg.vendor(), Http.requireSecure(URI.create(url)), pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),

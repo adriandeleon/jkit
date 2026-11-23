@@ -101,7 +101,7 @@ class StatusTest {
     @Test
     void missingHookIsTheHintWhenTheGlobalIsNotApplied() throws Exception {
         assertThat(text()).startsWith("jdk      -                       not set\n"
-                + "         the global jdk isn't applied: the jkit hook isn't loaded: jkit hook bash --install");
+                + "         the global jdk isn't applied: the jkit hook isn't loaded: jkit hook --install");
     }
 
     @Test

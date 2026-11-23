@@ -111,26 +111,32 @@ final class Hooks {
         return """
                 # jkit shell hook (PowerShell)
                 $env:JKIT_SHELL = 'pwsh'
-                $__jkitG = %1$s
-                $__jkitSep = [IO.Path]::PathSeparator
-                foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
-                  $bin = Join-Path (Join-Path $__jkitG $t) 'bin'
-                  if (($env:PATH -split [regex]::Escape($__jkitSep)) -notcontains $bin) { $env:PATH = $bin + $__jkitSep + $env:PATH }
-                }
-                foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
-                  $dir = Join-Path $__jkitG $pair[1]
-                  if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
-                    Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+                & {
+                  # a script block of its own: the profile's $t, $bin, $dir... stay as they were
+                  $g = %1$s
+                  $sep = [IO.Path]::PathSeparator
+                  foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
+                    $bin = Join-Path (Join-Path $g $t) 'bin'
+                    if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }
+                  }
+                  foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
+                    $dir = Join-Path $g $pair[1]
+                    if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
+                      Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+                    }
                   }
                 }
-                Remove-Variable __jkitG, __jkitSep, t, bin, pair, dir -ErrorAction SilentlyContinue
                 function jkit {
                   # dot-sourcing needs a .ps1 extension
                   $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
                   $env:JKIT_ENV_FILE = $envFile
-                  & (Get-Command jkit -CommandType Application | Select-Object -First 1) @args
-                  $rc = $LASTEXITCODE
-                  Remove-Item Env:JKIT_ENV_FILE
+                  try {
+                    & (Get-Command jkit -CommandType Application | Select-Object -First 1) @args
+                    $rc = $LASTEXITCODE
+                  } finally {
+                    # also after Ctrl-C: later jkit runs outside this function must not write to it
+                    Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
+                  }
                   if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) { . $envFile }
                   Remove-Item $envFile -ErrorAction SilentlyContinue
                   $global:LASTEXITCODE = $rc

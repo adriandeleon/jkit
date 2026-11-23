@@ -13,12 +13,46 @@ import java.util.TreeSet;
 final class Resolve {
     private Resolve() { }
 
+    /**
+     * {@code jdk@lts} as a feature release: online, the newest GA LTS foojay lists; offline (use,
+     * exec, remove, upgrade), the newest LTS release installed. Any other spec is returned as is.
+     */
+    static ToolSpec lts(Context ctx, ToolSpec spec, boolean online) throws Exception {
+        if (spec == null || !spec.isLts()) {
+            return spec;
+        }
+        if (online) {
+            for (dev.jkit.sources.FoojaySource.Major m : ctx.foojay().majors()) {
+                if (m.isLts()) {
+                    return new ToolSpec(spec.tool(), String.valueOf(m.major()));
+                }
+            }
+            throw new JkitException("foojay lists no LTS release");
+        }
+        int best = -1;
+        for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
+            int major = JsonOut.major(i.tool(), i.version());
+            boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
+            if (ToolSpec.isLtsMajor(major) && major > best && (spec.tool() != dev.jkit.model.Tool.GRAALVM || graal)) {
+                best = major;
+            }
+        }
+        if (best < 0) {
+            throw new JkitException(JkitException.NOT_INSTALLED, "no LTS " + spec.tool() + " is installed",
+                    "install one: jkit install " + spec.tool() + "@lts");
+        }
+        return new ToolSpec(spec.tool(), String.valueOf(best));
+    }
+
     /** The vendor typed, or the default; an error for tools without vendors. */
     static Vendor vendor(Context ctx, ToolSpec spec, String typed) {
         Tool tool = spec.tool();
         if (!tool.hasVendors()) {
             if (typed != null) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, tool + " has no vendors; drop '" + typed + "'");
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, tool + " has no vendors; drop '" + typed + "'",
+                        dev.jkit.model.Version.looksLikeVersion(typed)
+                                ? "a version goes after @, not a space: " + tool + "@" + typed.trim()
+                                : "e.g. jkit install " + tool + "@<version>");
             }
             return null;
         }

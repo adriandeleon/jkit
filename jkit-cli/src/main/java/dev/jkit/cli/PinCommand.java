@@ -38,7 +38,7 @@ final class PinCommand implements Callable<Integer> {
             completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--fx", description = "Require a JavaFX build.")
@@ -65,6 +65,7 @@ final class PinCommand implements Callable<Integer> {
     }
 
     int run(Context ctx, Path cwd) throws Exception {
+        spec = Resolve.lts(ctx, spec, true);
         String retry = "jkit pin " + spec + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "")
                 + (exact ? " --exact" : "");
         Path file = ProjectShell.target(ctx, cwd, here, retry);

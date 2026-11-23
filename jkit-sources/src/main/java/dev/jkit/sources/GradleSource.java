@@ -38,7 +38,7 @@ public final class GradleSource {
         String file = url.substring(url.lastIndexOf('/') + 1);
         Checksum checksum = Checksum.of(r.checksum(), "sha256");
         if (checksum == null && !r.checksumUrl().isEmpty()) {
-            checksum = Checksum.parse(http.get(Http.requireSecure(URI.create(r.checksumUrl()))), file, "sha256");
+            checksum = Checksum.parse(http.getFresh(Http.requireSecure(URI.create(r.checksumUrl()))), file, "sha256");
         }
         return new Artifact(Tool.GRADLE, r.version(), null, Http.requireSecure(URI.create(url)), file, "zip",
                 checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);

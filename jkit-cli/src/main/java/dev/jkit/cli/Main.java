@@ -40,7 +40,15 @@ public final class Main implements Runnable {
         spec.commandLine().usage(System.out);
     }
 
+    /** Commands whose stdout is shell code to eval or a script, not text for a person. */
+    private static final java.util.Set<String> MACHINE_STDOUT = java.util.Set.of("env", "hook-env", "hook", "completion");
+
     public static void main(String[] args) {
+        // messages carry text from project files and the network: never raw escape sequences
+        System.setErr(SafeOutput.wrap(System.err));
+        if (args.length == 0 || !MACHINE_STDOUT.contains(args[0])) {
+            System.setOut(SafeOutput.wrap(System.out));
+        }
         if (args.length >= 1 && args.length <= 2 && args[0].equals("hook-env")) {
             // the cd hook runs this on every directory change: skip building the whole command line
             HookEnvCommand hookEnv = new HookEnvCommand();
@@ -76,12 +84,11 @@ public final class Main implements Runnable {
                 }
                 return CommandLine.ExitCode.USAGE;
             }
-            System.err.println("error: " + ex.getMessage());
+            JkitException usage = usageError(ex);
+            printError(usage);
             if (json) {
-                JsonOut.print(System.out, JsonOut.error(new JkitException(ex.getMessage()), CommandLine.ExitCode.USAGE));
-                return CommandLine.ExitCode.USAGE; // a program reads the document, not the usage text
+                JsonOut.print(System.out, JsonOut.error(usage, CommandLine.ExitCode.USAGE));
             }
-            ex.getCommandLine().usage(System.err);
             return CommandLine.ExitCode.USAGE;
         });
         if (json && (list.contains("-h") || list.contains("--help") || list.contains("help")
@@ -99,6 +106,30 @@ public final class Main implements Runnable {
             return code;
         }
         return cli.execute(args);
+    }
+
+    /**
+     * A parse error as one line plus hints, not the whole usage screen: "did you mean" for a
+     * mistyped command, the missing -- for exec, and the command's synopsis.
+     */
+    static JkitException usageError(CommandLine.ParameterException ex) {
+        CommandLine cmd = ex.getCommandLine();
+        java.util.List<String> hints = new java.util.ArrayList<>();
+        boolean exec = cmd.getCommandName().equals("exec");
+        if (!exec && ex instanceof CommandLine.UnmatchedArgumentException unmatched
+                && !unmatched.getSuggestions().isEmpty()) {
+            hints.add("did you mean: " + unmatched.getSuggestions().getFirst() + "?");
+        }
+        if (exec) {
+            hints.add("put -- before the command to run: jkit exec [<tool>@<version> [vendor]]... -- <command> [args]");
+        }
+        String name = cmd.getCommandSpec().qualifiedName();
+        String synopsis = cmd.getHelp().synopsis(0).strip().replaceFirst("^Usage:\\s*", "");
+        if (cmd.getParent() != null) {
+            hints.add("usage: " + synopsis.replaceAll("\\s+", " "));
+        }
+        hints.add("more: " + name + " --help");
+        return new JkitException(CommandLine.ExitCode.USAGE, ex.getMessage(), hints.toArray(String[]::new));
     }
 
     private static void printError(JkitException e) {

@@ -28,7 +28,8 @@ public record Vendor(String name, String foojayName) {
             Set.of("graalvm_community", "graalvm", "liberica_native", "mandrel");
 
     public static Vendor of(String text) {
-        String lower = text.toLowerCase(Locale.ROOT).trim();
+        // liberica_nik and liberica-nik alike: aliases are keyed by the dash spelling
+        String lower = text.toLowerCase(Locale.ROOT).trim().replace('_', '-');
         String foojay = ALIASES.getOrDefault(lower, lower.replace('-', '_'));
         return fromFoojay(foojay);
     }

@@ -20,13 +20,16 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 @Command(name = "remove", description = {"Removes installed versions. Refuses anything global or chosen in this shell without --force.",
-        "Warns, but doesn't refuse, when the project file here pins it."})
+        "Warns, but doesn't refuse, when the project file here pins it.",
+        "",
+        "  jkit remove jdk@17.0.12 temurin",
+        "  jkit remove jdk@17 --all         every installed 17 from the default vendor"})
 final class RemoveCommand implements Callable<Integer> {
 
     @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--all", description = "Remove every match.")
@@ -44,6 +47,7 @@ final class RemoveCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
+        spec = Resolve.lts(ctx, spec, false);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx);
         String vendorSuffix = (vendor == null ? "" : " " + vendor) + (fx ? " --fx" : "");
@@ -63,8 +67,14 @@ final class RemoveCommand implements Callable<Integer> {
             for (Installed i : matches) {
                 List<String> notes = ListCommand.notes(ctx, i);
                 if (!notes.isEmpty()) {
+                    List<String> hints = new ArrayList<>();
+                    if (notes.stream().anyMatch(n -> n.startsWith("global"))) {
+                        hints.add("make another version the default first: jkit use " + i.tool() + "@<version> --global");
+                        hints.add("or clear the default: jkit reset " + i.tool() + " --global");
+                    }
+                    hints.add("or remove it anyway (the link goes too): add --force");
                     throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)
-                            + "; nothing removed", "remove it anyway: add --force");
+                            + "; nothing removed", hints.toArray(String[]::new));
                 }
             }
         }

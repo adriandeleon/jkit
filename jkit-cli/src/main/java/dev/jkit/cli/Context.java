@@ -57,6 +57,7 @@ final class Context {
         this.platform = Platform.current();
         Config loaded;
         String error = null;
+        home.requireSafe(); // never lenient: a home others can write to puts their programs on PATH
         try {
             loaded = Config.load(home, env);
         } catch (dev.jkit.model.JkitException e) {
@@ -77,6 +78,11 @@ final class Context {
     /** The caching HTTP client, created on first use. */
     Http http() {
         if (http == null) {
+            try {
+                home.create(); // before the cache makes it with the default permissions
+            } catch (java.io.IOException e) {
+                throw new dev.jkit.model.JkitException("cannot create " + home.root() + ": " + e.getMessage());
+            }
             http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
                     Duration.ofHours(24), Clock.systemUTC(), refresh,
                     offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),

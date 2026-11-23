@@ -51,7 +51,9 @@ public final class Store {
             }
         }
         // newest first; a plain build before a JavaFX build of the same version
-        out.sort(Comparator.comparing(Installed::version).reversed().thenComparing(Installed::fx));
+        // vendor last, so equal versions come in the same order on every machine (not directory order)
+        out.sort(Comparator.comparing(Installed::version).reversed().thenComparing(Installed::fx)
+                .thenComparing(i -> i.vendor() == null ? "" : i.vendor().name()));
         return out;
     }
 
@@ -90,7 +92,7 @@ public final class Store {
      * another jkit holds it.
      */
     public AutoCloseable lock() throws IOException {
-        Files.createDirectories(home.root());
+        home.create();
         java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(home.lockFile(),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
         java.nio.channels.FileLock lock;
@@ -108,7 +110,7 @@ public final class Store {
     }
 
     /** Whether the install was checked against a strong checksum; false for installs made before jkit recorded it. */
-    static boolean verified(Path dir) {
+    public static boolean verified(Path dir) {
         Properties p = new Properties();
         try (InputStream in = Files.newInputStream(dir.resolve(MARKER))) {
             p.load(in);

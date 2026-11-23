@@ -147,9 +147,9 @@ final class Changes {
                     + "; remove it from your shell profile to use jkit's");
         } else if (ctx.env.get("JKIT_SHELL") == null) {
             note("the jkit hook is not loaded in this shell, so nothing sets " + var
-                    + "; load it in new shells: jkit hook bash --install");
+                    + "; load it in new shells: jkit hook --install");
         } else {
-            note(var + " is not set in this shell yet; open a new shell, or: jkit use " + tool);
+            note(var + " is not set in this shell yet; open a new shell, or: jkit reset " + tool);
         }
         return this;
     }

@@ -44,7 +44,7 @@ public final class Installer {
             throw new JkitException("refusing an install folder outside " + toolsDir + ": " + dest);
         }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
-        Files.createDirectories(home.root());
+        home.create();
         try (FileChannel channel = FileChannel.open(home.lockFile(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
             if (Files.isDirectory(dest)) {
@@ -136,6 +136,29 @@ public final class Installer {
         return Files.isDirectory(macHome) ? macHome : candidate;
     }
 
+    private static final boolean POSIX =
+            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */
+    private static void makeExecutable(Path bin) {
+        try (var files = Files.list(bin)) {
+            for (Path f : files.toList()) {
+                String n = f.getFileName().toString();
+                if (Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS) && !n.endsWith(".bat")
+                        && !n.endsWith(".cmd") && !n.endsWith(".exe")) {
+                    java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
+                            new java.util.HashSet<>(Files.getPosixFilePermissions(f));
+                    perms.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+                    perms.add(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE);
+                    perms.add(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE);
+                    Files.setPosixFilePermissions(f, perms);
+                }
+            }
+        } catch (IOException e) {
+            throw new JkitException("cannot make " + bin + " executable: " + e.getMessage());
+        }
+    }
+
     private static void requireExecutable(Tool tool, Path toolHome, String label) {
         List<String> names = switch (tool) {
             case JDK, GRAALVM -> List.of("java", "java.exe");
@@ -144,7 +167,11 @@ public final class Installer {
             case SBT -> List.of("sbt", "sbt.bat");
         };
         for (String name : names) {
-            if (Files.isRegularFile(toolHome.resolve("bin").resolve(name))) {
+            Path launcher = toolHome.resolve("bin").resolve(name);
+            if (Files.isRegularFile(launcher)) {
+                if (POSIX && !name.contains(".") && !Files.isExecutable(launcher)) {
+                    makeExecutable(toolHome.resolve("bin")); // a zip made without Unix modes
+                }
                 return;
             }
         }
