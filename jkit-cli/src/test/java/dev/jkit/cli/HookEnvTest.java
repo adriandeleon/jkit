@@ -70,7 +70,7 @@ class HookEnvTest {
     @Test
     void theFolderLeftIsFoundEvenWithSemicolonsInItsName() {
         String sep = java.io.File.separator;
-        String file = sep + "src" + sep + "a;b:1" + sep + "jkit.toml";
+        String file = sep + "src" + sep + "a;b" + sep + "jkit.toml"; // no ":" in a Windows name
         assertThat(HookEnvCommand.appliedDir(file + ":1700000000000;" + sep + "x" + sep + ".sdkmanrc:5"))
                 .isEqualTo(Path.of(file).getParent().toString());
         assertThat(HookEnvCommand.appliedDir(file + ":1700000000000" + ProjectShell.MISSING))
