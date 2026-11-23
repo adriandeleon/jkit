@@ -135,6 +135,11 @@ class HookEnvTest {
         assertThat(env).containsEntry("JAVA_HOME", home.resolve("global/jdk").toString());
         cd(project.resolve("."));
         assertThat(said()).isEmpty(); // looked again, nothing new: quiet
+        cd(elsewhere); // leaving: nothing had changed, but jkit's note of the project goes, and that is said
+        assertThat(said()).contains("left the project in").contains("it had changed no versions")
+                .contains("unset  JKIT_PROJECT");
+        assertThat(env).doesNotContainKey("JKIT_PROJECT");
+        cd(project);
         Path jdk11 = install("jdk", "11.0.25+9-temurin", "version=11.0.25+9\nvendor=temurin\n");
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", jdk11.toString());
@@ -155,7 +160,8 @@ class HookEnvTest {
     void aBrokenProjectFileIsReportedOnceAndChangesNothing() throws Exception {
         Files.writeString(project.resolve("jkit.toml"), "[tools\njdk = \"21\"\n");
         cd(project);
-        assertThat(said()).startsWith("jkit: ").contains("jkit.toml").contains("this shell's versions are unchanged");
+        assertThat(said()).startsWith("jkit: ").contains("jkit.toml").contains("this shell's versions are unchanged")
+                .contains("set    JKIT_PROJECT=");
         assertThat(env).containsEntry("JAVA_HOME", home.resolve("global/jdk").toString()).containsKey("JKIT_PROJECT");
         assertThat(cd(project)).isEmpty();
         assertThat(said()).isEmpty();

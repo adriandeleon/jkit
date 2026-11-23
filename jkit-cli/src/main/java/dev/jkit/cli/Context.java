@@ -43,6 +43,7 @@ final class Context {
     final java.util.List<CacheWrite> cacheWrites = new java.util.ArrayList<>();
 
     /** One cached version list written: {@code created} false when it replaced an older copy. */
+    /** A file the cache wrote ({@code source} is where it came from), or deleted ({@code source} null). */
     record CacheWrite(URI source, java.nio.file.Path file, boolean created) { }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
@@ -90,6 +91,11 @@ final class Context {
                         @Override
                         public void stored(URI uri, java.nio.file.Path file, boolean created) {
                             cacheWrites.add(new CacheWrite(uri, file, created));
+                        }
+
+                        @Override
+                        public void removed(java.nio.file.Path file) {
+                            cacheWrites.add(new CacheWrite(null, file, false));
                         }
 
                         @Override

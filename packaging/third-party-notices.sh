@@ -51,6 +51,21 @@ if [ "$missing" = 1 ]; then
   echo "add a Files: stanza for each to $deb_copyright" >&2
   exit 1
 fi
+# ...and nothing else: each path it names is a listed component, or code embedded in one
+# (group/artifact/name), or the Java runtime
+extra=0
+while IFS= read -r path; do
+  case "$path" in '*'|openjdk/java-runtime) continue ;; esac
+  ga=$(printf '%s\n' "$path" | cut -d/ -f1,2)
+  if ! grep -qxF "${ga%%/*}:${ga#*/}" <(cut -d: -f1,2 "$tmp/listed"); then
+    echo "$deb_copyright names $path, which isn't in the binary" >&2
+    extra=1
+  fi
+done < <(awk '/^Files:/{f=1; sub(/^Files: */,""); print; next} f && /^ [^ .]/ && !/:/{sub(/^ +/,""); print; next} {f=0}' "$deb_copyright")
+if [ "$extra" = 1 ]; then
+  echo "remove those stanzas from $deb_copyright (or list the component in components.tsv)" >&2
+  exit 1
+fi
 
 # 2. Render the notices.
 jar_of() { # group:artifact version

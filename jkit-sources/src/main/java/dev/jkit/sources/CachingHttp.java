@@ -34,7 +34,15 @@ public final class CachingHttp implements Http {
 
         /** An old cached copy stands in for a request that failed. */
         default void stale(String message) { }
+
+        /** {@code file} was deleted to keep the cache small. */
+        default void removed(Path file) { }
     }
+
+    /** Cached answers older than this are deleted when the cache is written to. */
+    static final Duration MAX_AGE = Duration.ofDays(30);
+    /** The most the cache keeps: the oldest answers go first (real ones are a few KB to 0.3 MB). */
+    static final long MAX_BYTES = 32L << 20;
 
     public CachingHttp(Http delegate, Path dir, Duration ttl, Clock clock, boolean refresh, boolean offline) {
         this(delegate, dir, ttl, clock, refresh, offline, Listener.NONE);
@@ -139,7 +147,43 @@ public final class CachingHttp implements Http {
             Files.deleteIfExists(tmp);
         }
         listener.stored(uri, file, created);
+        prune(file);
         return body;
+    }
+
+    /**
+     * Keeps the cache under {@link #MAX_BYTES} and {@link #MAX_AGE}, never deleting {@code keep}:
+     * every lookup is a file of its own, so a mirror answering thousands of them would otherwise
+     * fill the disk.
+     */
+    private void prune(Path keep) {
+        record Entry(Path file, Instant time, long size) { }
+        java.util.List<Entry> entries = new java.util.ArrayList<>();
+        try (var files = Files.list(dir)) {
+            for (Path f : (Iterable<Path>) files::iterator) {
+                if (f.getFileName().toString().endsWith(".cache") && !f.equals(keep)
+                        && Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    entries.add(new Entry(f, Files.getLastModifiedTime(f).toInstant(), Files.size(f)));
+                }
+            }
+            long total = Files.size(keep);
+            for (Entry e : entries) {
+                total += e.size();
+            }
+            entries.sort(java.util.Comparator.comparing(Entry::time));
+            Instant old = clock.instant().minus(MAX_AGE);
+            for (Entry e : entries) {
+                if (total <= MAX_BYTES && e.time().isAfter(old)) {
+                    break;
+                }
+                if (Files.deleteIfExists(e.file())) {
+                    listener.removed(e.file());
+                }
+                total -= e.size();
+            }
+        } catch (IOException e) {
+            // a smaller cache is a nicety: the lookup itself worked
+        }
     }
 
     /** The sources answer JSON or XML; HTML means something in between answered instead. */

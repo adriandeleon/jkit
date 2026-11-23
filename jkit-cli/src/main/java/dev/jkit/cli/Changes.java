@@ -99,8 +99,10 @@ final class Changes {
             ctx.homeReported = true;
         }
         for (Context.CacheWrite w : ctx.cacheWrites) {
-            changes.add(new Change("file", w.file().toAbsolutePath().toString(), w.created() ? "create" : "update",
-                    w.source().toString()));
+            changes.add(w.source() == null
+                    ? new Change("file", w.file().toAbsolutePath().toString(), "delete", null)
+                    : new Change("file", w.file().toAbsolutePath().toString(), w.created() ? "create" : "update",
+                            w.source().toString()));
         }
         ctx.cacheWrites.clear();
         return this;
@@ -170,8 +172,14 @@ final class Changes {
     void print(PrintStream out) {
         int listsCreated = 0;
         int listsUpdated = 0;
+        int listsDeleted = 0;
         Set<String> hosts = new LinkedHashSet<>();
+        Path index = ctx.home.index().toAbsolutePath();
         for (Change c : changes) {
+            if (c.kind().equals("file") && c.action().equals("delete") && Path.of(c.name()).startsWith(index)) {
+                listsDeleted++; // old cached lookups, folded into the cache line
+                continue;
+            }
             if (c.kind().equals("file") && c.value() != null) {
                 if (c.action().equals("create")) {
                     listsCreated++;
@@ -196,7 +204,7 @@ final class Changes {
                 default -> c.toString();
             });
         }
-        if (listsCreated + listsUpdated > 0) {
+        if (listsCreated + listsUpdated + listsDeleted > 0) {
             List<String> parts = new ArrayList<>();
             if (listsCreated > 0) {
                 parts.add(listsCreated + (listsCreated == 1 ? " file" : " files") + " saved");
@@ -204,8 +212,12 @@ final class Changes {
             if (listsUpdated > 0) {
                 parts.add(listsUpdated + (listsUpdated == 1 ? " file" : " files") + " refreshed");
             }
-            out.println("  cache  " + tilde(ctx.home.index().toAbsolutePath().toString()) + ": "
-                    + String.join(", ", parts) + " from " + String.join(", ", hosts));
+            String text = parts.isEmpty() ? "" : String.join(", ", parts) + " from " + String.join(", ", hosts);
+            if (listsDeleted > 0) {
+                text += (text.isEmpty() ? "" : "; ") + listsDeleted + (listsDeleted == 1 ? " old file" : " old files")
+                        + " removed";
+            }
+            out.println("  cache  " + tilde(index.toString()) + ": " + text);
         }
         for (String note : notes) {
             out.println("  " + note);

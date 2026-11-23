@@ -20,6 +20,9 @@ import dev.jkit.model.Suggest;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
 public final class FoojaySource {
+    /** How many builds an install looks up for a direct download before giving up. */
+    static final int MAX_LOOKUPS = 5;
+
     public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
 
     /** One JDK package for one platform. */
@@ -157,8 +160,9 @@ public final class FoojaySource {
         if (candidates.isEmpty()) {
             throw noMatch(tool, versionSpec, vendor, platform, fx, major);
         }
-        // the newest build that can be downloaded directly; some vendors list builds behind a form
-        for (Pkg pkg : candidates) {
+        // the newest build that can be downloaded directly; some vendors list builds behind a form.
+        // A few tries at most: each is a request, and a hostile list could hold thousands
+        for (Pkg pkg : candidates.stream().limit(MAX_LOOKUPS).toList()) {
             // this answer carries the download link and often the checksum itself, so https too
             JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id())))
                     .path("result").path(0);
@@ -182,7 +186,8 @@ public final class FoojaySource {
                     checksum == null ? null : checksum.hash(), fx);
         }
         Pkg newest = candidates.getFirst();
-        throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download",
+        throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download"
+                + (candidates.size() > MAX_LOOKUPS ? " (nor the next " + (MAX_LOOKUPS - 1) + " builds)" : ""),
                 "download it from the vendor's site, or pick another vendor");
     }
 

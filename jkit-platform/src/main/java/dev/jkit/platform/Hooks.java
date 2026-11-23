@@ -101,11 +101,14 @@ final class Hooks {
                     __jkit_hook_env
                     """;
             case "fish" -> """
-                    # switch to a project's versions on cd (shell.auto_switch)
-                    function __jkit_hook_env --on-variable PWD
-                      __jkit_run hook-env fish | source
+                    # switch to a project's versions on cd (shell.auto_switch); interactive shells only,
+                    # since fish scripts that source the hook cd too
+                    if status is-interactive
+                      function __jkit_hook_env --on-variable PWD
+                        __jkit_run hook-env fish | source
+                      end
+                      __jkit_hook_env
                     end
-                    __jkit_hook_env
                     """;
             default -> null;
         };
@@ -202,8 +205,13 @@ final class Hooks {
                         Where-Object { -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
                         Select-Object -First 1 -ExpandProperty Source
                     }
-                    & $global:__jkit_bin @args
-                    $rc = $LASTEXITCODE
+                    if ($global:__jkit_bin) {
+                      & $global:__jkit_bin @args
+                      $rc = $LASTEXITCODE
+                    } else {
+                      [Console]::Error.WriteLine('jkit: not found on PATH')
+                      $rc = 127
+                    }
                   } finally {
                     # also after Ctrl-C: later jkit runs outside this function must not write to it
                     Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue

@@ -19,7 +19,7 @@ Then, as needed:
 
 ```bash
 jkit search jdk                        # vendors and releases (jkit search jdk@21 zulu: every build)
-jkit install jdk@lts corretto          # newest long-term-support release from a vendor
+jkit install jdk@lts zulu              # newest long-term-support release from a vendor
 jkit use jdk@21 --global               # the default for new shells
 jkit use jdk@17 zulu                   # only this shell
 jkit install maven                     # also gradle@8.14, sbt

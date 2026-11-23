@@ -60,7 +60,7 @@ final class HookCommand implements Callable<Integer> {
                     "jkit hook --install --auto-switch (it skips the startup file if the hook is already there)");
         }
         if (action.install || action.uninstall) {
-            String name = shell != null ? shell : loginShell(ctx);
+            String name = shell != null ? shell : loginShell(ctx, action.install ? "--install" : "--uninstall");
             return action.install ? install(ctx, name, userHome(ctx), autoSwitch) : uninstall(ctx, name, userHome(ctx));
         }
         String name = shell != null ? shell : ctx.platform.isWindows() ? "pwsh" : "bash";
@@ -97,14 +97,19 @@ final class HookCommand implements Callable<Integer> {
 
     /** bash, zsh or fish from $SHELL; anything else has to be named. */
     static String loginShell(Context ctx) {
+        return loginShell(ctx, "--install");
+    }
+
+    /** {@link #loginShell(Context)}, with a hint for {@code flag}: --install or --uninstall. */
+    static String loginShell(Context ctx, String flag) {
         String sh = ctx.env.get("SHELL");
         String name = sh == null || sh.isBlank() ? "" : Path.of(sh).getFileName().toString();
         if (List.of("bash", "zsh", "fish").contains(name)) {
             return name;
         }
-        throw new JkitException("can't tell which shell to add the hook to"
+        throw new JkitException("can't tell which shell " + (flag.equals("--install") ? "to add the hook to" : "to take the hook out of")
                 + (name.isEmpty() ? " ($SHELL isn't set)" : " ($SHELL is " + sh + ")"),
-                "name it: jkit hook bash --install (or zsh, fish)");
+                "name it: jkit hook bash " + flag + " (or zsh, fish)");
     }
 
     /** Adds the block to the startup file and says exactly what changed. */
@@ -167,12 +172,19 @@ final class HookCommand implements Callable<Integer> {
     private static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
         Path dir = file.toAbsolutePath().getParent();
         if (!Files.isDirectory(dir)) {
+            // every folder that is new, outermost first: fish's ~/.config, ~/.config/fish and conf.d
+            List<Path> missing = new java.util.ArrayList<>();
+            for (Path d = dir; d != null && !Files.exists(d); d = d.getParent()) {
+                missing.addFirst(d);
+            }
             if (dir.equals(ctx.home.root())) {
                 ctx.home.create();
             } else {
                 dev.jkit.model.Perms.mkdirs(dir); // 755 whatever the umask: other users mustn't edit startup files
             }
-            report.folder(dir, true);
+            for (Path d : missing) {
+                report.folder(d, true);
+            }
         }
     }
 
@@ -249,8 +261,10 @@ final class HookCommand implements Callable<Integer> {
             return 0;
         }
         Changes report = new Changes(ctx);
-        if (shell.equals("fish") && edit.text().isBlank()) {
-            Files.delete(file); // the file was jkit's own
+        if (edit.text().isBlank() && !Files.isSymbolicLink(file)) {
+            // nothing but jkit's block: fish's conf.d file is jkit's own, and a ~/.bashrc that held
+            // only the block is one --install created
+            Files.delete(file);
             report.fileDeleted(file);
         } else {
             Files.writeString(file, edit.text(), charset);

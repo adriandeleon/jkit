@@ -27,7 +27,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
   pull_request:
-    paths: ['pom.xml', '*/pom.xml', '.mvn/**', 'packaging/**', '.github/workflows/release.yml']
+    # also the native-image metadata: the JVM tests in ci.yml don't exercise it
+    paths: ['pom.xml', '*/pom.xml', '.mvn/**', 'packaging/**', '.github/workflows/release.yml',
+            '**/META-INF/native-image/**']
 
 permissions:
   contents: read
@@ -298,7 +300,9 @@ jobs:
         run: |
           bin=stage/jkit
           chmod 755 "$bin"
-          if [ -z "$CERT_P12" ] || [ -z "$API_KEY_P8" ]; then
+          # all five, so a missing one fails here with this message, not later inside security or notarytool
+          if [ -z "$CERT_P12" ] || [ -z "$CERT_PASSWORD" ] || [ -z "$API_KEY_P8" ] || [ -z "$API_KEY_ID" ] \
+             || [ -z "$API_ISSUER_ID" ]; then
             case "$GITHUB_REF_NAME" in
               *-*) echo "::warning::signing secrets are not set; this pre-release ships unsigned for macOS"
                    exit 0 ;;
@@ -411,7 +415,13 @@ jobs:
           stage/jkit --version | grep -Fx "jkit $VERSION"
           lipo -archs stage/jkit | grep -Fx "${{ matrix.arch }}"
           codesign -dv stage/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
-          # a tag ships what macos-sign signed: check it really is, not the linker's ad-hoc signature
+          # a tag ships what macos-sign signed: check it really is, not the linker's ad-hoc signature.
+          # A tag run without macos-sign (skipped by a future change to its if:) must not pack at all
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = tag ] \
+             && [ "${{ needs.macos-sign.result }}" != success ]; then
+            echo "::error::macos-sign didn't succeed (${{ needs.macos-sign.result }}) on a tag run; not packing an unsigned binary"
+            exit 1
+          fi
           if [ "${{ needs.macos-sign.result }}" = success ]; then
             codesign --verify --strict stage/jkit
             # captured first: grep -q stops reading early, and codesign's SIGPIPE would fail pipefail
@@ -480,11 +490,11 @@ jobs:
             "$RUNNER_TEMP"/manifests/*.yaml
 
   release:
-    needs: [build, macos-pack, packaging-check]
+    needs: [build, macos-sign, macos-pack, packaging-check]
     if: >-
       github.event_name == 'push' && github.ref_type == 'tag' && !cancelled()
-      && needs.build.result == 'success' && needs.macos-pack.result == 'success'
-      && needs.packaging-check.result == 'success'
+      && needs.build.result == 'success' && needs.macos-sign.result == 'success'
+      && needs.macos-pack.result == 'success' && needs.packaging-check.result == 'success'
     outputs:
       latest: ${{ steps.publish.outputs.latest }}
     runs-on: ubuntu-24.04

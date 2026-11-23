@@ -210,6 +210,29 @@ class HttpTest {
     }
 
     @Test
+    void theCacheDropsItsOldestAnswersAndSaysSo() throws Exception {
+        // every lookup is a file: a mirror answering thousands of them must not fill the disk
+        Instant now = Instant.parse("2026-11-21T12:00:00Z");
+        Path dir = Files.createDirectories(tmp.resolve("index"));
+        Path ancient = Files.writeString(dir.resolve("aaa.cache"), "{}");
+        Files.setLastModifiedTime(ancient, FileTime.from(now.minus(Duration.ofDays(40))));
+        Path big = Files.write(dir.resolve("bbb.cache"), new byte[(int) CachingHttp.MAX_BYTES]);
+        Files.setLastModifiedTime(big, FileTime.from(now.minus(Duration.ofDays(1))));
+        Path recent = Files.writeString(dir.resolve("ccc.cache"), "{}");
+        Files.setLastModifiedTime(recent, FileTime.from(now.minus(Duration.ofHours(1))));
+        List<Path> removed = new ArrayList<>();
+        new CachingHttp(answering("{\"result\":[]}", false), dir, Duration.ofHours(24), Clock.fixed(now, ZoneOffset.UTC),
+                false, false, new CachingHttp.Listener() {
+                    @Override
+                    public void removed(Path file) {
+                        removed.add(file);
+                    }
+                }).get(URI.create("https://api.foojay.io/y"));
+        assertThat(removed).containsExactly(ancient, big); // oldest first, until under the limit
+        assertThat(recent).exists();
+    }
+
+    @Test
     void cacheRefusesHtmlAndFallsBackToAnOldCopyWhenOffline() throws Exception {
         URI uri = URI.create("https://api.foojay.io/x");
         Instant now = Instant.parse("2026-11-21T12:00:00Z");

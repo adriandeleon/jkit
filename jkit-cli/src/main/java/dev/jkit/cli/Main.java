@@ -79,12 +79,13 @@ public final class Main implements Runnable {
         int code;
         try {
             code = run(args);
-        } catch (OutOfMemoryError e) {
+        } catch (OutOfMemoryError | StackOverflowError e) {
             // the HTTP and archive limits should prevent this; if not, still one line and one document
-            System.err.println("error: out of memory");
+            String what = e instanceof OutOfMemoryError ? "out of memory" : "out of stack (a deeply nested input)";
+            System.err.println("error: " + what);
             if (own.contains(JsonOut.FLAG)) {
                 System.out.println("{\"schemaVersion\":" + JsonOut.SCHEMA_VERSION
-                        + ",\"error\":{\"message\":\"out of memory\",\"hints\":[],\"exitCode\":1}}");
+                        + ",\"error\":{\"message\":\"" + what + "\",\"hints\":[],\"exitCode\":1}}");
             }
             code = 1;
         }

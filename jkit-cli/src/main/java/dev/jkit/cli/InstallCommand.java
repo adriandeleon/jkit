@@ -116,9 +116,19 @@ final class InstallCommand implements Callable<Integer> {
         Changes changes = installed(ctx, result);
         // the first one of a tool becomes the default, as most people would do next anyway
         Path globalLink = ctx.home.global(spec.tool());
-        boolean madeDefault = result.fresh() && first && !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
+        boolean madeDefault = false;
+        if (result.fresh() && first && !noDefault) {
+            // checked and set under the store lock: another jkit may set a default or remove this meanwhile
+            try (AutoCloseable lock = ctx.store.lock()) {
+                if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        && Files.isRegularFile(result.installed().home().resolve(dev.jkit.core.Store.MARKER),
+                                java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    ctx.os.pointLink(globalLink, result.installed().home());
+                    madeDefault = true;
+                }
+            }
+        }
         if (madeDefault) {
-            ctx.os.pointLink(globalLink, result.installed().home());
             changes.link(globalLink, result.installed().home()).globalEffect(spec.tool());
             changes.note("it's the default " + spec.tool() + " now (the first one installed); to clear it: jkit reset "
                     + spec.tool() + " --global");
@@ -128,7 +138,7 @@ final class InstallCommand implements Callable<Integer> {
                 + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
         changes.print(say);
         if (json.json) {
-            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
+            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.fresh() ? result.verified() : null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
         if (!madeDefault) {

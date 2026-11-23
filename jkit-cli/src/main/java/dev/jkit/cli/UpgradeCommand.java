@@ -25,8 +25,9 @@ import picocli.CommandLine.Parameters;
  * installed; a global link that pointed at the line's newest build moves to the new one.
  */
 @Command(name = "upgrade",
-        description = {"Installs the newest build within each installed major version, and moves the global",
-                "default along when it pointed at the old build. Old builds stay (jkit remove them).",
+        description = {"Installs the newest build of each installed major version.",
+                "A global default that pointed at the old build moves to the new one. Old builds stay",
+                "(jkit remove them).",
                 "",
                 "  jkit upgrade --dry-run           what would change (21.0.5 → 21.0.9, maven 3.9.11 → 3.10.2)",
                 "  jkit upgrade jdk"})
@@ -222,9 +223,17 @@ final class UpgradeCommand implements Callable<Integer> {
                 continue;
             }
             Path link = ctx.home.global(t);
-            Path target = ctx.os.readLink(link);
-            if (target != null && Resolve.same(target, previous.home())) {
-                ctx.os.pointLink(link, newHome);
+            // read and moved under the store lock: a jkit use --global in between must not be undone
+            boolean moved = false;
+            try (AutoCloseable lock = ctx.store.lock()) {
+                Path target = ctx.os.readLink(link);
+                if (target != null && Resolve.same(target, previous.home())
+                        && java.nio.file.Files.isRegularFile(newHome.resolve(dev.jkit.core.Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    ctx.os.pointLink(link, newHome);
+                    moved = true;
+                }
+            }
+            if (moved) {
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));

@@ -62,6 +62,7 @@ final class HookEnvCommand implements Callable<Integer> {
             err.println("jkit: " + dev.jkit.model.Visible.of(e.getMessage()) + "; this shell's versions are unchanged");
             Map<String, String> remember = new LinkedHashMap<>();
             remember.put(ShellEnv.PROJECT, key);
+            new Changes(ctx).env(remember).print(err); // remembered so the error shows once, and said
             return ShellEnv.format(remember, shell);
         }
         Map<String, String> changes = plan.changes();
@@ -70,7 +71,11 @@ final class HookEnvCommand implements Callable<Integer> {
         }
         if (plan.project().isEmpty() && !hasProjectState(ctx.env)) {
             // leaving a project that never applied anything (nothing installed, or a broken file):
-            // only the bookkeeping changes, so there is nothing to announce
+            // the versions stay, and only jkit's note of the project goes, which is still said
+            String left = appliedDir(applied);
+            err.println("jkit: left the project" + (left == null ? "" : " in " + Changes.tilde(left))
+                    + "; it had changed no versions");
+            new Changes(ctx).env(changes).print(err);
             return ShellEnv.format(changes, shell);
         }
         err.println("jkit: " + headline(plan, applied));

@@ -193,6 +193,38 @@ class ArchivesTest {
     }
 
     @Test
+    void extendedHeadersThatCommonsCompressReadsInItsOwnOrderAreRefused() throws IOException {
+        // two PAX headers before one entry: commons-compress applies the first, a scan the last
+        byte[] small = pax("size=0");
+        byte[] big = pax("size=512");
+        Path twoX = tarOf("xx.tar.gz", header("h", 'x', small.length), small, header("h", 'x', big.length), big,
+                header("f", '0', 0), new byte[512]);
+        assertThatThrownBy(() -> Archives.extract(twoX, tmp.resolve("o1"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("two 'x' headers");
+        // a long name and a PAX path: which wins depends on their order
+        byte[] name = "d/\0".getBytes(StandardCharsets.US_ASCII);
+        byte[] path = pax("path=f", "size=512");
+        Path both = tarOf("lx.tar.gz", header("././@LongLink", 'L', name.length), name, header("h", 'x', path.length),
+                path, header("f", '0', 0), new byte[512]);
+        assertThatThrownBy(() -> Archives.extract(both, tmp.resolve("o2"), "tar.gz"))
+                .hasMessageContaining("both a PAX path and a long name");
+        // a global header's name is merged into later entries in an order of its own
+        byte[] global = pax("path=d/");
+        Path g = tarOf("gp.tar.gz", header("h", 'g', global.length), global, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(g, tmp.resolve("o3"), "tar.gz"))
+                .hasMessageContaining("global PAX header sets a name");
+        // a long chain of headers before one entry: each one counts as an entry
+        byte[][] chain = new byte[24][];
+        for (int i = 0; i < 12; i++) {
+            chain[2 * i + 1] = pax("comment=c");
+            chain[2 * i] = header("h", 'g', chain[2 * i + 1].length);
+        }
+        Path many = tarOf("gg.tar.gz", chain);
+        assertThatThrownBy(() -> Archives.extract(many, tmp.resolve("o4"), "tar.gz"))
+                .hasMessageContaining("more than 8 global headers");
+    }
+
+    @Test
     void aZipIsCountedByItsHeadersNotItsEndRecord() throws IOException {
         Path archive = tmp.resolve("lying.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -220,6 +252,30 @@ class ArchivesTest {
         } finally {
             Archives.entryLimit = Archives.MAX_ENTRIES;
         }
+    }
+
+    @Test
+    void zipEntriesMustEachHaveTheirOwnLocalHeader() throws IOException {
+        Path archive = tmp.resolve("shared.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            for (String name : new String[] {"jdk/a", "jdk/b"}) {
+                zip.putArchiveEntry(new ZipArchiveEntry(name));
+                zip.write(new byte[] {1});
+                zip.closeArchiveEntry();
+            }
+        }
+        // point the second central entry at the first local header, as a memory bomb would
+        byte[] bytes = Files.readAllBytes(archive);
+        int seen = 0;
+        for (int i = 0; i + 46 < bytes.length; i++) {
+            if (bytes[i] == 0x50 && bytes[i + 1] == 0x4b && bytes[i + 2] == 1 && bytes[i + 3] == 2 && ++seen == 2) {
+                java.util.Arrays.fill(bytes, i + 42, i + 46, (byte) 0);
+                break;
+            }
+        }
+        Files.write(archive, bytes);
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("share or overlap a local header");
     }
 
     @Test
