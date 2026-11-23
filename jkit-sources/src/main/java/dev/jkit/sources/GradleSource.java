@@ -38,9 +38,9 @@ public final class GradleSource {
         String file = url.substring(url.lastIndexOf('/') + 1);
         Checksum checksum = Checksum.of(r.checksum(), "sha256");
         if (checksum == null && !r.checksumUrl().isEmpty() && !http.offline()) {
-            checksum = Checksum.parseStrict(http.getFresh(Http.sent(r.checksumUrl(), "a Gradle checksum")), file, "sha256");
+            checksum = Checksum.parseStrict(http.getFresh(Http.sent(r.checksumUrl(), "a Gradle checksum", base)), file, "sha256");
         }
-        return new Artifact(Tool.GRADLE, r.version(), null, Http.sent(url, "a Gradle download"), file, "zip",
+        return new Artifact(Tool.GRADLE, r.version(), null, Http.sent(url, "a Gradle download", base), file, "zip",
                 checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
     }
 

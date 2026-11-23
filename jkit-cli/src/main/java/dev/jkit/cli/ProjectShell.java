@@ -52,6 +52,9 @@ final class ProjectShell {
 
     /** Writes a project file without following a link put there since {@link #target} checked. */
     static void write(Path file, String text) throws IOException {
+        if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
+        }
         Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
                 java.nio.file.StandardOpenOption.WRITE);

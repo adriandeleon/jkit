@@ -71,7 +71,17 @@ public final class Installer {
                     verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
                 Path out = work.resolve("out");
-                Archives.extract(archive, out, artifact.archiveType());
+                try {
+                    Archives.extract(archive, out, artifact.archiveType());
+                } catch (IOException e) {
+                    // truncated or corrupt (EOF, "not a ZIP archive"): the download, not this disk
+                    if (e instanceof java.nio.file.FileSystemException) {
+                        throw e;
+                    }
+                    throw new JkitException("the downloaded archive for " + artifact.label() + " is damaged ("
+                            + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + "); nothing was installed",
+                            "try again; if it keeps happening, the source has a broken file: pick another version");
+                }
                 Path toolHome = locateHome(out);
                 requireExecutable(storeTool, toolHome, artifact.label());
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
@@ -144,6 +154,21 @@ public final class Installer {
         if (!real && Files.isSymbolicLink(macHome)) {
             throw Archives.unsafe("its Contents/Home is a symbolic link");
         }
+        Path frameworks = candidate.resolve("Contents").resolve("Frameworks");
+        if (real && Files.isDirectory(frameworks, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            // JetBrains' JCEF build keeps Chromium in Contents/Frameworks, next to Home, and finds it
+            // from java.home: install the whole bundle, with links to Home's folders at its top, so
+            // JAVA_HOME/bin/java works and java still sees Contents/Home as its home
+            try (Stream<Path> children = Files.list(macHome)) {
+                for (Path child : children.toList()) {
+                    Path link = candidate.resolve(child.getFileName().toString());
+                    if (!Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        Files.createSymbolicLink(link, Path.of("Contents", "Home", child.getFileName().toString()));
+                    }
+                }
+            }
+            return candidate;
+        }
         return real ? macHome : candidate;
     }
 
@@ -159,6 +184,15 @@ public final class Installer {
         for (int attempt = 1; ; attempt++) {
             try {
                 Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+                return;
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                // tools/ is on another disk than tmp/ (a link to it): copy next to the destination,
+                // then rename there, so the install still appears in one step
+                Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
+                Fs.deleteRecursively(partial);
+                Fs.copyTree(from, partial);
+                Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
+                Fs.deleteRecursively(from);
                 return;
             } catch (java.nio.file.AccessDeniedException e) {
                 if (!windows || attempt >= 10) {

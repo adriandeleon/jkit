@@ -219,8 +219,16 @@ public final class ProjectFile {
                         + (versionOk ? "vendor" : "version") + " with characters jkit doesn't accept, skipped");
             }
         });
+        if (warnings.size() > MAX_WARNINGS) {
+            // a file of thousands of unknown tables must not print thousands of lines on every cd
+            int more = warnings.size() - MAX_WARNINGS;
+            warnings.subList(MAX_WARNINGS, warnings.size()).clear();
+            warnings.add(spec.files().getFirst() + ": " + more + " more warnings not shown");
+        }
         return new ProjectSpec(spec.files(), tools, warnings);
     }
+
+    static final int MAX_WARNINGS = 20;
 
     private static List<Path> filesIn(Path dir) {
         for (String name : List.of(JKIT_TOML, HIDDEN_TOML)) {
@@ -257,7 +265,7 @@ public final class ProjectFile {
 
     private static Path home(Map<String, String> env) {
         Path home = Fs.path(env.getOrDefault("HOME", System.getProperty("user.home")));
-        return home == null ? null : home.toAbsolutePath().normalize();
+        return home == null || !home.isAbsolute() ? null : home.normalize();
     }
 
     /**
@@ -424,11 +432,11 @@ public final class ProjectFile {
         Vendor vendor = null;
         if (vendorText != null && !vendorText.isBlank()) {
             if (!tool.hasVendors()) {
-                warnings.add(where + ": " + tool + " has no vendors; vendor '" + vendorText + "' ignored");
+                warnings.add(where + ": " + tool + " has no vendors; vendor '" + shown(vendorText) + "' ignored");
             } else {
                 vendor = Vendor.of(vendorText);
                 if (tool == Tool.GRAALVM && !vendor.isGraalVmBased()) {
-                    warnings.add(where + ": " + vendor + " is not GraalVM-based, skipped " + key
+                    warnings.add(where + ": " + shown(vendor.toString()) + " is not GraalVM-based, skipped " + shown(key)
                             + " (graalvm vendors: " + Vendor.graalVmVendorList() + ")");
                     return null;
                 }

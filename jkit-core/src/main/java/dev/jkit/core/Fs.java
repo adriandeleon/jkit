@@ -34,6 +34,23 @@ public final class Fs {
         }
     }
 
+    /** Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist. */
+    public static void copyTree(Path from, Path to) throws IOException {
+        try (var all = java.nio.file.Files.walk(from)) {
+            for (Path p : (Iterable<Path>) all::iterator) {
+                Path target = to.resolve(from.relativize(p).toString());
+                if (java.nio.file.Files.isSymbolicLink(p)) {
+                    java.nio.file.Files.createSymbolicLink(target, java.nio.file.Files.readSymbolicLink(p));
+                } else if (java.nio.file.Files.isDirectory(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    java.nio.file.Files.createDirectories(target);
+                } else {
+                    java.nio.file.Files.copy(p, target, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES,
+                            java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                }
+            }
+        }
+    }
+
     public static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return;

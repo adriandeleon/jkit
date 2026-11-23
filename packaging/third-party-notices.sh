@@ -119,7 +119,7 @@ source on request: open an issue at https://github.com/adriandeleon/jkit/issues.
 The OpenJDK class library includes third-party code under the notices that follow.
 EOF
   for f in ADDITIONAL_LICENSE_INFO ASSEMBLY_EXCEPTION icu.md cldr.md unicode.md zlib.md aes.md \
-           siphash.md public_suffix.md xerces.md xalan.md jcup.md dom.md; do
+           siphash.md public_suffix.md xerces.md xalan.md jcup.md dom.md wepoll.md; do
     printf '\n%s\nOpenJDK: %s\n%s\n\n' \
       "------------------------------------------------------------------------------" "$f" \
       "------------------------------------------------------------------------------"

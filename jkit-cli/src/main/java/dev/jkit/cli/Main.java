@@ -177,9 +177,9 @@ public final class Main implements Runnable {
     }
 
     private static void printError(JkitException e) {
-        System.err.println("error: " + dev.jkit.model.Visible.of(e.getMessage()));
+        System.err.println("error: " + dev.jkit.model.Visible.of(Errors.capped(e.getMessage())));
         for (String hint : e.hints()) {
-            System.err.println("  " + dev.jkit.model.Visible.of(hint));
+            System.err.println("  " + dev.jkit.model.Visible.of(Errors.capped(hint)));
         }
     }
 }

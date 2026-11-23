@@ -100,9 +100,9 @@ final class JsonOut {
             doc.set("changes", toNode(partial.changes()));
         }
         ObjectNode error = doc.putObject("error");
-        error.put("message", e.getMessage());
+        error.put("message", Errors.capped(e.getMessage()));
         ArrayNode hints = error.putArray("hints");
-        e.hints().forEach(hints::add);
+        e.hints().forEach(h -> hints.add(Errors.capped(h)));
         error.put("exitCode", exitCode);
         return doc;
     }

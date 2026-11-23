@@ -149,7 +149,16 @@ final class UpgradeCommand implements Callable<Integer> {
             row.put("verified", result.verified());
             row.put("path", result.installed().home());
             Changes changes = InstallCommand.installed(ctx, result);
-            moveLinks(ctx, changes, line, newest, result.installed().home());
+            try {
+                moveLinks(ctx, changes, line, newest, result.installed().home());
+            } catch (Exception e) {
+                // the new build is installed either way: say so, and what is still to do
+                JkitException je = Errors.describe(e);
+                changes.note("warning: couldn't move the global link to the new build: "
+                        + dev.jkit.model.Visible.of(je.getMessage()) + "; to do it yourself: jkit use " + line.userTool()
+                        + "@" + artifact.version() + (line.vendor() == null ? "" : " " + line.vendor().name())
+                        + (line.fx() ? " --fx" : "") + " --global");
+            }
             changes.note("the old build stays: jkit remove " + line.userTool() + "@" + newest.version()
                     + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             row.put("changes", changes.json());

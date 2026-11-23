@@ -17,7 +17,8 @@ RUNTIME = [
     ("org.graalvm", "graalvm-community-native-image", GRAALVM,
      "GPL-2.0-only WITH Classpath-exception-2.0", "https://github.com/oracle/graal"),
     ("org.openjdk", "openjdk-class-library", JDK,
-     "GPL-2.0-only WITH Classpath-exception-2.0 AND Unicode-3.0 AND Zlib AND MPL-2.0 AND Apache-2.0",
+     "GPL-2.0-only WITH Classpath-exception-2.0 AND Apache-2.0 AND BSD-2-Clause AND CC0-1.0 AND ICU AND MPL-2.0"
+     " AND Unicode-3.0 AND W3C AND Zlib AND LicenseRef-CUP AND LicenseRef-Cryptix",
      "https://github.com/openjdk/jdk25u"),
 ]
 

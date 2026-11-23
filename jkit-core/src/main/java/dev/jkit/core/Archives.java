@@ -109,7 +109,8 @@ public final class Archives {
 
     private static void extractTarGz(Path archive, Path target) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(archive));
-             TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw))) {
+             // every gzip member, as ArchiveScan reads it (bgzip and pigz write several)
+             TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw, true))) {
             Budget budget = new Budget();
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
@@ -150,7 +151,7 @@ public final class Archives {
                 if (entry.isDirectory()) {
                     createDirectories(target, out);
                 } else if (entry.isUnixSymlink()) {
-                    symlink(target, out, zip.getUnixSymlink(entry), entry.getName());
+                    symlink(target, out, linkTarget(zip, entry), entry.getName());
                 } else {
                     createDirectories(target, out.getParent());
                     Files.deleteIfExists(out);
@@ -198,6 +199,20 @@ public final class Archives {
             throw unsafe("a link replaces a folder already unpacked: " + entryName);
         }
         Files.createSymbolicLink(out, link);
+    }
+
+    /** A zip symlink's target, read only up to a path's length: ZipFile would read any size whole. */
+    private static String linkTarget(ZipFile zip, ZipArchiveEntry entry) throws IOException {
+        if (entry.getSize() > ArchiveScan.MAX_NAME) {
+            throw unsafe("a symlink entry holds " + entry.getSize() + " bytes: " + entry.getName());
+        }
+        try (InputStream in = zip.getInputStream(entry)) {
+            byte[] bytes = in.readNBytes(ArchiveScan.MAX_NAME + 1);
+            if (bytes.length > ArchiveScan.MAX_NAME) {
+                throw unsafe("a symlink entry is too long: " + entry.getName());
+            }
+            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 
     /** createDirectories that refuses to go through a symlink an earlier entry made. */

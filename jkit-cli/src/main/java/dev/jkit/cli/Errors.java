@@ -16,6 +16,14 @@ final class Errors {
 
     private Errors() { }
 
+    /** At most 1,000 characters: a message can quote a name from a hostile archive or source. */
+    static String capped(String text) {
+        if (text == null || text.length() <= 1000) {
+            return text;
+        }
+        return text.substring(0, 1000) + "… (" + (text.length() - 1000) + " more characters)";
+    }
+
     static JkitException describe(Throwable ex) {
         if (ex instanceof JkitException je) {
             return je;

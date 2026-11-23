@@ -30,12 +30,18 @@ public interface Http {
     }
 
     /** An address a source sent: a JkitException, not a crash, when it isn't a usable https URL. */
-    static URI sent(String text, String what) {
+    static URI sent(String text, String what, URI source) {
         URI uri;
         try {
             uri = URI.create(text.strip());
         } catch (IllegalArgumentException e) {
             throw new dev.jkit.model.JkitException("the source sent an invalid address for " + what);
+        }
+        // plain http to this machine only from a mirror on this machine: a remote source must not
+        // send jkit to local services
+        if (!"https".equalsIgnoreCase(uri.getScheme()) && "https".equalsIgnoreCase(source.getScheme())) {
+            throw new dev.jkit.model.JkitException("refusing " + what + " over " + uri.getScheme() + " from "
+                    + source.getHost() + ": " + uri, "jkit only downloads tools and checksums over https");
         }
         return requireSecure(uri);
     }

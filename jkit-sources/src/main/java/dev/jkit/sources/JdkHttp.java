@@ -114,10 +114,7 @@ public final class JdkHttp implements Http {
                 }
                 rest = rest.substring(scheme + 3);
             }
-            int slash = rest.indexOf('/');
-            if (slash >= 0) {
-                rest = rest.substring(0, slash);
-            }
+            // credentials first, up to the last @: a password may hold / or @ itself
             String user = null;
             String password = null;
             int at = rest.lastIndexOf('@');
@@ -127,6 +124,10 @@ public final class JdkHttp implements Http {
                 int colon = credentials.indexOf(':');
                 user = decode(colon < 0 ? credentials : credentials.substring(0, colon));
                 password = colon < 0 ? "" : decode(credentials.substring(colon + 1));
+            }
+            int slash = rest.indexOf('/');
+            if (slash >= 0) {
+                rest = rest.substring(0, slash);
             }
             String host = rest;
             int port = 8080;
@@ -162,7 +163,7 @@ public final class JdkHttp implements Http {
             } catch (NumberFormatException e) {
                 // below
             }
-            throw new IllegalArgumentException("proxy " + redact(setting) + ": '" + text + "' is not a port");
+            throw new IllegalArgumentException("proxy " + redact(setting) + ": the port isn't a number from 1 to 65535");
         }
 
         private static String decode(String text) {
@@ -247,7 +248,9 @@ public final class JdkHttp implements Http {
     /** A download slower than this over a whole idle window counts as stalled. */
     static final long MIN_BYTES_PER_WINDOW = 16 * 1024;
     /** After the first two minutes, a download averaging less than this is given up on. */
-    static final long MIN_AVERAGE_BYTES_PER_SECOND = 8 * 1024;
+    static final long MIN_AVERAGE_BYTES_PER_SECOND = 32 * 1024;
+    /** However fast it keeps trickling, a download ends by then (a 500 MB JDK at 50 KB/s takes under 3 h). */
+    static final Duration DOWNLOAD_DEADLINE = Duration.ofHours(3);
     static final Duration AVERAGE_GRACE = Duration.ofMinutes(2);
     private static final int MAX_REDIRECTS = 5;
 
@@ -389,6 +392,8 @@ public final class JdkHttp implements Http {
                 why = "no data for " + idle.toSeconds() + " s";
             } else if (text && now - started > TEXT_DEADLINE.toNanos()) {
                 why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
+            } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {
+                why = "not finished after " + DOWNLOAD_DEADLINE.toHours() + " hours";
             } else if (!text && now - started > AVERAGE_GRACE.toNanos()
                     && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
                 // a server can stay above the per-window minimum and still take months for 2 GB

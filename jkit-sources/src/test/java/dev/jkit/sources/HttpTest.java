@@ -36,11 +36,15 @@ class HttpTest {
         assertThat(p.password()).isEqualTo("p:w");
         assertThat(JdkHttp.ProxySpec.parse("proxy.corp").address().getPort()).isEqualTo(8080);
         assertThat(JdkHttp.ProxySpec.parse("http://[::1]:3128").address().getHostString()).isEqualTo("::1");
-        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("proxy.corp:abc")).hasMessageContaining("is not a port");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("proxy.corp:abc")).hasMessageContaining("the port isn't a number");
         assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("socks5://proxy:1080")).hasMessageContaining("only http proxies");
         assertThat(JdkHttp.ProxySpec.redact("http://me:secret@proxy:3128")).isEqualTo("http://me:***@proxy:3128");
         assertThat(JdkHttp.ProxySpec.redact("me:Secr3t@proxy:x")).isEqualTo("me:***@proxy:x");
         assertThat(JdkHttp.ProxySpec.redact("http://me:a/b@c@proxy:1")).isEqualTo("http://me:***@proxy:1");
+        // a / in the password is part of the password, never printed as a "port"
+        JdkHttp.ProxySpec slash = JdkHttp.ProxySpec.parse("http://alice:hunter2/topsecret@proxy.example:3128");
+        assertThat(slash.password()).isEqualTo("hunter2/topsecret");
+        assertThat(slash.address().getPort()).isEqualTo(3128);
     }
 
     @Test
@@ -48,7 +52,7 @@ class HttpTest {
         JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
         assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
                 .isInstanceOf(JkitException.class)
-                .hasMessageContaining("is not a port");
+                .hasMessageContaining("the port isn't a number");
     }
 
     @Test

@@ -98,14 +98,19 @@ public final class Store {
                 dev.jkit.model.Perms.file());
         java.nio.channels.FileLock lock;
         try {
-            lock = channel.lock();
+            lock = channel.tryLock();
+            if (lock == null) {
+                System.err.println("waiting for another jkit to finish (an install can take a few minutes)…");
+                lock = channel.lock();
+            }
         } catch (IOException | RuntimeException e) {
             channel.close();
             throw e;
         }
+        java.nio.channels.FileLock held = lock;
         return () -> {
             try (channel) {
-                lock.release();
+                held.release();
             }
         };
     }

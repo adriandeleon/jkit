@@ -85,7 +85,7 @@ final class Context {
             }
             http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
                     Duration.ofHours(24), Clock.systemUTC(), refresh,
-                    offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
+                    offline || offlineByEnv(env),
                     new CachingHttp.Listener() {
                         @Override
                         public void stored(URI uri, java.nio.file.Path file, boolean created) {
@@ -99,6 +99,12 @@ final class Context {
                     });
         }
         return http;
+    }
+
+    /** JKIT_NETWORK_OFFLINE=true, 1 or yes, like the other on/off variables. */
+    static boolean offlineByEnv(Map<String, String> env) {
+        String v = env.getOrDefault("JKIT_NETWORK_OFFLINE", "").trim().toLowerCase(java.util.Locale.ROOT);
+        return v.equals("true") || v.equals("1") || v.equals("yes") || v.equals("on");
     }
 
     static String userAgent() {

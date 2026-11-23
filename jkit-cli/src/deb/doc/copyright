@@ -96,6 +96,26 @@ Files: org.checkerframework/checker-qual
 Copyright: 2004-present the Checker Framework developers
 License: MIT
 
+Files: openjdk/java-runtime
+Copyright: Oracle and/or its affiliates, and the authors listed in
+ /usr/share/doc/jkit/THIRD-PARTY-NOTICES ("Java runtime")
+License: GPL-2-with-classpath-exception
+Comment: the OpenJDK class library and GraalVM Substrate VM parts compiled into
+ /usr/bin/jkit. They carry third-party code under further licenses (ICU,
+ Unicode-3.0, W3C, Zlib, MPL-2.0, Apache-2.0, CC0-1.0, BSD-2-Clause, and the CUP
+ and Cryptix licenses), reproduced in full in THIRD-PARTY-NOTICES with the
+ source code offer.
+
+License: GPL-2-with-classpath-exception
+ This program is free software; you can redistribute it and/or modify it under
+ the terms of the GNU General Public License version 2 only, as published by
+ the Free Software Foundation, with the "Classpath" exception.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in /usr/share/common-licenses/GPL-2. The Classpath
+ exception and the full license as distributed with OpenJDK are in
+ /usr/share/doc/jkit/THIRD-PARTY-NOTICES.
+
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

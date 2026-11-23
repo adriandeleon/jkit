@@ -218,7 +218,7 @@ class SourcesTest {
                 "b.sha256", "f".repeat(64))), FoojaySource.DEFAULT_BASE);
         assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
                 .isInstanceOf(JkitException.class)
-                .hasMessageContaining("refusing to download over http");
+                .hasMessageContaining("refusing a checksum over http");
     }
 
     @Test

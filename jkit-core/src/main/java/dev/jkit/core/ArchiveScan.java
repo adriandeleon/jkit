@@ -25,13 +25,23 @@ final class ArchiveScan {
 
     private ArchiveScan() { }
 
-    /** Every tar header: meta headers small, at most {@code maxEntries} entries, at most {@code maxBytes} of data. */
+    /** A path or link target: Linux allows 4096 bytes. */
+    static final int MAX_NAME = 4096;
+
+    /**
+     * Every tar header, read the way commons-compress reads it. Only the entry types JDK, Maven,
+     * Gradle and sbt archives use are allowed (files, links, folders, GNU long names, PAX headers);
+     * anything else (Solaris X headers, sparse files, devices) is refused rather than guessed at,
+     * so this scan and the real read can't disagree. Names stay under {@link #MAX_NAME}, at most
+     * {@code maxEntries} entries, at most {@code maxBytes} of data in all.
+     */
     static void tarGz(Path archive, int maxEntries, long maxBytes) throws IOException {
         try (InputStream in = new GzipCompressorInputStream(new BufferedInputStream(Files.newInputStream(archive)), true)) {
             byte[] header = new byte[512];
             int entries = 0;
             long total = 0;
             long paxSize = -1;
+            long globalSize = -1;
             while (true) {
                 if (in.readNBytes(header, 0, 512) < 512 || isZero(header)) {
                     return; // end of archive (or a short one, which the real read reports)
@@ -41,42 +51,107 @@ final class ArchiveScan {
                 }
                 char type = (char) header[156];
                 long size = size(header);
-                if (type == 'L' || type == 'K' || type == 'x' || type == 'g') {
-                    if (size > MAX_META_HEADER) {
-                        throw Archives.unsafe("a tar header claims " + size + " bytes");
+                if (size < 0) {
+                    throw Archives.unsafe("a tar entry has a negative size");
+                }
+                switch (type) {
+                    case 'L', 'K' -> {
+                        if (size > MAX_NAME + 1) {
+                            throw Archives.unsafe("a tar header claims a " + size + "-byte name");
+                        }
+                        skip(in, pad(size));
+                        continue;
                     }
-                    byte[] meta = in.readNBytes((int) size);
-                    skip(in, pad(size) - size);
-                    if (type == 'x') {
-                        paxSize = paxSize(meta);
+                    case 'x', 'g' -> {
+                        if (size > MAX_META_HEADER) {
+                            throw Archives.unsafe("a tar header claims " + size + " bytes");
+                        }
+                        byte[] meta = in.readNBytes((int) size);
+                        skip(in, pad(size) - size);
+                        long sz = pax(meta, type == 'g');
+                        if (type == 'g') {
+                            globalSize = sz >= 0 ? sz : globalSize;
+                        } else {
+                            paxSize = sz;
+                        }
+                        continue;
                     }
-                    continue;
+                    case '0', '\0', '7', '1', '2', '5' -> {
+                        // an ordinary entry, below
+                    }
+                    case 'S' -> throw Archives.unsafe("it holds a sparse file, which jkit doesn't unpack");
+                    default -> throw Archives.unsafe("it holds a tar entry of type '"
+                            + (type >= 0x20 && type < 0x7f ? String.valueOf(type) : String.format("\\x%02x", (int) type))
+                            + "', which jkit doesn't unpack");
                 }
                 if (++entries > maxEntries) {
                     throw Archives.unsafe("more than " + maxEntries + " entries");
                 }
-                long data = paxSize >= 0 ? paxSize : size;
+                long data = paxSize >= 0 ? paxSize : globalSize >= 0 ? globalSize : size;
                 paxSize = -1;
-                if (data < 0) {
-                    throw Archives.unsafe("a tar entry has a negative size");
+                total += data;
+                if (total > maxBytes) {
+                    throw Archives.unsafe("it unpacks to more than " + (maxBytes >> 30) + " GB");
                 }
-                boolean hasData = type == '0' || type == '\0' || type == '7';
-                if (hasData) {
-                    total += data;
-                    if (total > maxBytes) {
-                        throw Archives.unsafe("it unpacks to more than " + (maxBytes >> 30) + " GB");
-                    }
-                }
-                // a link or folder header may still carry data the reader has to skip
+                // a link or folder header may still carry data the reader skips
                 skip(in, pad(data));
-                if (!hasData) {
-                    total += data;
-                    if (total > maxBytes) {
-                        throw Archives.unsafe("it holds more than " + (maxBytes >> 30) + " GB");
-                    }
-                }
             }
         }
+    }
+
+    /**
+     * A PAX header's records, parsed as commons-compress does: each is {@code <length> key=value\n},
+     * the length counting the whole record, and the last {@code size} wins. Returns that size or -1.
+     * Sparse-file records and over-long names are refused; a global header may not set a size.
+     */
+    private static long pax(byte[] meta, boolean global) {
+        long size = -1;
+        int i = 0;
+        while (i < meta.length) {
+            int sp = i;
+            while (sp < meta.length && meta[sp] >= '0' && meta[sp] <= '9' && sp - i < 10) {
+                sp++;
+            }
+            if (sp == i || sp >= meta.length || meta[sp] != ' ') {
+                if (meta[i] == 0) {
+                    break; // padding
+                }
+                throw Archives.unsafe("a PAX header is damaged");
+            }
+            int length = Integer.parseInt(new String(meta, i, sp - i, StandardCharsets.US_ASCII));
+            int recordEnd = i + length;
+            if (length <= sp - i + 1 || recordEnd > meta.length || meta[recordEnd - 1] != '\n') {
+                throw Archives.unsafe("a PAX header is damaged");
+            }
+            String record = new String(meta, sp + 1, recordEnd - sp - 2, StandardCharsets.UTF_8);
+            int eq = record.indexOf('=');
+            if (eq < 0) {
+                throw Archives.unsafe("a PAX header is damaged");
+            }
+            String key = record.substring(0, eq);
+            String value = record.substring(eq + 1);
+            if (key.startsWith("GNU.sparse")) {
+                throw Archives.unsafe("it holds a sparse file, which jkit doesn't unpack");
+            }
+            if ((key.equals("path") || key.equals("linkpath")) && value.length() > MAX_NAME) {
+                throw Archives.unsafe("a tar entry has a " + value.length() + "-character name");
+            }
+            if (key.equals("size")) {
+                if (global) {
+                    throw Archives.unsafe("a global PAX header sets a size");
+                }
+                try {
+                    size = Long.parseLong(value.trim());
+                } catch (NumberFormatException e) {
+                    throw Archives.unsafe("a PAX header is damaged");
+                }
+                if (size < 0) {
+                    throw Archives.unsafe("a tar entry has a negative size");
+                }
+            }
+            i = recordEnd;
+        }
+        return size;
     }
 
     /** The entry count and central directory size from the end records, before ZipFile reads the directory. */
@@ -193,22 +268,5 @@ final class ArchiveScan {
             }
             n -= s;
         }
-    }
-
-    /** The "size" record of a PAX header, or -1. */
-    private static long paxSize(byte[] meta) {
-        String text = new String(meta, StandardCharsets.UTF_8);
-        for (String record : text.split("\n")) {
-            int sp = record.indexOf(' ');
-            String kv = sp >= 0 ? record.substring(sp + 1) : record;
-            if (kv.startsWith("size=")) {
-                try {
-                    return Long.parseLong(kv.substring(5).trim());
-                } catch (NumberFormatException e) {
-                    return -1;
-                }
-            }
-        }
-        return -1;
     }
 }

@@ -101,7 +101,7 @@ auto_switch = true        # switch to a project's versions on cd (jkit hook --in
 ```
 
 Environment variables: `JKIT_HOME`, `JKIT_JDK_VENDOR`, `JKIT_GRAALVM_VENDOR`, `JKIT_AUTO_SWITCH`
-(`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE`,
+(`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE` (`1`/`true`: like `--offline`),
 `HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT}_URL`
 for https mirrors.
 

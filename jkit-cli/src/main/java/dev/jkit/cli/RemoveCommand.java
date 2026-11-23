@@ -121,7 +121,15 @@ final class RemoveCommand implements Callable<Integer> {
         Path trash = trashDir.resolve(i.id());
         try {
             // one rename first: if anything holds the folder open (Windows), nothing is touched
-            Files.move(i.home(), trash, StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(i.home(), trash, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException crossDisk) {
+                // tools/ on another disk than tmp/: set it aside next to itself instead
+                Files.deleteIfExists(trashDir);
+                trashDir = Files.createTempDirectory(i.home().getParent(), ".remove-");
+                trash = trashDir.resolve(i.id());
+                Files.move(i.home(), trash, StandardCopyOption.ATOMIC_MOVE);
+            }
         } catch (IOException e) {
             Files.deleteIfExists(trashDir);
             if (e instanceof java.nio.file.AccessDeniedException && !ctx.platform.isWindows()) {

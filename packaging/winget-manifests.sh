@@ -70,7 +70,7 @@ PublisherUrl: https://github.com/adriandeleon
 PublisherSupportUrl: https://github.com/$repo/issues
 PackageName: jkit
 PackageUrl: https://jkit-project.dev
-License: MIT (bundled components under Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSL-1.0, MPL-2.0, Unicode-3.0, Zlib, GPL-2.0 with the Classpath Exception and others; see THIRD-PARTY-NOTICES)
+License: MIT (bundled components under Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSL-1.0, CC0-1.0, ICU, MPL-2.0, Unicode-3.0, W3C, Zlib, GPL-2.0 with the Classpath Exception and the CUP and Cryptix licenses; see THIRD-PARTY-NOTICES)
 LicenseUrl: https://github.com/$repo/blob/v$version/LICENSE
 ShortDescription: Installs and switches JDKs from several vendors, Maven, Gradle and sbt.
 Description: A single native binary that installs and switches JDKs from several vendors, Maven, Gradle and sbt, per shell, per project or globally.

@@ -84,7 +84,14 @@ final class HookCommand implements Callable<Integer> {
     static Path userHome(Context ctx) {
         // an empty or relative HOME would put the rc file in the current folder
         Path home = dev.jkit.core.Fs.path(ctx.env.get("HOME"));
-        return (home == null || !home.isAbsolute() ? Path.of(System.getProperty("user.home")) : home).normalize();
+        if (home == null || !home.isAbsolute()) {
+            home = dev.jkit.core.Fs.path(System.getProperty("user.home"));
+        }
+        if (home == null || !home.isAbsolute()) {
+            throw new dev.jkit.model.JkitException("can't tell your home folder, so not which startup file to change",
+                    "set HOME to an absolute path");
+        }
+        return home.normalize();
     }
 
     /** bash, zsh or fish from $SHELL; anything else has to be named. */
@@ -123,6 +130,9 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("line " + manual + " of " + shown + " already loads the jkit hook; nothing changed there");
         } else {
             createParent(ctx, file, report);
+            if (!exists) {
+                Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
+            }
             Files.writeString(file, ShellRc.add(text, shell).text(), charset);
             report.file(file, !exists);
             added = true;
@@ -157,7 +167,7 @@ final class HookCommand implements Callable<Integer> {
             if (dir.equals(ctx.home.root())) {
                 ctx.home.create();
             } else {
-                Files.createDirectories(dir);
+                dev.jkit.model.Perms.mkdirs(dir); // 755 whatever the umask: other users mustn't edit startup files
             }
             report.folder(dir, true);
         }
@@ -174,6 +184,9 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
+            if (!Files.exists(config)) {
+                Files.createFile(config, dev.jkit.model.Perms.file());
+            }
             Files.writeString(config, edit.text());
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "

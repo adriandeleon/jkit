@@ -24,7 +24,13 @@ public record JkitHome(Path root) {
         if (Fs.path(home) == null || !Fs.path(home).isAbsolute() || !Owners.posix()) {
             home = System.getProperty("user.home");
         }
-        return new JkitHome(Path.of(home, ".jkit"));
+        // no passwd entry (docker run -u 1001) and no HOME: user.home is "?", relative to every folder
+        Path base = Fs.path(home);
+        if (base == null || !base.isAbsolute()) {
+            throw new dev.jkit.model.JkitException("can't tell your home folder (HOME isn't set, and this user has "
+                    + "no home in the system's user list)", "set HOME, or JKIT_HOME, to an absolute path");
+        }
+        return new JkitHome(base.resolve(".jkit"));
     }
 
     public JkitHome {
@@ -54,10 +60,12 @@ public record JkitHome(Path root) {
      */
     public void create() throws java.io.IOException {
         if (java.nio.file.Files.isDirectory(root)) {
+            // whoever made it, maybe another user since this command started: checked again
+            requireSafe();
             return;
         }
         if (root.getParent() != null) {
-            java.nio.file.Files.createDirectories(root.getParent());
+            dev.jkit.model.Perms.mkdirs(root.getParent());
         }
         try {
             if (POSIX) {

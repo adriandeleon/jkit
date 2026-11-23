@@ -133,7 +133,7 @@ final class InstallCommand implements Callable<Integer> {
         }
         if (!madeDefault) {
             ctx.out.println("make it the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText)
-                    + " --global");
+                    + (fx ? " --fx" : "") + " --global");
         }
         return 0;
     }

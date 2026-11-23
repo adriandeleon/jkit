@@ -127,6 +127,70 @@ class ArchivesTest {
                 .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("claims");
     }
 
+    private Path tarOf(String name, byte[]... blocks) throws IOException {
+        Path archive = tmp.resolve(name);
+        try (OutputStream out = new GzipCompressorOutputStream(Files.newOutputStream(archive))) {
+            for (byte[] b : blocks) {
+                out.write(b);
+                if (b.length % 512 != 0) {
+                    out.write(new byte[512 - b.length % 512]);
+                }
+            }
+            out.write(new byte[1024]);
+        }
+        return archive;
+    }
+
+    private static byte[] pax(String... records) {
+        StringBuilder sb = new StringBuilder();
+        for (String r : records) {
+            int len = r.length() + 2;
+            len += String.valueOf(len + String.valueOf(len).length()).length();
+            sb.append(len).append(' ').append(r).append('\n');
+        }
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void headerTypesJkitDoesNotUnpackAreRefused() throws IOException {
+        // Solaris X headers and sparse files: commons-compress would read them, the scan won't guess
+        Path solaris = tarOf("x.tar.gz", header("h", 'X', 10), new byte[10]);
+        assertThatThrownBy(() -> Archives.extract(solaris, tmp.resolve("o1"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("type 'X'");
+        byte[] sparse = pax("GNU.sparse.major=1");
+        Path gnu = tarOf("s.tar.gz", header("h", 'x', sparse.length), sparse, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(gnu, tmp.resolve("o2"), "tar.gz"))
+                .hasMessageContaining("sparse");
+        byte[] global = pax("size=0");
+        Path g = tarOf("g.tar.gz", header("h", 'g', global.length), global, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(g, tmp.resolve("o3"), "tar.gz"))
+                .hasMessageContaining("global PAX header sets a size");
+    }
+
+    @Test
+    void theLastPaxSizeIsTheOneCounted() throws IOException {
+        // commons-compress uses the last size record: the scan must count that one, not the first
+        byte[] two = pax("size=0", "size=5000000000");
+        Path archive = tarOf("p.tar.gz", header("h", 'x', two.length), two, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("o"), "tar.gz"))
+                .hasMessageContaining("more than 3 GB");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    void aZipSymlinkTargetIsNeverReadWhole() throws IOException {
+        Path archive = tmp.resolve("link.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            ZipArchiveEntry e = new ZipArchiveEntry("top/link");
+            e.setUnixMode(0120777);
+            zip.putArchiveEntry(e);
+            zip.write(new byte[10_000]);
+            zip.closeArchiveEntry();
+        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symlink entry");
+    }
+
     @Test
     @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // symlinks
     void aMacHomeThatIsALinkIsRefused() throws IOException {

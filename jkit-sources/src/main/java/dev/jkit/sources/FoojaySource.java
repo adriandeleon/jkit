@@ -138,6 +138,15 @@ public final class FoojaySource {
                     .filter(p -> p.vendor().equals(vendor))
                     .mapToInt(Pkg::major).max()
                     .orElseThrow(() -> new JkitException(vendor + " has no builds for " + platform));
+            if (pre) {
+                // --pre without a version: an early-access major above the newest release, when there is one
+                for (int ea = major + 2; ea > major; ea--) {
+                    if (!builds(ea, vendor, platform, fx, true).isEmpty()) {
+                        major = ea;
+                        break;
+                    }
+                }
+            }
         } else {
             major = Version.parse(versionSpec).part(0);
         }
@@ -160,10 +169,15 @@ public final class FoojaySource {
             Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
             String checksumUri = Json.text(info, "checksum_uri");
             if (checksum == null && !checksumUri.isEmpty() && !http.offline()) {
-                URI uri = Http.sent(checksumUri, "a checksum");
-                checksum = Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
+                URI uri = Http.sent(checksumUri, "a checksum", base);
+                // a file named for its algorithm (.sha256) must hold that kind; checksum_type alone is a hint
+                String named = java.util.stream.Stream.of("sha512", "sha384", "sha256")
+                        .filter(a -> uri.getPath() != null && uri.getPath().endsWith("." + a)).findFirst().orElse(null);
+                checksum = named != null
+                        ? Checksum.parseStrict(http.getFresh(uri), pkg.fileName(), named)
+                        : Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
-            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.sent(url, "a download"), pkg.fileName(),
+            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.sent(url, "a download", base), pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
                     checksum == null ? null : checksum.hash(), fx);
         }
@@ -214,7 +228,7 @@ public final class FoojaySource {
             }
             if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))
                     || !Json.text(n, "id").matches("[A-Za-z0-9_-]{1,128}")
-                    || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+-]{0,199}")
+                    || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+%-]{0,199}")
                     || !java.util.Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
                 continue; // not text jkit can use as a folder name
             }

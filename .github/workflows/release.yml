@@ -35,6 +35,7 @@ concurrency:
 
 jobs:
   build:
+    name: build (${{ matrix.platform }})
     strategy:
       fail-fast: false   # a dry run should report every platform, not stop at the first
       matrix:
@@ -43,29 +44,35 @@ jobs:
           # (checked below) such as RHEL 9 and Debian 12.
           - runner: ubuntu-22.04
             platform: linux-x64
-            graalvm: community
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-x64_bin.tar.gz
+            graalvm_sha256: c6438dee6c3ade2220d40b7ccdcad24b512d30e233e61bb4fc70519522de34ef
             profiles: native,linux-packages
           - runner: ubuntu-22.04-arm
             platform: linux-aarch64
-            graalvm: community
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-aarch64_bin.tar.gz
+            graalvm_sha256: 41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66
             profiles: native,linux-packages
           # Both macOS binaries are signed and notarized by the macos-sign job below.
           - runner: macos-15
             platform: macos-aarch64
             arch: arm64
-            graalvm: community
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_macos-aarch64_bin.tar.gz
+            graalvm_sha256: 54369d4a5931a5a2101c7c52444a4e7e6647a3a4e041335053cda6fd22295e0c
             profiles: native
           - runner: macos-15-intel
             platform: macos-x64
             arch: x86_64
-            graalvm: liberica
+            # GraalVM CE has no macOS x64 build; Liberica NIK is the same code, built by BellSoft
+            graalvm_url: https://github.com/bell-sw/LibericaNIK/releases/download/jdk-25.0.5.0.3%2B6/bellsoft-liberica-vm-openjdk25.0.5.0.3%2B6-25.0.5.0.3%2B1-macos-amd64.tar.gz
+            graalvm_sha256: 3c6d64062b7795849f76f209a8e571e5a7205ac482b40ef511f150ef83bb729e
             profiles: native
           # No windows-aarch64: GraalVM has no native-image for Windows on ARM, and winget
           # installs this x64 build there instead, which runs under emulation.
           - runner: windows-2025
             platform: windows-x64
             exe: .exe
-            graalvm: community
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_windows-x64_bin.zip
+            graalvm_sha256: b02c3b162129fa8cbfa7ebd0fcc1ae6eba2fc736bf3bef8e40e5ace3e9d9a0d6
             profiles: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
@@ -80,35 +87,36 @@ jobs:
 
       # No Maven cache on purpose: a release builds from a clean repository, so nothing a cache
       # entry saved by another workflow run could hold ends up in the binary.
-      - name: Set up GraalVM Community Edition
-        if: matrix.graalvm == 'community'
-        uses: graalvm/setup-graalvm@f70bc8032f90a104502824a54bcb94b6f01715bc # v1.6.8
-        with:
-          distribution: graalvm-community
-          version: '25.5.5.0.3'   # GraalVM CE 25 Innovation 5, JDK 25.0.5
-          java-version: '25'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # GraalVM CE has no macOS x64 build; Liberica NIK is the same code, built by BellSoft.
-      - name: Set up Liberica NIK
-        if: matrix.graalvm == 'liberica'
+      # GraalVM CE 25.5.5.0.3 (JDK 25.0.5), or Liberica NIK on macOS x64: downloaded by hand and
+      # checked against the SHA-256 GitHub publishes for the release asset (bump URL and hash together)
+      - name: Set up GraalVM
         env:
-          NIK_URL: https://github.com/bell-sw/LibericaNIK/releases/download/jdk-25.0.5.0.3%2B6/bellsoft-liberica-vm-openjdk25.0.5.0.3%2B6-25.0.5.0.3%2B1-macos-amd64.tar.gz
-          NIK_SHA256: 3c6d64062b7795849f76f209a8e571e5a7205ac482b40ef511f150ef83bb729e
+          GRAALVM_URL: ${{ matrix.graalvm_url }}
+          GRAALVM_SHA256: ${{ matrix.graalvm_sha256 }}
         run: |
-          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/nik.tar.gz" "$NIK_URL"
-          echo "$NIK_SHA256  $RUNNER_TEMP/nik.tar.gz" | shasum -a 256 -c -
-          mkdir "$RUNNER_TEMP/nik"
-          tar -C "$RUNNER_TEMP/nik" -xzf "$RUNNER_TEMP/nik.tar.gz"
-          rm "$RUNNER_TEMP/nik.tar.gz"
-          # the JDK home is the shallowest directory holding a `release` file (…/Contents/Home)
-          home=$(find "$RUNNER_TEMP/nik" -maxdepth 4 -name release -type f \
+          set -euo pipefail
+          file="$RUNNER_TEMP/graalvm-download"
+          curl -fsSL --proto '=https' -o "$file" "$GRAALVM_URL"
+          actual=$( (sha256sum "$file" 2>/dev/null || shasum -a 256 "$file") | cut -d' ' -f1)
+          if [ "$actual" != "$GRAALVM_SHA256" ]; then
+            echo "::error::$GRAALVM_URL has SHA-256 $actual, expected $GRAALVM_SHA256"
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/graalvm"
+          case "$GRAALVM_URL" in
+            *.zip) 7z x -bso0 -o"$RUNNER_TEMP/graalvm" "$file" ;;
+            *)     tar -C "$RUNNER_TEMP/graalvm" -xzf "$file" ;;
+          esac
+          rm "$file"
+          # the JDK home is the shallowest directory holding a `release` file (…/Contents/Home on macOS)
+          home=$(find "$RUNNER_TEMP/graalvm" -maxdepth 4 -name release -type f \
             | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
           home=$(dirname "$home")
-          "$home/bin/native-image" --version
+          "$home/bin/native-image${{ matrix.exe && '.cmd' || '' }}" --version
+          if [ "$RUNNER_OS" = Windows ]; then home=$(cygpath -w "$home"); fi
           echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$home" >> "$GITHUB_ENV"
-          echo "$home/bin" >> "$GITHUB_PATH"
+          echo "$home${{ matrix.exe && '\bin' || '/bin' }}" >> "$GITHUB_PATH"
 
       - name: Set the version from the tag
         run: |
@@ -375,12 +383,18 @@ jobs:
           name: unsigned-${{ matrix.platform }}
           path: stage
 
+      # into a folder of its own, then copied over the unsigned one: nothing depends on how
+      # download-artifact treats a file that is already there
       - name: Download the signed binary
         if: needs.macos-sign.result == 'success'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-${{ matrix.platform }}
-          path: stage
+          path: signed
+
+      - name: Use the signed binary
+        if: needs.macos-sign.result == 'success'
+        run: cp -f signed/jkit stage/jkit
 
       - name: Check and pack
         run: |
@@ -391,6 +405,18 @@ jobs:
           stage/jkit --version | grep -Fx "jkit $VERSION"
           lipo -archs stage/jkit | grep -Fx "${{ matrix.arch }}"
           codesign -dv stage/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
+          # a tag ships what macos-sign signed: check it really is, not the linker's ad-hoc signature
+          if [ "${{ needs.macos-sign.result }}" = success ]; then
+            codesign --verify --strict stage/jkit
+            if codesign -dvv stage/jkit 2>&1 | grep -q 'Authority=Developer ID Application'; then
+              echo "signed with a Developer ID"
+            else
+              case "$GITHUB_REF_NAME" in
+                *-*) echo "::warning::this pre-release's macOS binary isn't Developer-ID signed" ;;
+                *)   echo "::error::the macOS binary isn't Developer-ID signed"; exit 1 ;;
+              esac
+            fi
+          fi
           mkdir dist
           base="jkit-$VERSION-${{ matrix.platform }}"
           files=(jkit LICENSE THIRD-PARTY-NOTICES)
@@ -406,8 +432,41 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  release:
+  # The Homebrew formula and winget manifests are otherwise first generated on a real tag: make
+  # them from this run's files and check their syntax on every run, the manual ones included.
+  packaging-check:
     needs: [build, macos-pack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: jkit-*
+          merge-multiple: true
+
+      - name: Generate and check
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
+          (cd dist && sha256sum * > "$RUNNER_TEMP/SHA256SUMS")
+          case "$version" in
+            *-*) echo "a pre-release: Homebrew and winget skip it, but the files are still checked" ;;
+          esac
+          packaging/homebrew-formula.sh "$version" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/jkit.rb"
+          ruby -c "$RUNNER_TEMP/jkit.rb"
+          packaging/winget-manifests.sh "$version" "$RUNNER_TEMP/SHA256SUMS" "$RUNNER_TEMP/manifests"
+          python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]; print(len(sys.argv) - 1, "manifests parse")' \
+            "$RUNNER_TEMP"/manifests/*.yaml
+
+  release:
+    needs: [build, macos-pack, packaging-check]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     outputs:
       latest: ${{ steps.publish.outputs.latest }}
@@ -546,8 +605,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
           # a pinned wingetcreate release; bump both lines together
-          WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe
-          WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+          WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.28.1.0/wingetcreate.exe
+          WINGETCREATE_SHA256: 63d980ba79e97042395bd6eb5992c2db9e01e9e7a8a22958a95c288f27310413
         run: |
           if [ -z "$WINGET_TOKEN" ]; then
             echo "::error::WINGET_TOKEN is not set, so no winget pull request was opened." \
@@ -566,12 +625,23 @@ jobs:
             exit 1
           fi
           # a re-run after wingetcreate already opened the pull request must not open a second one
-          title="New version: AdrianDeLeon.jkit version $version"
-          # any state (merged or closed counts too), exact title only (the search matches prefixes:
-          # "version 0.3" would also find "version 0.3.1"); the winget token can always search
-          existing=$(T="$title" GH_TOKEN="$WINGET_TOKEN" gh pr list --repo microsoft/winget-pkgs --state all \
-                       --search "\"$title\" in:title" --limit 50 --json url,title,state \
-                       --jq '.[] | select(.title == env.T) | "\(.state) \(.url)"' | head -1)
+          # winget-pkgs titles a package's first submission "New package", later ones "New version"
+          if GH_TOKEN="$WINGET_TOKEN" gh api repos/microsoft/winget-pkgs/contents/manifests/a/AdrianDeLeon/jkit \
+               > /dev/null 2>&1; then
+            title="New version: AdrianDeLeon.jkit version $version"
+          else
+            title="New package: AdrianDeLeon.jkit version $version"
+          fi
+          # an open or merged pull request for this version, under either title (a re-run after the
+          # first one merged would otherwise ask for "New version"); a closed, unmerged one doesn't
+          # count, so a rejected submission is sent again. Exact titles only: the search matches
+          # prefixes ("version 0.3" would also find "version 0.3.1")
+          existing=$(T1="New package: AdrianDeLeon.jkit version $version" \
+                     T2="New version: AdrianDeLeon.jkit version $version" GH_TOKEN="$WINGET_TOKEN" \
+                     gh pr list --repo microsoft/winget-pkgs --state all \
+                       --search "\"AdrianDeLeon.jkit version $version\" in:title" --limit 50 --json url,title,state \
+                       --jq '.[] | select((.title == env.T1 or .title == env.T2) and .state != "CLOSED")
+                             | "\(.state) \(.url)"' | head -1)
           if [ -n "$existing" ]; then
             echo "a pull request for $version exists already: $existing"
             exit 0

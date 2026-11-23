@@ -151,7 +151,11 @@ final class StatusCommand implements Callable<Integer> {
 
     private static String installedHint(Context ctx, Tool tool) throws Exception {
         List<Installed> installed = ctx.store.list(tool);
-        Installed newest = installed.getFirst();
+        // the default vendor's newest when there is one, like jkit use without a vendor would pick
+        dev.jkit.model.Vendor preferred = tool.hasVendors() ? ctx.config.defaultVendor(tool) : null;
+        Installed newest = installed.stream().filter(i -> preferred != null && preferred.equals(i.vendor())
+                && (tool != Tool.JDK || !(i.vendor() != null && i.vendor().isGraalVmBased())))
+                .findFirst().orElse(installed.getFirst());
         return installed.size() + " installed, none chosen: " + useCommand(tool, newest, true);
     }
 

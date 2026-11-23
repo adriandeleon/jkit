@@ -426,8 +426,8 @@ final class DoctorCommand implements Callable<Integer> {
             r.info("version index: " + files + " cached " + (files == 1 ? "list" : "lists") + ", newest "
                     + age(Duration.between(newest, Instant.now())) + " old (refetched after 24 h)");
         }
-        if ("true".equals(r.ctx.env.get("JKIT_NETWORK_OFFLINE"))) {
-            r.info("offline mode is on (JKIT_NETWORK_OFFLINE=true): only cached version lists are used");
+        if (Context.offlineByEnv(r.ctx.env)) {
+            r.info("offline mode is on (JKIT_NETWORK_OFFLINE): only cached version lists are used");
         }
     }
 

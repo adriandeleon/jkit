@@ -31,6 +31,7 @@ cat <<EOF
 class Jkit < Formula
   desc "Installs and switches JDKs, Maven, Gradle and sbt"
   homepage "https://jkit-project.dev"
+  # stated, not scanned from the URL: "jkit-0.3.0-linux-aarch64" holds other numbers too
   version "$version"
   # jkit's own code is MIT; the binary also carries the libraries and Java runtime parts listed
   # in THIRD-PARTY-NOTICES (the main licenses; the notices file has every one)
@@ -40,13 +41,14 @@ class Jkit < Formula
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
+    "CC0-1.0",
+    "ICU",
     "MPL-2.0",
     "Unicode-3.0",
+    "W3C",
     "Zlib",
     { "GPL-2.0-only" => { with: "Classpath-exception-2.0" } },
   ]
-  # the binary links the system zlib (libz.so.1) on Linux
-  uses_from_macos "zlib"
 
   on_macos do
     depends_on macos: :sequoia
