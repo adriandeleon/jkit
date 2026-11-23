@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build:
     strategy:
-      fail-fast: true
+      fail-fast: false   # a dry run should report every platform, not stop at the first
       matrix:
         include:
           # Ubuntu 22.04 runners: glibc 2.35, so the binary runs on glibc 2.34+ systems

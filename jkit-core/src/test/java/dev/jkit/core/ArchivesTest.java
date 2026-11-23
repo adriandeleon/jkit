@@ -48,6 +48,7 @@ class ArchivesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
     void tarGzKeepsPermissionsAndSymlinks() throws IOException {
         Path out = tmp.resolve("out");
         Archives.extract(jdkTarGz(tmp, "jdk-21"), out, "tar.gz");
@@ -61,6 +62,7 @@ class ArchivesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
     void zipKeepsUnixModes() throws IOException {
         Path archive = tmp.resolve("maven.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
