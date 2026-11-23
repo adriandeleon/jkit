@@ -1,0 +1,19 @@
+# Libraries compiled into the jkit binary: the runtime dependencies of jkit-cli, minus jkit's own
+# modules. packaging/third-party-notices.sh builds THIRD-PARTY-NOTICES from this table, and its
+# --check mode (run in CI) fails when Maven resolves a different set than the one listed here.
+#
+# Tab-separated: group:artifact, version, SPDX license, copyright line, project URL, then the
+# notice and license files to reproduce verbatim, comma-separated. A file is a jar entry
+# (META-INF/...) of that artifact, or a path under packaging/third-party/ for texts the jar lacks.
+# The Apache-2.0 text is reproduced once at the end, so Apache jars list only their NOTICE.
+com.fasterxml.jackson.core:jackson-annotations	2.23	Apache-2.0	Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)	https://github.com/FasterXML/jackson-annotations	META-INF/NOTICE
+com.fasterxml.jackson.core:jackson-core	2.23.0	Apache-2.0	Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)	https://github.com/FasterXML/jackson-core	META-INF/NOTICE,META-INF/FastDoubleParser-LICENSE,META-INF/FastDoubleParser-ThirdParty-LICENSE,META-INF/Schubfach-LICENSE
+com.fasterxml.jackson.core:jackson-databind	2.23.0	Apache-2.0	Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)	https://github.com/FasterXML/jackson-databind	META-INF/NOTICE
+commons-codec:commons-codec	1.19.0	Apache-2.0	Copyright 2002-2025 The Apache Software Foundation	https://commons.apache.org/proper/commons-codec/	META-INF/NOTICE.txt
+commons-io:commons-io	2.20.0	Apache-2.0	Copyright 2002-2025 The Apache Software Foundation	https://commons.apache.org/proper/commons-io/	META-INF/NOTICE.txt
+info.picocli:picocli	4.7.7	Apache-2.0	Copyright 2017 Remko Popma	https://picocli.info	-
+org.antlr:antlr4-runtime	4.11.1	BSD-3-Clause	Copyright (c) 2012-2022 The ANTLR Project. All rights reserved.	https://www.antlr.org	packaging/third-party/antlr4-runtime-LICENSE.txt
+org.apache.commons:commons-compress	1.28.0	Apache-2.0	Copyright 2002-2025 The Apache Software Foundation	https://commons.apache.org/proper/commons-compress/	META-INF/NOTICE.txt
+org.apache.commons:commons-lang3	3.18.0	Apache-2.0	Copyright 2001-2025 The Apache Software Foundation	https://commons.apache.org/proper/commons-lang/	META-INF/NOTICE.txt
+org.checkerframework:checker-qual	3.21.2	MIT	Copyright 2004-present by the Checker Framework developers	https://checkerframework.org	META-INF/LICENSE.txt
+org.tomlj:tomlj	1.1.1	Apache-2.0	Copyright the tomlj authors (Chris Leishman and contributors)	https://github.com/tomlj/tomlj	-

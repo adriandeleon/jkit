@@ -1,5 +1,8 @@
 # Project files (pin and sync)
 
+> Design notes from when this was built, kept for contributors. They may lag behind the code;
+> the user documentation is in [../](../).
+
 Status: implemented, phases 1 to 4 (see the end).
 
 ## Goal

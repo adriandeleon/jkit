@@ -1,5 +1,8 @@
 # Diagnostics: status, env, doctor
 
+> Design notes from when this was built, kept for contributors. They may lag behind the code;
+> the user documentation is in [../](../).
+
 Status: implemented (`status`, `env`, `doctor`). Builds on project files (docs/project-files.md);
 phase 1 of that (reading `jkit.toml` and friends) is all these commands need.
 

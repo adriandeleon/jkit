@@ -86,7 +86,11 @@
     <!--
       mvn -Pnative package  (needs GRAALVM_HOME pointing at GraalVM 25)
 
-      Use package or verify with this profile, not install. On Oracle GraalVM the plugin makes a
+      Releases are built with GraalVM Community Edition, which supports -Os (optimize for size)
+      too. The SBOM shipped with a release is a separate file (CycloneDX, made in release.yml);
+      Community Edition embeds none in the binary.
+
+      With Oracle GraalVM, use package or verify with this profile, not install: the plugin makes a
       base SBOM with cyclonedx-maven-plugin, which attaches target/base_sbom.json to the project as
       an extra artifact; the plugin then embeds the SBOM in the binary and deletes that file. The
       artifact stays attached, so install fails copying a file that's gone. The binary is fine.
@@ -114,6 +118,8 @@
               <mainClass>${main.class}</mainClass>
               <buildArgs>
                 <buildArg>-Os</buildArg>
+                <!-- the default targets x86-64-v3 (AVX2) on amd64: keep the binary running on older CPUs -->
+                <buildArg>-march=compatibility</buildArg>
               </buildArgs>
             </configuration>
           </plugin>
@@ -223,6 +229,16 @@
                       </mapper>
                     </data>
                     <data>
+                      <src>${project.basedir}/../THIRD-PARTY-NOTICES</src>
+                      <type>file</type>
+                      <mapper>
+                        <type>perm</type>
+                        <prefix>/usr/share/doc/jkit</prefix>
+                        <user>root</user>
+                        <group>root</group>
+                      </mapper>
+                    </data>
+                    <data>
                       <src>${project.basedir}/src/deb/doc/copyright</src>
                       <type>file</type>
                       <mapper>
@@ -251,8 +267,8 @@
                 <configuration>
                   <packageName>jkit</packageName>
                   <architecture>${rpm.arch}</architecture>
-                  <summary>Installs and switches JDKs, Maven and Gradle</summary>
-                  <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven and Gradle. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
+                  <summary>Installs and switches JDKs, Maven, Gradle and sbt</summary>
+                  <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven, Gradle and sbt. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
                   <license>MIT</license>
                   <group>Development/Tools</group>
                   <vendor>Adrian De Leon</vendor>
@@ -292,6 +308,15 @@
                     <entry>
                       <name>/usr/share/licenses/jkit/LICENSE</name>
                       <file>${project.basedir}/../LICENSE</file>
+                      <license>true</license>
+                      <mode>0644</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
+                    <entry>
+                      <!-- the libraries compiled into the binary: their licenses and NOTICE files -->
+                      <name>/usr/share/licenses/jkit/THIRD-PARTY-NOTICES</name>
+                      <file>${project.basedir}/../THIRD-PARTY-NOTICES</file>
                       <license>true</license>
                       <mode>0644</mode>
                       <user>root</user>

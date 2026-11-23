@@ -5,8 +5,8 @@ document on stdout**, also when it fails. Progress, download bars and messages g
 program can read stdout whole and show stderr lines as progress.
 
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
-`remove`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout belongs to the command
-it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
+`pin`, `unpin`, `sync`, `remove`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout
+belongs to the command it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
 print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
 ## Versioning
@@ -52,6 +52,7 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
   "graalvm": false,
   "preRelease": false,
   "home": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin",
+  "verified": true,
   "global": ["jdk"],
   "activeInShell": []
 }
@@ -62,6 +63,11 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
 - `major` is the feature release: 21 for `21.0.9+10`, 8 for `1.8.0_472`, 3 for Maven `3.9.11`.
 - `vendor` is null for Maven, Gradle and sbt.
 - `home` is the folder to use as `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME` or `SBT_HOME`.
+- `verified` is true when the download matched a sha256, sha384 or sha512 checksum published by its
+  source (foojay or the vendor for JDKs, Maven Central, services.gradle.org, sbt's GitHub releases).
+  It proves the file is the one the source lists, not who built it: no signatures are checked. False
+  for md5/sha1-only checksums, for `--allow-unverified` installs, and for installs made before jkit
+  recorded it.
 - `global` lists the slots (`jdk`, `graalvm`, `maven`, `gradle`, `sbt`) whose global link points here;
   `activeInShell` the slots the calling shell's hook points here.
 
@@ -127,7 +133,7 @@ Never uses the network. Reads the project file found from the working directory 
   file can't be read.
 - `matches` is true when `source` is what jkit would pick; `hint` says what to do when it isn't.
 
-## `jkit env [--global] [--dir <path>] --json`
+## `jkit env [--no-project] [--dir <path>] --json`
 
 Never uses the network. The environment for a new process in `dir`: global links,
 overridden by the project's pins (shell choices don't count).
@@ -229,7 +235,8 @@ the same lines on stderr, under a `jkit: using â€¦` or `jkit: left the project â
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
   is reported per entry, with `action` `add` or `remove`.
 
-`list`, `status`, `env`, `exec`, `doctor` and `hook` never change anything.
+`list`, `status`, `env`, `exec` and `doctor` never change anything; nor does `hook` without
+`--install` or `--uninstall` (those edit your shell's startup file and `config.toml`).
 
 ## `jkit install <tool>@<version> [vendor] --json`
 
@@ -238,9 +245,12 @@ the same lines on stderr, under a `jkit: using â€¦` or `jkit: left the project â
   "changes": [ { "kind": "folder", "name": "â€¦/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null } ] }
 ```
 
-`status` is `installed` or `already-installed` (then `verified` is null). `verified` is false when the
-source publishes no checksum, or only an md5 or sha1 one (jkit still checks those, but they don't
-count as verified). Downloads and checksums come only over https.
+`status` is `installed` or `already-installed` (then `verified` is null; the install object's own
+`verified` says how it was installed). `verified` is false when the source publishes only an md5
+or sha1 checksum (jkit still checks those, but they don't count as verified), or for an
+`--allow-unverified` install; a download with no checksum at all is refused without that flag.
+Downloads and checksums come only over https. The first install of a tool also sets its global
+link (in `changes`), unless `--no-default`.
 
 ## `jkit upgrade [tool[@major]] [vendor] [--dry-run] --json`
 
