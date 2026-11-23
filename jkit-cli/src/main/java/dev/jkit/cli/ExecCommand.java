@@ -122,7 +122,7 @@ final class ExecCommand implements Callable<Integer> {
         for (Choice c : choices) {
             ToolSpec cs = Resolve.lts(ctx, c.spec(), c.vendor(), false);
             Vendor vendor = Resolve.vendor(ctx, cs, c.vendor());
-            Installed chosen = Resolve.installed(ctx, cs, vendor, c.vendor(), false).getFirst();
+            Installed chosen = Resolve.installed(ctx, cs, vendor, c.vendor(), false, "exec").getFirst();
             homes.put(c.spec().tool(), chosen.home());
             if (c.spec().tool() == Tool.JDK) {
                 jdkIsGraalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
@@ -135,7 +135,8 @@ final class ExecCommand implements Callable<Integer> {
             variables.put(ShellEnv.projectVariable(t), null); // nor what jkit sync applied to it
             String current = ctx.env.get(t.homeVariable());
             if (!variables.containsKey(t.homeVariable()) && current != null
-                    && Path.of(current).toAbsolutePath().normalize().startsWith(tools)) {
+                    && dev.jkit.core.Fs.path(current) != null
+                    && dev.jkit.core.Fs.path(current).toAbsolutePath().normalize().startsWith(tools)) {
                 variables.put(t.homeVariable(), null); // a jkit install whose bin is no longer on PATH
             }
         }
@@ -166,7 +167,8 @@ final class ExecCommand implements Callable<Integer> {
             return name;
         }
         boolean windows = File.separatorChar == '\\';
-        List<String> suffixes = windows ? List.of("", ".exe", ".cmd", ".bat") : List.of("");
+        // Windows: mvn.cmd before mvn, the Unix script next to it that CreateProcess can't start
+        List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
         for (String entry : path.split(File.pathSeparator)) {
             if (entry.isEmpty()) {
                 continue;

@@ -112,6 +112,14 @@ final class Changes {
         return this;
     }
 
+    /**
+     * How to load the hook in new shells: hook --install can't edit a PowerShell profile, so on
+     * Windows the line to add by hand.
+     */
+    static final String HOOK_SETUP = java.io.File.separatorChar == '\\'
+            ? "add to your PowerShell $PROFILE: jkit hook pwsh | Out-String | Invoke-Expression"
+            : "jkit hook --install";
+
     /** A project file or shell startup file this command wrote (pin, unpin, hook --install). */
     Changes file(Path file, boolean created) {
         changes.add(new Change("file", file.toAbsolutePath().toString(), created ? "create" : "update", null));
@@ -139,7 +147,7 @@ final class Changes {
         if (shellChoice != null && !shellChoice.isBlank()) {
             note("this shell keeps its own " + tool + " (" + tilde(Path.of(shellChoice))
                     + "); to follow the global one: jkit reset " + tool);
-        } else if (current != null && Path.of(current).toAbsolutePath().normalize()
+        } else if (dev.jkit.core.Fs.path(current) != null && dev.jkit.core.Fs.path(current).toAbsolutePath().normalize()
                 .equals(home.global(tool).toAbsolutePath().normalize())) {
             note("this shell follows it already: " + var + "=" + link);
         } else if (current != null && !current.isBlank()) {
@@ -147,7 +155,7 @@ final class Changes {
                     + "; remove it from your shell profile to use jkit's");
         } else if (ctx.env.get("JKIT_SHELL") == null) {
             note("the jkit hook is not loaded in this shell, so nothing sets " + var
-                    + "; load it in new shells: jkit hook --install");
+                    + "; load it in new shells: " + HOOK_SETUP);
         } else {
             note(var + " is not set in this shell yet; open a new shell, or: jkit reset " + tool);
         }

@@ -262,6 +262,18 @@ class ProjectFileTest {
 
     @Test
     @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void everyFileReadTogetherIsChecked() throws IOException {
+        // .sdkmanrc, .tool-versions and .java-version are read together: a bad second one counts too
+        write("home/p/.sdkmanrc", "java=21.0.2-tem\n");
+        write("home/p/.tool-versions", "maven 3.9.9\n");
+        Files.setPosixFilePermissions(tmp.resolve("home/p/.tool-versions"),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains(".tool-versions");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
     void aRelativeOverrideFollowsTheSameRules() throws IOException {
         write("shared/x.toml", "[tools]\njdk = \"21\"\n");
         Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));

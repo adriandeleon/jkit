@@ -32,7 +32,15 @@ class Jkit < Formula
   desc "Installs and switches JDKs, Maven, Gradle and sbt"
   homepage "https://jkit-project.dev"
   version "$version"
-  license "MIT"
+  # jkit's own code is MIT; the binary also carries the libraries and Java runtime parts listed
+  # in THIRD-PARTY-NOTICES
+  license all_of: [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    { "GPL-2.0-only" => { with: "Classpath-exception-2.0" } },
+  ]
 
   on_macos do
     depends_on macos: :sequoia

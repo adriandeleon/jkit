@@ -82,8 +82,9 @@ final class HookCommand implements Callable<Integer> {
     }
 
     static Path userHome(Context ctx) {
-        String home = ctx.env.getOrDefault("HOME", System.getProperty("user.home"));
-        return Path.of(home).toAbsolutePath().normalize();
+        // an empty or relative HOME would put the rc file in the current folder
+        Path home = dev.jkit.core.Fs.path(ctx.env.get("HOME"));
+        return (home == null || !home.isAbsolute() ? Path.of(System.getProperty("user.home")) : home).normalize();
     }
 
     /** bash, zsh or fish from $SHELL; anything else has to be named. */

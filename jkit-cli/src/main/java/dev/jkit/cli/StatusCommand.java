@@ -64,7 +64,7 @@ final class StatusCommand implements Callable<Integer> {
             out.println("nothing active or installed yet · try: jkit search jdk");
         }
         if (result.projectError() != null) {
-            out.println("project file error: " + result.projectError());
+            out.println("project file error: " + Changes.tilde(result.projectError()));
         } else if (result.projectSkipped() != null) {
             out.println("project: none (" + Changes.tilde(result.projectSkipped()) + ")");
         } else if (result.project().isPresent()) {
@@ -139,7 +139,7 @@ final class StatusCommand implements Callable<Integer> {
                         + "; remove it from your shell profile to use jkit's";
                 case STALE -> "set by jkit earlier but no longer chosen: open a new shell, or jkit reset " + tool;
                 default -> ctx.env.get("JKIT_SHELL") == null
-                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: jkit hook --install, then open a new shell"
+                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: " + Changes.HOOK_SETUP + ", then open a new shell"
                         : "the global " + tool + " isn't applied in this shell yet: open a new shell";
             };
             case NONE -> s.source() == Source.STALE

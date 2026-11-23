@@ -10,6 +10,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # a new release waits a week first, so a compromised one is likely caught before it lands here
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       maven:
@@ -19,6 +22,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       github-actions:

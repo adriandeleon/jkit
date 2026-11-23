@@ -20,6 +20,8 @@
     <rpm.version>${project.version}</rpm.version>
     <!-- the same for the .deb: its control file, file name and changelog all use this -->
     <deb.version>${project.version}</deb.version>
+    <!-- file times inside the jars and the .deb; the release workflow sets the tagged commit's time -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
   </properties>
 
   <dependencies>
@@ -125,6 +127,8 @@
                 <buildArg>-Os</buildArg>
                 <!-- the default targets x86-64-v3 (AVX2) on amd64: keep the binary running on older CPUs -->
                 <buildArg>-march=compatibility</buildArg>
+                <!-- HttpClient's proxy authentication (407) goes through java.net.URL with http -->
+                <buildArg>--enable-url-protocols=http,https</buildArg>
               </buildArgs>
             </configuration>
           </plugin>
@@ -214,6 +218,7 @@
                 <configuration>
                   <deb>${project.build.directory}/jkit_[[deb.version]]_${deb.arch}.deb</deb>
                   <snapshotExpand>true</snapshotExpand>
+                  <outputTimestamp>${project.build.outputTimestamp}</outputTimestamp>
                   <controlDir>${project.basedir}/src/deb/control</controlDir>
                   <dataSet>
                     <data>
@@ -301,12 +306,19 @@
                   <architecture>${rpm.arch}</architecture>
                   <summary>Installs and switches JDKs, Maven, Gradle and sbt</summary>
                   <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven, Gradle and sbt. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
-                  <license>MIT</license>
+                  <!-- jkit's own code, then what is compiled in (THIRD-PARTY-NOTICES) -->
+                  <license>MIT AND Apache-2.0 AND BSD-3-Clause AND BSL-1.0 AND GPL-2.0-only WITH Classpath-exception-2.0</license>
                   <group>Development/Tools</group>
                   <vendor>Adrian De Leon</vendor>
                   <packager>${package.maintainer}</packager>
                   <attach>false</attach>
                   <requires>
+                    <!-- what rpmbuild adds for a "~" in the version (pre-releases): rpm 4.10 or newer -->
+                    <require>
+                      <name>rpmlib(TildeInVersions)</name>
+                      <version>4.10.0-1</version>
+                      <lessOrEqual/>
+                    </require>
                     <require>
                       <name>libc.so.6(GLIBC_2.34)(64bit)</name>
                     </require>

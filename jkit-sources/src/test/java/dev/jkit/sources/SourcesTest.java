@@ -180,6 +180,24 @@ class SourcesTest {
     }
 
     @Test
+    void versionsThatCantBeFolderNamesAreDropped() throws IOException {
+        // "3.9.99.:." would put "." on PATH (a PATH separator inside the install folder's name)
+        String metadata = "<metadata><versioning><versions><version>3.9.11</version>"
+                + "<version>3.9.99.:.</version><version>3.9.98/../x</version></versions></versioning></metadata>";
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata)), MavenSource.DEFAULT_BASE);
+        assertThat(maven.versions(true)).extracting(v -> v.raw()).containsExactly("3.9.11");
+    }
+
+    @Test
+    void aChecksumWeakerThanItsFileNameIsRefused() {
+        // a .sha512 holding an md5 must not count as even a weak checksum
+        assertThatThrownBy(() -> Checksum.parse("d".repeat(32) + "  b.zip\n", "b.zip", "sha512"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("md5, not sha512");
+        assertThatThrownBy(() -> Checksum.of("zz" + "d".repeat(62), "sha256"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("isn't a hex hash");
+    }
+
+    @Test
     void checksumFileWithoutAUsableHashIsAnError() {
         // a proxy's plain-text block page must not turn into "no checksum, install unverified"
         assertThatThrownBy(() -> Checksum.parse("Access denied by cafe proxy\n", "b.tar.gz", "sha256"))

@@ -27,8 +27,10 @@ final class Errors {
             return network(n.uri().getHost(), n.getCause());
         }
         if (ex instanceof AccessDeniedException a) {
-            return new JkitException("permission denied: " + a.getFile(),
-                    "check the folder's owner, or set JKIT_HOME to a folder you can write");
+            return new JkitException("permission denied: " + a.getFile(), java.io.File.separatorChar == '\\'
+                    ? "something may have the file open (an antivirus scan, an IDE, a Gradle daemon): wait a moment, "
+                            + "then run this again"
+                    : "check the folder's owner, or set JKIT_HOME to a folder you can write");
         }
         if (ex instanceof NoSuchFileException f) {
             return new JkitException("file not found: " + f.getFile());

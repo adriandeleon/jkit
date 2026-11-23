@@ -180,7 +180,7 @@ final class DoctorCommand implements Callable<Integer> {
         String fix = switch (name) {
             case "zsh" -> "jkit hook zsh --install, then open a new shell";
             case "fish" -> "jkit hook fish --install, then open a new shell";
-            default -> "jkit hook --install, then open a new shell";
+            default -> Changes.HOOK_SETUP + ", then open a new shell";
         };
         r.warn("shell hook not loaded: jkit use can't change this shell, and the global versions aren't on PATH", fix);
     }

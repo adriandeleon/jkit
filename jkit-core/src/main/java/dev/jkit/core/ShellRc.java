@@ -35,7 +35,9 @@ public final class ShellRc {
     }
 
     private static Path dirOr(String value, Path fallback) {
-        return value == null || value.isBlank() ? fallback : Path.of(value);
+        // relative values (rare, and not what the shell means either) fall back like unset ones
+        Path path = Fs.path(value);
+        return path == null || !path.isAbsolute() ? fallback : path;
     }
 
     /** The lines between and including the markers. Guarded, so a shell still starts after jkit is gone. */

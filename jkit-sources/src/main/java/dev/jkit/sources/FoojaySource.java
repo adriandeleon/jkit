@@ -76,6 +76,9 @@ public final class FoojaySource {
         TreeSet<String> names = new TreeSet<>();
         for (JsonNode d : root.path("result")) {
             String param = Json.text(d, "api_parameter");
+            if (!Vendor.isSafeName(param)) {
+                continue;
+            }
             Vendor known = Vendor.fromFoojay(param);
             if (known.isRetired()) {
                 continue;
@@ -208,6 +211,9 @@ public final class FoojaySource {
             }
             if (n.path("javafx_bundled").asBoolean() != fx) {
                 continue;
+            }
+            if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))) {
+                continue; // not text jkit can use as a folder name
             }
             Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),
                     n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),

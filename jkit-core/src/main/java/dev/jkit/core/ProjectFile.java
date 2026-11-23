@@ -109,11 +109,18 @@ public final class ProjectFile {
                 continue;
             }
             List<Path> found = filesIn(dir);
-            String why = found.isEmpty() ? trustProblem(dir) : untrusted(found.getFirst());
+            String why = found.isEmpty() ? trustProblem(dir) : null;
+            Path bad = null;
+            for (Path file : found) { // .sdkmanrc, .tool-versions and .java-version are read together
+                why = untrusted(file);
+                if (why != null) {
+                    bad = file;
+                    break;
+                }
+            }
             if (why != null) {
                 // like git's safe.directory: someone else's folder can't steer this shell
-                return new Search(List.of(), found.isEmpty() ? null
-                        : "ignoring " + found.getFirst() + ": " + why);
+                return new Search(List.of(), bad == null ? null : "ignoring " + bad + ": " + why);
             }
             if (!found.isEmpty() || (belowHome && dir.equals(home))) {
                 return new Search(found, found.isEmpty() ? unreadable : null);
@@ -227,8 +234,8 @@ public final class ProjectFile {
     }
 
     private static Path home(Map<String, String> env) {
-        String home = env.getOrDefault("HOME", System.getProperty("user.home"));
-        return home == null || home.isBlank() ? null : Path.of(home).toAbsolutePath().normalize();
+        Path home = Fs.path(env.getOrDefault("HOME", System.getProperty("user.home")));
+        return home == null ? null : home.toAbsolutePath().normalize();
     }
 
     /**

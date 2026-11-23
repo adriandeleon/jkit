@@ -13,6 +13,11 @@ name: Release
 #
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
 # publishing anything: the release, homebrew and winget jobs only run for a pushed tag.
+#
+# If homebrew or winget fails after the release is published (a missing token, an outage), fix
+# the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
+# stops at the published release and skips both. A re-run of winget first looks for an open pull
+# request for this version, so it doesn't open a second one.
 
 on:
   push:
@@ -116,13 +121,19 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           # .rpm and .deb: "~" sorts a pre-release before the release (1.2.0~rc.1 < 1.2.0), and RPM
-          # allows no "-" in a version
-          echo "PKG_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
+          # allows no "-" in a version (sed: macOS's bash 3.2 keeps the backslash in ${VERSION/-/\~})
+          echo "PKG_VERSION=$(printf '%s' "$VERSION" | sed 's/-/~/')" >> "$GITHUB_ENV"
+          # file times in the jars and the .deb: the tagged commit's, so a rebuild gives the same files
+          echo "BUILD_TIME=$(git log -1 --format=%cI)" >> "$GITHUB_ENV"
           ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
       - name: Test, build the native binary and the packages
-        run: ./mvnw -B -P${{ matrix.profiles }} verify "-Drpm.version=$PKG_VERSION" "-Ddeb.version=$PKG_VERSION"
+        # -C: fail on a dependency whose checksum doesn't match the repository's (a clean repository
+        # here downloads everything)
+        run: >-
+          ./mvnw -B -C -P${{ matrix.profiles }} verify "-Drpm.version=$PKG_VERSION" "-Ddeb.version=$PKG_VERSION"
+          "-Dproject.build.outputTimestamp=$BUILD_TIME"
 
       # The notices must list exactly the libraries compiled in; CI checks this on every PR too.
       - name: Check THIRD-PARTY-NOTICES and make the SBOM
@@ -133,6 +144,8 @@ jobs:
           ./mvnw -B -q -pl jkit-cli -am compile org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeBom \
             -DoutputFormat=json -DoutputName=sbom -DprojectType=application
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["metadata"]["component"]["name"] == "jkit-cli"; print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' jkit-cli/target/sbom.json
+          # the Java runtime compiled into the binary isn't a Maven dependency: add it by hand
+          python3 packaging/sbom-runtime.py jkit-cli/target/sbom.json
 
       - name: Check the glibc the binary needs
         if: runner.os == 'Linux'
@@ -332,13 +345,25 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
               --title "jkit ${tag#v}" "${flags[@]}"
           fi
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          # "Latest" only for the highest version: a later 0.2.x patch must not take it from 0.3.0
+          latest=false
+          case "$tag" in
+            *-*) ;;
+            *)
+              highest=$( { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+                             --limit 200 --json tagName --jq '.[].tagName'; echo "$tag"; } \
+                         | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+              [ "$highest" = "$tag" ] && latest=true ;;
+          esac
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
 
   # Needs HOMEBREW_TAP_TOKEN: a fine-grained token with Contents read/write on
   # adriandeleon/homebrew-tap. Users install with `brew install adriandeleon/tap/jkit`.
   homebrew:
     needs: release
     if: github.event_name == 'push' && github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    # the tokens can live in this environment, limited to v* tags (Settings → Environments)
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -385,6 +410,7 @@ jobs:
   winget:
     needs: release
     if: github.event_name == 'push' && github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    environment: release
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -420,6 +446,15 @@ jobs:
             echo "::error::wingetcreate.exe has SHA-256 $actual, expected $WINGETCREATE_SHA256"
             exit 1
           fi
-          # --no-open: there is no browser on the runner to show the pull request in
-          "$exe" submit --no-open --token "$WINGET_TOKEN" \
+          # a re-run after wingetcreate already opened the pull request must not open a second one
+          title="New version: AdrianDeLeon.jkit version $version"
+          open=$(gh pr list --repo microsoft/winget-pkgs --state open --search "\"$title\" in:title" \
+                   --json url --jq '.[0].url // empty')
+          if [ -n "$open" ]; then
+            echo "a pull request for $version is already open: $open"
+            exit 0
+          fi
+          # --no-open: there is no browser on the runner. The token comes from the environment
+          # (WINGET_CREATE_GITHUB_TOKEN), not the command line, where it could end up in a log.
+          WINGET_CREATE_GITHUB_TOKEN="$WINGET_TOKEN" "$exe" submit --no-open \
             --prtitle "New version: AdrianDeLeon.jkit version $version" manifests

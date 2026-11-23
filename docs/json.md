@@ -116,7 +116,7 @@ Never uses the network. Reads the project file found from the working directory 
       "wanted": { "source": "project", "home": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin" },
       "global": { "target": "/home/me/.jkit/tools/jdk/17.0.13+11-zulu", "missing": false },
       "matches": false,
-      "hint": "jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit use jdk@21.0.9+10 temurin"
+      "hint": "jkit.toml wants jdk 21.0.9+10 temurin; this shell has global: jkit sync"
     }
   ]
 }

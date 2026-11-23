@@ -37,7 +37,10 @@ public final class Visible {
         }
         boolean bidi = c == 0x061c || c == 0x200e || c == 0x200f || (c >= 0x202a && c <= 0x202e)
                 || (c >= 0x2066 && c <= 0x2069);
-        if (bidi || c == 0x2028 || c == 0x2029) {
+        // zero-width and invisible characters could hide text in a name
+        boolean invisible = (c >= 0x200b && c <= 0x200d) || (c >= 0x2060 && c <= 0x2064) || c == 0xfeff
+                || c == 0x00ad;
+        if (bidi || invisible || c == 0x2028 || c == 0x2029) {
             return String.format("\\u{%04x}", (int) c);
         }
         return null;

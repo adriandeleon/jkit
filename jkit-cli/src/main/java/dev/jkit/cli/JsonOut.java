@@ -128,7 +128,7 @@ final class JsonOut {
                 global.add(t.id());
             }
             String state = ctx.env.get(ShellEnv.stateVariable(t));
-            if (state != null && Resolve.same(Path.of(state), i.home())) {
+            if (state != null && Resolve.same(dev.jkit.core.Fs.path(state), i.home())) {
                 shell.add(t.id());
             }
         }

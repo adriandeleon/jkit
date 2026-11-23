@@ -77,6 +77,11 @@ public record Checksum(String algorithm, String hash) {
             return null;
         }
         String h = hash.strip().toLowerCase(Locale.ROOT);
+        if (!h.matches("[0-9a-f]+")) {
+            throw new JkitException("the published checksum isn't a hex hash: " + dev.jkit.model.Visible.of(
+                    h.length() > 40 ? h.substring(0, 40) + "…" : h),
+                    "a proxy or captive portal may have answered instead; try again on another network");
+        }
         String byLength = switch (h.length()) {
             case 32 -> "md5";
             case 40 -> "sha1";
@@ -85,9 +90,26 @@ public record Checksum(String algorithm, String hash) {
             case 128 -> "sha512";
             default -> null;
         };
-        String algorithm = byLength != null ? byLength
-                : declared == null || declared.isBlank() ? "sha256" : normalize(declared);
+        String named = declared == null || declared.isBlank() ? null : normalize(declared);
+        if (named != null && byLength != null && strength(byLength) < strength(named)) {
+            // a .sha512 file holding an md5 must not pass as a (weak) checksum; a stronger hash than
+            // declared is fine (foojay's checksum_type is sometimes wrong in that direction)
+            throw new JkitException("the published " + named + " checksum is " + h.length()
+                    + " hex digits long, which is " + byLength + ", not " + named);
+        }
+        String algorithm = byLength != null ? byLength : named != null ? named : "sha256";
         return new Checksum(algorithm, h);
+    }
+
+    private static int strength(String algorithm) {
+        return switch (algorithm) {
+            case "md5" -> 1;
+            case "sha1" -> 2;
+            case "sha256" -> 3;
+            case "sha384" -> 4;
+            case "sha512" -> 5;
+            default -> 0;
+        };
     }
 
     private static String normalize(String algorithm) {

@@ -1,0 +1,6 @@
+# Text shipped in the release archives keeps LF line endings on every platform, Windows included
+LICENSE text eol=lf
+THIRD-PARTY-NOTICES text eol=lf
+README.md text eol=lf
+# the Maven wrapper's Windows script needs CRLF
+*.cmd text eol=crlf

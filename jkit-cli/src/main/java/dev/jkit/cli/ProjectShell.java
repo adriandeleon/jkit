@@ -38,6 +38,18 @@ final class ProjectShell {
         return file;
     }
 
+    /**
+     * Writes the shell code the hook sources next. For PowerShell with a UTF-8 byte-order mark:
+     * Windows PowerShell 5.1 reads a script without one in the ANSI code page, which garbles
+     * C:\\Users\\José in JAVA_HOME and PATH.
+     */
+    static void writeEnvFile(Context ctx, String envFile, Map<String, String> changes) throws IOException {
+        String shell = ctx.env.getOrDefault("JKIT_SHELL", "bash");
+        String text = ShellEnv.format(changes, shell);
+        boolean pwsh = shell.equals("pwsh") || shell.equals("powershell");
+        Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     /** Writes a project file without following a link put there since {@link #target} checked. */
     static void write(Path file, String text) throws IOException {
         Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
@@ -90,7 +102,7 @@ final class ProjectShell {
             }
             return;
         }
-        Files.writeString(Path.of(envFile), ShellEnv.format(plan.changes(), ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        writeEnvFile(ctx, envFile, plan.changes());
         report.env(plan.changes());
         if (plan.applies() && !ctx.config.autoSwitch()) {
             report.note("to switch to a project's versions on cd: add auto_switch = true under [shell] in "

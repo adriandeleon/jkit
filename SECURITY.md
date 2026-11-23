@@ -21,9 +21,11 @@ jkit downloads JDKs, Maven, Gradle and sbt and runs them, so the trust it places
 matters:
 
 - Downloads, checksums and version lists are fetched over HTTPS only. The one exception is a
-  mirror on this machine (`JKIT_SOURCES_*_URL` pointing at `http://localhost`), and a redirect
-  from it must again go to HTTPS or to this machine.
-- When the source publishes a SHA-256 or SHA-512 checksum, jkit checks the download against it.
+  mirror on this machine (`JKIT_SOURCES_*_URL` pointing at `http://localhost`), which is reached
+  directly, never through `HTTPS_PROXY`. Every redirect is checked before it is followed: HTTPS
+  stays HTTPS, and plain HTTP only goes to this machine.
+- When the source publishes a SHA-256, SHA-384 or SHA-512 checksum, jkit checks the download
+  against it. A checksum file named for one algorithm (`.sha512`) must hold a hash of that kind.
   That checksum comes from the same source as the download (for example the vendor's release
   site or the foojay API), so it catches corruption and tampering in transit or on a mirror, not
   a compromised source.
@@ -43,12 +45,21 @@ status`, `jkit sync` and `jkit doctor` say when they ignored one. `jkit pin` and
 refuse to write through a project file that is a symbolic link. Project files over 256 KiB are
 refused. `JKIT_PROJECT_FILE` set to an absolute path is your own choice and is used as is.
 
+## Untrusted network data
+
+Version and vendor names from a source must be plain text (letters, digits, `.`, `+`, `_`, `~`,
+`-`); anything else is skipped, so a source can't put a path or PATH separator into an install
+folder name. Version lists and checksum files are limited to 32 MB, downloads to 2 GB, and an
+archive to 3 GB and 200,000 entries unpacked. A server that sends too slowly is given up on.
+Archive entries can't escape their folder, and files are never left writable by every user.
+
 ## The jkit home
 
 `~/.jkit` (or `JKIT_HOME`, which must be an absolute path) holds the programs jkit puts first on
 `PATH`. jkit creates it readable only by you, and refuses to run when it, or its `tools` and
 `global` folders, belong to another user (root is fine) or are world-writable, or when a folder
-above it is world-writable without the sticky bit.
+above it (followed through symbolic links) belongs to another user or is world-writable without
+the sticky bit. This is checked on the first run too, before anything is created.
 
 Limits: group-writable folders are accepted, because many distributions give every user a
 private group and a umask that makes new folders group-writable. On Windows there are no POSIX

@@ -128,6 +128,12 @@ final class Resolve {
      */
     static List<Installed> installed(Context ctx, ToolSpec spec, Vendor vendor, String typedVendor, boolean fx)
             throws IOException {
+        return installed(ctx, spec, vendor, typedVendor, fx, "use");
+    }
+
+    /** Like above; {@code command} (use, remove or exec) is what the hints suggest running again. */
+    static List<Installed> installed(Context ctx, ToolSpec spec, Vendor vendor, String typedVendor, boolean fx,
+                                     String command) throws IOException {
         List<Installed> all = ctx.store.find(spec.tool(), spec.version(), vendor);
         List<Installed> plain = all.stream().filter(i -> !i.fx()).toList();
         List<Installed> withFx = all.stream().filter(Installed::fx).toList();
@@ -141,14 +147,18 @@ final class Resolve {
                 : typedVendor == null ? " from " + vendor + " (default vendor)" : " " + vendor);
         String install = "jkit install " + spec + (typedVendor == null ? "" : " " + typedVendor) + (fx ? " --fx" : "");
         List<String> hints = new java.util.ArrayList<>();
-        hints.add("install it:          " + install);
+        if (!command.equals("remove")) {
+            hints.add("install it:          " + install);
+        }
         if (vendor != null) {
             TreeSet<String> others = new TreeSet<>();
             for (Installed i : ctx.store.find(spec.tool(), spec.version(), null)) {
                 others.add(i.vendor().name());
             }
             for (String other : others) {
-                hints.add("or use installed:    jkit use " + spec + " " + other);
+                hints.add((command.equals("remove") ? "installed:           " : "or use installed:    ") + "jkit "
+                        + command + " " + spec + " " + other + (fx ? " --fx" : "")
+                        + (command.equals("exec") ? " -- <command>" : ""));
             }
         }
         throw new JkitException(JkitException.NOT_INSTALLED,

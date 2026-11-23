@@ -113,7 +113,7 @@ final class ListCommand implements Callable<Integer> {
                 notes.add(t == Tool.GRAALVM ? "global graalvm" : "global");
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(Path.of(shell), i.home())) {
+            if (shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), i.home())) {
                 notes.add(t == Tool.GRAALVM ? "graalvm in this shell" : "this shell");
             }
         }

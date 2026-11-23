@@ -47,7 +47,7 @@ public final class SbtSource {
         Matcher m = VERSION.matcher(xml);
         while (m.find()) {
             String raw = m.group(1).trim();
-            if (!PUBLISHED.matcher(raw).matches()) {
+            if (!PUBLISHED.matcher(raw).matches() || !Version.isSafeText(raw)) {
                 continue;
             }
             Version v = Version.parse(raw);

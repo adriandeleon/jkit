@@ -34,6 +34,11 @@ public record Vendor(String name, String foojayName) {
         return fromFoojay(foojay);
     }
 
+    /** A distribution name plain enough for a folder name and output (see {@link Version#isSafeText}). */
+    public static boolean isSafeName(String foojayName) {
+        return foojayName != null && foojayName.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
+    }
+
     public static Vendor fromFoojay(String foojayName) {
         String name = FRIENDLY.getOrDefault(foojayName, foojayName.replace('_', '-'));
         return new Vendor(name, foojayName);

@@ -30,7 +30,10 @@ public final class MavenSource {
         List<Version> out = new ArrayList<>();
         Matcher m = VERSION.matcher(xml);
         while (m.find()) {
-            Version v = Version.parse(m.group(1));
+            if (!Version.isSafeText(m.group(1).trim())) {
+                continue; // not a version jkit can use as a folder name
+            }
+            Version v = Version.parse(m.group(1).trim());
             if (pre || !v.isPreRelease()) {
                 out.add(v);
             }

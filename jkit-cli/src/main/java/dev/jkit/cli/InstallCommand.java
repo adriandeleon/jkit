@@ -88,7 +88,10 @@ final class InstallCommand implements Callable<Integer> {
         Context ctx = options.context();
         spec = Resolve.lts(ctx, spec, true);
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
-        Artifact artifact = artifact(ctx, spec, vendor, fx, pre);
+        // an exact pre-release (maven@4.0.0-rc-7) asks for pre-releases by itself, as pin and sync do
+        boolean wantPre = pre || spec.version() != null && dev.jkit.model.Version.looksLikeVersion(spec.version())
+                && dev.jkit.model.Version.parse(spec.version()).isPreRelease();
+        Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
         java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
@@ -108,17 +111,19 @@ final class InstallCommand implements Callable<Integer> {
         Changes changes = installed(ctx, result);
         // the first one of a tool becomes the default, as most people would do next anyway
         Path globalLink = ctx.home.global(spec.tool());
-        boolean madeDefault = first && !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
+        boolean madeDefault = result.fresh() && first && !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
         if (madeDefault) {
             ctx.os.pointLink(globalLink, result.installed().home());
             changes.link(globalLink, result.installed().home()).globalEffect(spec.tool());
             changes.note("it's the default " + spec.tool() + " now (the first one installed); to clear it: jkit reset "
                     + spec.tool() + " --global");
         }
-        say.println("installed " + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
+        // another jkit may have installed it while this one waited for the store lock
+        say.println((result.fresh() ? "installed " : "already installed (by another jkit just now): ")
+                + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
         changes.print(say);
         if (json.json) {
-            printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
+            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
         if (!madeDefault) {

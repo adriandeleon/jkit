@@ -76,7 +76,19 @@ public final class Main implements Runnable {
             hookEnv.shell = args.length == 2 ? args[1] : null;
             System.exit(hookEnv.call());
         }
-        System.exit(run(args));
+        int code;
+        try {
+            code = run(args);
+        } catch (OutOfMemoryError e) {
+            // the HTTP and archive limits should prevent this; if not, still one line and one document
+            System.err.println("error: out of memory");
+            if (own.contains(JsonOut.FLAG)) {
+                System.out.println("{\"schemaVersion\":" + JsonOut.SCHEMA_VERSION
+                        + ",\"error\":{\"message\":\"out of memory\",\"hints\":[],\"exitCode\":1}}");
+            }
+            code = 1;
+        }
+        System.exit(code);
     }
 
     private static boolean cwdExists() {
@@ -116,7 +128,7 @@ public final class Main implements Runnable {
                 }
                 return CommandLine.ExitCode.USAGE;
             }
-            JkitException usage = usageError(ex);
+            JkitException usage = usageError(ex, all);
             printError(usage);
             if (json) {
                 JsonOut.print(System.out, JsonOut.error(usage, CommandLine.ExitCode.USAGE));
@@ -144,7 +156,7 @@ public final class Main implements Runnable {
      * A parse error as one line plus hints, not the whole usage screen: "did you mean" for a
      * mistyped command, the missing -- for exec, and the command's synopsis.
      */
-    static JkitException usageError(CommandLine.ParameterException ex) {
+    static JkitException usageError(CommandLine.ParameterException ex, java.util.List<String> args) {
         CommandLine cmd = ex.getCommandLine();
         java.util.List<String> hints = new java.util.ArrayList<>();
         boolean exec = cmd.getCommandName().equals("exec");
@@ -152,7 +164,7 @@ public final class Main implements Runnable {
                 && !unmatched.getSuggestions().isEmpty()) {
             hints.add("did you mean: " + unmatched.getSuggestions().getFirst() + "?");
         }
-        if (exec) {
+        if (exec && !args.contains("--")) {
             hints.add("put -- before the command to run: jkit exec [<tool>@<version> [vendor]]... -- <command> [args]");
         }
         String name = cmd.getCommandSpec().qualifiedName();

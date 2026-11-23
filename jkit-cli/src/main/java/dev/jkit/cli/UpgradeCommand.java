@@ -159,7 +159,7 @@ final class UpgradeCommand implements Callable<Integer> {
             JkitException je = Errors.describe(e);
             row.put("status", "failed");
             row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
-            ctx.err.println("warning: " + line + ": " + je.getMessage());
+            ctx.err.println("warning: " + line + ": " + dev.jkit.model.Visible.of(je.getMessage()));
             je.hints().forEach(h -> ctx.err.println("  " + h));
         }
         return row;
@@ -214,7 +214,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(Path.of(shell), previous.home())) {
+            if (shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), previous.home())) {
                 changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }

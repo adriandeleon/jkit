@@ -40,7 +40,7 @@ final class ResetCommand implements Callable<Integer> {
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
-            throw new JkitException("the jkit shell hook is not active", "load it in new shells: jkit hook --install");
+            throw new JkitException("the jkit shell hook is not active", "load it in new shells: " + Changes.HOOK_SETUP);
         }
         // the project's install applies again only while this folder's project still pins it
         String projectVar = ShellEnv.projectVariable(tool);
@@ -63,7 +63,7 @@ final class ResetCommand implements Callable<Integer> {
         if (applied != null && !java.util.Objects.equals(env.get(projectVar), applied)) {
             changes.put(projectVar, env.get(projectVar));
         }
-        Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        ProjectShell.writeEnvFile(ctx, envFile, changes);
         ctx.out.println("reset " + tool + " in this shell");
         Changes report = new Changes(ctx).env(changes);
         if (report.isEmpty()) {

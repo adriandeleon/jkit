@@ -39,14 +39,16 @@ public final class Installer {
         Http.requireSecure(artifact.url());
         Tool storeTool = artifact.tool().storeTool();
         Path toolsDir = home.tools(storeTool);
-        Path dest = toolsDir.resolve(Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx())).normalize();
-        if (!toolsDir.equals(dest.getParent())) {
+        String dirName = Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx());
+        Path dest = toolsDir.resolve(dirName).normalize();
+        // the folder's bin goes on PATH: no ":" or ";" (PATH separators), "/", spaces or controls
+        if (!dirName.matches("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,160}") || !toolsDir.equals(dest.getParent())) {
             throw new JkitException("refusing an install folder outside " + toolsDir + ": " + dest);
         }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         home.create();
         try (FileChannel channel = FileChannel.open(home.lockFile(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-             FileLock ignored = channel.lock()) {
+             FileLock ignored = lock(channel)) {
             if (Files.isDirectory(dest)) {
                 if (!Files.isRegularFile(dest.resolve(Store.MARKER))) {
                     throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
@@ -73,7 +75,7 @@ public final class Installer {
                 requireExecutable(storeTool, toolHome, artifact.label());
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
                 Files.createDirectories(dest.getParent());
-                Files.move(toolHome, dest, StandardCopyOption.ATOMIC_MOVE);
+                moveIntoPlace(toolHome, dest);
                 return new Result(installed, true, verified, removed);
             } catch (IOException | RuntimeException e) {
                 if (e instanceof IOException io) {
@@ -98,7 +100,9 @@ public final class Installer {
         List<Path> removed = new java.util.ArrayList<>();
         try (Stream<Path> children = Files.list(tmp)) {
             for (Path child : children.toList()) {
-                if (child.getFileName().toString().startsWith("install-")) {
+                String name = child.getFileName().toString();
+                // remove also works under the lock, so a remove- folder here is a leftover too
+                if (name.startsWith("install-") || name.startsWith("remove-")) {
                     try {
                         Fs.deleteRecursively(child);
                         removed.add(child);
@@ -138,6 +142,40 @@ public final class Installer {
 
     private static final boolean POSIX =
             java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    /**
+     * The final move into tools/. On Windows an antivirus scan of the files just unpacked often
+     * holds them for a moment and the move fails with access denied: try again for a few seconds.
+     */
+    private static void moveIntoPlace(Path from, Path to) throws IOException {
+        boolean windows = java.io.File.separatorChar == '\\';
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+                return;
+            } catch (java.nio.file.AccessDeniedException e) {
+                if (!windows || attempt >= 10) {
+                    throw e;
+                }
+                try {
+                    Thread.sleep(500L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    /** The store lock; says so on stderr when another jkit holds it, instead of hanging silently. */
+    private static FileLock lock(FileChannel channel) throws IOException {
+        FileLock lock = channel.tryLock();
+        if (lock != null) {
+            return lock;
+        }
+        System.err.println("waiting for another jkit to finish installing…");
+        return channel.lock();
+    }
 
     /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */
     private static void makeExecutable(Path bin) {

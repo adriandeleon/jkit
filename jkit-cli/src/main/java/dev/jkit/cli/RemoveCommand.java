@@ -49,7 +49,7 @@ final class RemoveCommand implements Callable<Integer> {
         Context ctx = Context.create(false, true);
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
-        List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx);
+        List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx, "remove");
         String vendorSuffix = (vendor == null ? "" : " " + vendor) + (fx ? " --fx" : "");
         if (matches.size() > 1 && !all) {
             List<String> hints = new ArrayList<>();
@@ -128,8 +128,15 @@ final class RemoveCommand implements Callable<Integer> {
                             ? "something may have it open (IDE or Gradle daemon?): try gradle --stop, then run this again"
                             : "check the folder's permissions, then run this again");
         }
-        Fs.deleteRecursively(trash.getParent());
         removedLinks.folder(i.home(), false);
+        try {
+            Fs.deleteRecursively(trash.getParent());
+        } catch (IOException e) {
+            // the install is already out of tools/: finish the links below, and let the next
+            // install (which clears tmp/) or doctor deal with what is left
+            removedLinks.note("warning: couldn't delete " + Changes.tilde(trash.getParent().toString()) + " ("
+                    + e.getMessage() + "); the next jkit install cleans it up");
+        }
         for (Tool t : Tool.values()) {
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
@@ -139,12 +146,12 @@ final class RemoveCommand implements Callable<Integer> {
                 removedLinks.note("warning: there is no global " + t + " any more");
             }
             String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
-            if (t.storeTool() == i.tool() && shell != null && Resolve.same(Path.of(shell), i.home())) {
+            if (t.storeTool() == i.tool() && shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
             }
             String project = ctx.env.get(dev.jkit.core.ShellEnv.projectVariable(t));
             if (t.storeTool() == i.tool() && (shell == null || shell.isBlank()) && project != null
-                    && Resolve.same(Path.of(project), i.home())) {
+                    && Resolve.same(dev.jkit.core.Fs.path(project), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder "
                         + "(applied from a project file): jkit sync to install it again, or jkit reset " + t);
             }

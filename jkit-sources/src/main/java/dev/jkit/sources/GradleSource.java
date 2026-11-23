@@ -53,6 +53,9 @@ public final class GradleSource {
                 continue;
             }
             String version = Json.text(n, "version");
+            if (!Version.isSafeText(version)) {
+                continue; // not a version jkit can use as a folder name
+            }
             boolean isPre = !Json.text(n, "rcFor").isEmpty() || !Json.text(n, "milestoneFor").isEmpty()
                     || Version.parse(version).isPreRelease(); // 1.0-milestone-* carry no milestoneFor
             if (isPre && !pre) {

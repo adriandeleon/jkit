@@ -198,7 +198,7 @@ public final class ToolStates {
     }
 
     private static Path pathOrNull(String value) {
-        return value == null || value.isBlank() ? null : Path.of(value);
+        return Fs.path(value);
     }
 
     /** Same folder, following links (the global link and its target are the same install). */

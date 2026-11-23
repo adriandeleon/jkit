@@ -64,13 +64,13 @@ final class UseCommand implements Callable<Integer> {
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active, so this shell can't be changed",
-                    "load it in new shells: jkit hook --install",
+                    "load it in new shells: " + Changes.HOOK_SETUP,
                     "or set the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText) + " --global",
                     "or run one command with it: jkit exec " + spec + (vendorText == null ? "" : " " + vendorText) + " -- <command>");
         }
         boolean graalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
         Map<String, String> changes = ShellEnv.use(ctx.env, ctx.home, tool, chosen.home(), graalVm);
-        Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        ProjectShell.writeEnvFile(ctx, envFile, changes);
         Changes report = new Changes(ctx).env(changes)
                 .note("only this shell; for new shells too: jkit use " + tool + "@" + chosen.version().raw()
                         + (chosen.vendor() == null ? "" : " " + chosen.vendor().name()) + (chosen.fx() ? " --fx" : "") + " --global");

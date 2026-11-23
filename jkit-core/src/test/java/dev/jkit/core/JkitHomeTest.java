@@ -66,6 +66,35 @@ class JkitHomeTest {
 
     @Test
     @DisabledOnOs(OS.WINDOWS)
+    void theFirstRunIsCheckedBeforeAnythingIsCreated() throws Exception {
+        Path shared = Files.createDirectory(tmp.resolve("shared"));
+        Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
+        JkitHome home = new JkitHome(shared.resolve("new/.jkit"));
+        assertThatThrownBy(home::requireSafe).isInstanceOf(JkitException.class).hasMessageContaining("anyone could replace it");
+        assertThatThrownBy(home::create).isInstanceOf(JkitException.class);
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aSymlinkAboveTheHomeIsCheckedWhereItLeads() throws Exception {
+        Path shared = Files.createDirectory(tmp.resolve("shared"));
+        Path sub = Files.createDirectory(shared.resolve("sub"));
+        Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
+        Path link = Files.createSymbolicLink(tmp.resolve("link"), sub);
+        JkitHome home = new JkitHome(link.resolve(".jkit"));
+        assertThatThrownBy(home::requireSafe).isInstanceOf(JkitException.class).hasMessageContaining("anyone could replace it");
+    }
+
+    @Test
+    void quotedOrInvalidPathsFromTheEnvironmentAreHandled() {
+        assertThat(Fs.path("\"" + tmp + "\"")).isEqualTo(tmp);
+        assertThat(Fs.path("  ")).isNull();
+        assertThat(Fs.path(null)).isNull();
+        assertThat(Fs.path("bad\u0000path")).isNull();
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
     void ownershipIsComparedByUid() throws Exception {
         Path mine = Files.createDirectory(tmp.resolve("mine"));
         assertThat(Owners.mine(mine)).isTrue();

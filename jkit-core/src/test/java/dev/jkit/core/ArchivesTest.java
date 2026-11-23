@@ -79,6 +79,41 @@ class ArchivesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    void filesAreNeverWritableByEveryone() throws IOException {
+        Path archive = tmp.resolve("loose.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            ZipArchiveEntry e = new ZipArchiveEntry("apache-maven/bin/mvn");
+            e.setUnixMode(0100777);
+            zip.putArchiveEntry(e);
+            zip.write("#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeArchiveEntry();
+        }
+        Path out = tmp.resolve("out");
+        Archives.extract(archive, out, "zip");
+        assertThat(Files.getPosixFilePermissions(out.resolve("apache-maven/bin/mvn")))
+                .contains(PosixFilePermission.OWNER_EXECUTE).doesNotContain(PosixFilePermission.OTHERS_WRITE);
+    }
+
+    @Test
+    void anArchiveWithTooManyEntriesIsRefused() throws IOException {
+        Path archive = tmp.resolve("many.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            for (int i = 0; i < 11; i++) {
+                zip.putArchiveEntry(new ZipArchiveEntry("x/d" + i + "/"));
+                zip.closeArchiveEntry();
+            }
+        }
+        Archives.entryLimit = 10;
+        try {
+            assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
+        } finally {
+            Archives.entryLimit = Archives.MAX_ENTRIES;
+        }
+    }
+
+    @Test
     void refusesEntriesOutsideTheTarget() throws IOException {
         Path archive = tmp.resolve("evil.tar.gz");
         try (OutputStream raw = Files.newOutputStream(archive);

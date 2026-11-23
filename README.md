@@ -9,7 +9,7 @@ Website: <https://jkit-project.dev>
 
 ```bash
 brew install adriandeleon/tap/jkit     # or see Install below
-jkit hook --install                    # adds one line to ~/.bashrc, ~/.zshrc or fish's config
+jkit hook --install                    # adds a short marked block to ~/.bashrc, ~/.zshrc or fish's config
 # open a new shell, then:
 jkit install jdk@21                    # the first JDK you install becomes the default
 java -version
@@ -37,11 +37,12 @@ jkit upgrade                           # newest build within each installed rele
 | macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
 | Debian, Ubuntu (x64, arm64) | the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
-| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` |
+| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
 | Anything else | a `.tar.gz` or `.zip` from the releases |
 
 Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
-anywhere on your `PATH`. Linux builds need glibc 2.34 or newer (Debian 12+, Ubuntu 22.04+, RHEL 9+);
+anywhere on your `PATH`. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
+(Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04, RHEL 8 or Alpine);
 macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
 hyphen) are on the releases page only.
 
@@ -66,7 +67,7 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 ## How it works
 
 - Installs go to `~/.jkit/tools/<tool>/<version>`; nothing outside `~/.jkit` is touched except the
-  one line `jkit hook --install` adds to your shell's startup file.
+  short marked block `jkit hook --install` adds to your shell's startup file (`--uninstall` removes it).
 - The global default is a link, `~/.jkit/global/<tool>`, which the hook puts on `PATH` and uses for
   `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME` and `GRAALVM_HOME`. Point an IDE at
   `~/.jkit/global/jdk` and it follows `jkit use … --global`.
