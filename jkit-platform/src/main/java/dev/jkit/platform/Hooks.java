@@ -45,9 +45,10 @@ final class Hooks {
                 __jkit_root=%4$s
                 __jkit_run() {
                   if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
-                    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin
+                    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin;
+                    # (pattern) because bash 3.2 (macOS) ends $( ) at a case pattern's lone )
                     __jkit_bin=$(printf '%%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
-                      case "$__jkit_d/" in "$__jkit_root"/*) ;; *) if [ -x "$__jkit_d/jkit" ]; then printf '%%s\n' "$__jkit_d/jkit"; break; fi ;; esac
+                      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%%s\n' "$__jkit_d/jkit"; break; fi ;; esac
                     done)
                   fi
                   if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi
