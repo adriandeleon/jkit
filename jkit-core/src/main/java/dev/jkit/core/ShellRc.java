@@ -1,6 +1,7 @@
 package dev.jkit.core;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.ShellQuote;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,15 +43,62 @@ public final class ShellRc {
 
     /** The lines between and including the markers. Guarded, so a shell still starts after jkit is gone. */
     public static List<String> block(String shell) {
-        String load = shell.equals("fish")
-                ? "if type -q jkit; jkit hook fish | source; end"
-                : "if command -v jkit >/dev/null 2>&1; then eval \"$(jkit hook " + shell + ")\"; fi";
-        return List.of(START, "# added by jkit hook " + shell + " --install; remove with jkit hook " + shell
-                + " --uninstall", load, END);
+        return block(shell, null, null);
+    }
+
+    /**
+     * The block for the jkit at {@code self}: a shell started from a shell (tmux, an IDE terminal,
+     * {@code bash}) inherits a PATH with a project's tool bin folders first, so a {@code bin/jkit}
+     * in a JDK must not be what prints the hook. If {@code self} is gone (moved, upgraded), the first
+     * {@code jkit} on PATH outside {@code root}, jkit's own folder, loads it instead. With either
+     * null, a plain PATH lookup.
+     */
+    public static List<String> block(String shell, String self, Path root) {
+        List<String> lines = new ArrayList<>();
+        lines.add(START);
+        lines.add("# added by jkit hook " + shell + " --install; remove with jkit hook " + shell + " --uninstall");
+        if (self == null || root == null) {
+            lines.add(shell.equals("fish")
+                    ? "if type -q jkit; jkit hook fish | source; end"
+                    : "if command -v jkit >/dev/null 2>&1; then eval \"$(jkit hook " + shell + ")\"; fi");
+        } else {
+            String bin = ShellQuote.quote(shell, self);
+            String under = ShellQuote.quote(shell, root.toAbsolutePath().normalize() + "/");
+            switch (shell) {
+                case "fish" -> {
+                    lines.add("set -l __jkit " + bin);
+                    lines.add("if not test -x $__jkit; set __jkit; for d in $PATH; if not string match -q -- "
+                            + ShellQuote.quote("fish", root.toAbsolutePath().normalize() + "/*") + " \"$d/\"; "
+                            + "and test -x $d/jkit; set __jkit $d/jkit; break; end; end; end");
+                    lines.add("if test -n \"$__jkit\"; $__jkit hook fish | source; end");
+                }
+                default -> {
+                    lines.add("__jkit=" + bin);
+                    if (shell.equals("zsh")) {
+                        lines.add("if [ ! -x \"$__jkit\" ]; then __jkit=; for __jkit_d in ${(s.:.)PATH}; do case \"$__jkit_d/\" in "
+                                + under + "*) ;; *) if [ -x \"$__jkit_d/jkit\" ]; then __jkit=$__jkit_d/jkit; break; fi ;; "
+                                + "esac; done; unset __jkit_d; fi");
+                    } else {
+                        lines.add("if [ ! -x \"$__jkit\" ]; then __jkit=; IFS=: read -r -a __jkit_p <<< \"$PATH\"; "
+                                + "for __jkit_d in \"${__jkit_p[@]}\"; do case \"$__jkit_d/\" in "
+                                + under + "*) ;; *) if [ -x \"$__jkit_d/jkit\" ]; then __jkit=$__jkit_d/jkit; break; fi ;; "
+                                + "esac; done; unset __jkit_p __jkit_d; fi");
+                    }
+                    lines.add("if [ -n \"$__jkit\" ]; then eval \"$(\"$__jkit\" hook " + shell + ")\"; fi; unset __jkit");
+                }
+            }
+        }
+        lines.add(END);
+        return lines;
     }
 
     /** {@code text} with the block at the end, unchanged when it already has the block or loads the hook itself. */
     public static Edit add(String text, String shell) {
+        return add(text, shell, null, null);
+    }
+
+    /** {@link #add(String, String)} with the block for the jkit at {@code self}. */
+    public static Edit add(String text, String shell, String self, Path root) {
         if (hasBlock(text) || manualLine(text) > 0) {
             return new Edit(text, false);
         }
@@ -62,7 +110,7 @@ public final class ShellRc {
         if (!text.isBlank()) {
             sb.append(nl);
         }
-        for (String line : block(shell)) {
+        for (String line : block(shell, self, root)) {
             sb.append(line).append(nl);
         }
         return new Edit(sb.toString(), true);

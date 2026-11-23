@@ -91,7 +91,9 @@ public final class Version implements Comparable<Version> {
             try {
                 out.add(Integer.parseInt(piece));
             } catch (NumberFormatException e) {
-                break;
+                // too large: kept as the largest number rather than dropped, so 21.99999999999999999999
+                // matches no real version instead of quietly meaning 21
+                out.add(Integer.MAX_VALUE);
             }
         }
         return out.stream().mapToInt(Integer::intValue).toArray();

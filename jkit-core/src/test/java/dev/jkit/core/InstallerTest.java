@@ -68,6 +68,10 @@ class InstallerTest {
         assertThat(new Store(home).find(Tool.JDK, "21", Vendor.of("zulu"))).isEmpty();
         assertThat(new Store(home).list(Tool.GRAALVM)).isEmpty();
         assertThat(home.tmp()).isEmptyDirectory();
+
+        // a copy from another disk that is still going (or was killed) is no second install
+        Fs.copyTree(result.installed().home(), home.tools(Tool.JDK).resolve(".21.0.13+9-temurin.partial"));
+        assertThat(new Store(home).list(Tool.JDK)).hasSize(1);
     }
 
     @Test

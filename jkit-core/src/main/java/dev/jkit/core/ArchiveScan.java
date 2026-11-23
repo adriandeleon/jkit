@@ -42,6 +42,9 @@ final class ArchiveScan {
             long total = 0;
             long paxSize = -1;
             long globalSize = -1;
+            String longName = null;
+            String paxPath = null;
+            String globalPath = null;
             while (true) {
                 if (in.readNBytes(header, 0, 512) < 512 || isZero(header)) {
                     return; // end of archive (or a short one, which the real read reports)
@@ -59,7 +62,11 @@ final class ArchiveScan {
                         if (size > MAX_NAME + 1) {
                             throw Archives.unsafe("a tar header claims a " + size + "-byte name");
                         }
-                        skip(in, pad(size));
+                        byte[] name = in.readNBytes((int) size);
+                        skip(in, pad(size) - size);
+                        if (type == 'L') {
+                            longName = cString(name, 0, name.length);
+                        }
                         continue;
                     }
                     case 'x', 'g' -> {
@@ -68,11 +75,14 @@ final class ArchiveScan {
                         }
                         byte[] meta = in.readNBytes((int) size);
                         skip(in, pad(size) - size);
-                        long sz = pax(meta, type == 'g');
+                        String[] path = new String[1];
+                        long sz = pax(meta, type == 'g', path);
                         if (type == 'g') {
                             globalSize = sz >= 0 ? sz : globalSize;
+                            globalPath = path[0] != null ? path[0] : globalPath;
                         } else {
                             paxSize = sz;
+                            paxPath = path[0];
                         }
                         continue;
                     }
@@ -88,12 +98,21 @@ final class ArchiveScan {
                     throw Archives.unsafe("more than " + maxEntries + " entries");
                 }
                 long data = paxSize >= 0 ? paxSize : globalSize >= 0 ? globalSize : size;
+                String name = paxPath != null ? paxPath : longName != null ? longName
+                        : globalPath != null ? globalPath : cString(header, 0, 100);
                 paxSize = -1;
+                paxPath = null;
+                longName = null;
+                if (data > 0 && (type == '5' || name.endsWith("/"))) {
+                    // commons-compress never reads a folder's data, so it would parse that data as
+                    // headers this scan never saw: refuse rather than read two different archives
+                    throw Archives.unsafe("a folder entry in it carries data");
+                }
                 total += data;
                 if (total > maxBytes) {
                     throw Archives.unsafe("it unpacks to more than " + (maxBytes >> 30) + " GB");
                 }
-                // a link or folder header may still carry data the reader skips
+                // a link header may still carry data, which the reader skips too
                 skip(in, pad(data));
             }
         }
@@ -101,10 +120,10 @@ final class ArchiveScan {
 
     /**
      * A PAX header's records, parsed as commons-compress does: each is {@code <length> key=value\n},
-     * the length counting the whole record, and the last {@code size} wins. Returns that size or -1.
+     * the length counting the whole record, and the last {@code size} wins. Returns that size or -1, and puts a {@code path} record in {@code path[0]}.
      * Sparse-file records and over-long names are refused; a global header may not set a size.
      */
-    private static long pax(byte[] meta, boolean global) {
+    private static long pax(byte[] meta, boolean global, String[] path) {
         long size = -1;
         int i = 0;
         while (i < meta.length) {
@@ -136,6 +155,9 @@ final class ArchiveScan {
             if ((key.equals("path") || key.equals("linkpath")) && value.length() > MAX_NAME) {
                 throw Archives.unsafe("a tar entry has a " + value.length() + "-character name");
             }
+            if (key.equals("path")) {
+                path[0] = value;
+            }
             if (key.equals("size")) {
                 if (global) {
                     throw Archives.unsafe("a global PAX header sets a size");
@@ -154,7 +176,11 @@ final class ArchiveScan {
         return size;
     }
 
-    /** The entry count and central directory size from the end records, before ZipFile reads the directory. */
+    /**
+     * The central directory, walked the way ZipFile walks it: from the offset the end record gives,
+     * header after header until one isn't a directory header, whatever count the end record claims.
+     * At most {@code maxEntries} headers and {@link #MAX_CENTRAL_DIRECTORY} bytes.
+     */
     static void zip(Path archive, int maxEntries) throws IOException {
         try (SeekableByteChannel ch = Files.newByteChannel(archive)) {
             long length = ch.size();
@@ -174,9 +200,8 @@ final class ArchiveScan {
             if (eocd < 0) {
                 return; // not a zip: ZipFile says so
             }
-            long entries = Short.toUnsignedInt(buf.getShort(eocd + 10));
-            long dirSize = Integer.toUnsignedLong(buf.getInt(eocd + 12));
-            if ((entries == 0xffff || dirSize == 0xffffffffL) && eocd >= 20 && buf.getInt(eocd - 20) == 0x07064b50) {
+            long offset = Integer.toUnsignedLong(buf.getInt(eocd + 16));
+            if (eocd >= 20 && buf.getInt(eocd - 20) == 0x07064b50) {
                 long zip64 = buf.getLong(eocd - 20 + 8);
                 if (zip64 >= 0 && zip64 + 56 <= length) {
                     ByteBuffer z = ByteBuffer.allocate(56).order(ByteOrder.LITTLE_ENDIAN);
@@ -185,18 +210,41 @@ final class ArchiveScan {
                         // fill
                     }
                     if (z.getInt(0) == 0x06064b50) {
-                        entries = z.getLong(32);
-                        dirSize = z.getLong(40);
+                        offset = z.getLong(48);
                     }
                 }
             }
-            if (entries > maxEntries || entries < 0) {
-                throw Archives.unsafe("more than " + maxEntries + " entries");
+            if (offset < 0 || offset >= length) {
+                return; // ZipFile reports the damage
             }
-            if (dirSize > MAX_CENTRAL_DIRECTORY || dirSize < 0) {
-                throw Archives.unsafe("its directory is over " + (MAX_CENTRAL_DIRECTORY >> 20) + " MB");
+            ch.position(offset);
+            InputStream in = new BufferedInputStream(java.nio.channels.Channels.newInputStream(ch), 64 * 1024);
+            byte[] fixed = new byte[46];
+            ByteBuffer h = ByteBuffer.wrap(fixed).order(ByteOrder.LITTLE_ENDIAN);
+            long entries = 0;
+            long bytes = 0;
+            while (in.readNBytes(fixed, 0, 46) == 46 && h.getInt(0) == 0x02014b50) {
+                if (++entries > maxEntries) {
+                    throw Archives.unsafe("more than " + maxEntries + " entries");
+                }
+                long rest = Short.toUnsignedInt(h.getShort(28)) + Short.toUnsignedInt(h.getShort(30))
+                        + Short.toUnsignedInt(h.getShort(32));
+                bytes += 46 + rest;
+                if (bytes > MAX_CENTRAL_DIRECTORY) {
+                    throw Archives.unsafe("its directory is over " + (MAX_CENTRAL_DIRECTORY >> 20) + " MB");
+                }
+                skip(in, rest);
             }
         }
+    }
+
+    /** Text up to the first NUL, as tar stores names. */
+    private static String cString(byte[] b, int off, int len) {
+        int end = off;
+        while (end < off + len && b[end] != 0) {
+            end++;
+        }
+        return new String(b, off, end - off, StandardCharsets.UTF_8);
     }
 
     private static boolean isZero(byte[] b) {

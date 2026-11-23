@@ -204,6 +204,7 @@ What `available` holds for a JDK (or `graalvm`):
 | Arguments | `available` |
 | --- | --- |
 | `jdk` | the newest build of every vendor and major |
+| `jdk zulu` | the newest build of every major from that vendor |
 | `jdk@21` | the newest matching build of every vendor |
 | `jdk@21 zulu` | every matching build of that vendor |
 
@@ -264,7 +265,8 @@ link (in `changes`), unless `--no-default`.
   "lines": [
     { "tool": "jdk", "major": 21, "vendor": "temurin", "fx": false,
       "from": "21.0.5+11", "to": "21.0.9+10", "status": "available" }
-  ]
+  ],
+  "changes": [ { "kind": "file", "name": "/home/me/.jkit/index/3f9a….cache", "action": "update", "value": null } ]
 }
 ```
 
@@ -305,8 +307,9 @@ lines text mode prints, also on stderr):
   "notes": [] }
 ```
 
-`previous` is null when the file didn't pin the tool. With the shell hook active, `changes` also
-lists the variables of this shell that now follow the project.
+`previous` is null when the file didn't pin the tool. A `pin.version` of null is a pin to the
+latest release (`jkit pin jdk@latest`, written as `jdk = "latest"`). With the shell hook active,
+`changes` also lists the variables of this shell that now follow the project.
 
 ## `jkit unpin <tool> [--here] --json`
 

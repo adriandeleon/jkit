@@ -28,7 +28,7 @@ jobs:
     # any tag-push run, even one whose homebrew or winget job failed after the release went out;
     # a rebuild that finds nothing new is harmless
     if: github.event_name == 'release' || github.event.workflow_run.event == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
     steps:

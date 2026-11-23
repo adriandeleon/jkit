@@ -66,7 +66,11 @@ final class ProjectShell {
             return !Files.isRegularFile(cwd.resolve(ProjectFile.JKIT_TOML)) && Files.isRegularFile(hidden)
                     ? hidden : cwd.resolve(ProjectFile.JKIT_TOML);
         }
-        Optional<ProjectSpec> found = ProjectFile.find(cwd, ctx.env);
+        String named = ctx.env.get(ProjectFile.OVERRIDE);
+        boolean absentOverride = named != null && !named.isBlank() && !Files.exists(
+                cwd.resolve(named).toAbsolutePath().normalize(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        // an absolute override that doesn't exist yet is an error for reading, but it's the file to create
+        Optional<ProjectSpec> found = absentOverride ? Optional.empty() : ProjectFile.find(cwd, ctx.env);
         if (found.isEmpty()) {
             String override = ctx.env.get(ProjectFile.OVERRIDE);
             if (override != null && override.isBlank()) {

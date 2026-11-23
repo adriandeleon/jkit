@@ -79,4 +79,41 @@ class ShellRcTest {
         assertThat(added).startsWith("a\r\n\r\n" + ShellRc.START + "\r\n").doesNotContain("\n" + ShellRc.END + "\n");
         assertThat(ShellRc.remove(added).text()).isEqualTo("a\r\n");
     }
+
+    @org.junit.jupiter.api.io.TempDir
+    Path tmp;
+
+    /**
+     * The block runs jkit at its own path, not a JDK's bin/jkit first on an inherited PATH; with that
+     * path gone, the first jkit on PATH outside jkit's own folder.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void theBlockRunsJkitByPathAndSkipsToolFolders() throws Exception {
+        Path root = tmp.resolve("o'b home/.jkit");
+        Path tool = java.nio.file.Files.createDirectories(root.resolve("tools/jdk/21/bin"));
+        Path other = java.nio.file.Files.createDirectories(tmp.resolve("usr bin"));
+        Path self = java.nio.file.Files.createDirectories(tmp.resolve("self")).resolve("jkit");
+        for (Path p : new Path[] {tool.resolve("jkit"), other.resolve("jkit"), self}) {
+            java.nio.file.Files.writeString(p, "#!/bin/sh\necho 'echo " + p.getParent().getFileName() + "'\n");
+            p.toFile().setExecutable(true);
+        }
+        String path = tool + ":" + other + ":/usr/bin:/bin";
+        assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("self");
+        java.nio.file.Files.delete(self);
+        assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("usr bin");
+        java.nio.file.Files.delete(other.resolve("jkit"));
+        assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEmpty();
+    }
+
+    private String runBash(String script, String path) throws Exception {
+        Path file = tmp.resolve("rc.sh");
+        java.nio.file.Files.writeString(file, script + "\n");
+        ProcessBuilder pb = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", file.toString()).redirectErrorStream(true);
+        pb.environment().put("PATH", path);
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+        assertThat(p.waitFor()).as(out).isZero();
+        return out;
+    }
 }

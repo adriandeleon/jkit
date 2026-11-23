@@ -231,10 +231,10 @@ public final class JdkHttp implements Http {
         }
     }
 
-    private HttpRequest request(URI uri) {
+    private HttpRequest request(URI uri, Duration timeout) {
         return HttpRequest.newBuilder(uri)
                 .header("User-Agent", userAgent)
-                .timeout(idle)
+                .timeout(timeout)
                 .GET()
                 .build();
     }
@@ -243,7 +243,7 @@ public final class JdkHttp implements Http {
     static final long MAX_TEXT = 8L << 20; // foojay's largest answer is about 0.3 MB
     /** The largest JDK archives are under 500 MB. */
     static final long MAX_DOWNLOAD = 2L << 30;
-    /** A text answer must be complete within this, however slowly it trickles in. */
+    /** A text answer must be complete within this, redirects and all, however slowly it trickles in. */
     static final Duration TEXT_DEADLINE = Duration.ofMinutes(2);
     /** A download slower than this over a whole idle window counts as stalled. */
     static final long MIN_BYTES_PER_WINDOW = 16 * 1024;
@@ -308,10 +308,24 @@ public final class JdkHttp implements Http {
 
     private void fetchOnce(URI start, Sink sink, Progress progress, long max, boolean text) throws IOException {
         URI uri = start;
+        long begun = System.nanoTime();
         for (int hop = 0; ; hop++) {
+            Duration timeout = idle;
+            if (text) {
+                // one time limit for the whole answer: not one per redirect
+                Duration left = TEXT_DEADLINE.minusNanos(System.nanoTime() - begun);
+                if (left.isNegative() || left.isZero()) {
+                    throw new NetworkException(uri, new IOException("no complete answer within "
+                            + TEXT_DEADLINE.toSeconds() + " s"), true);
+                }
+                timeout = left.compareTo(idle) < 0 ? left : idle;
+            }
             HttpResponse<InputStream> response;
             try {
-                response = client.send(request(uri), HttpResponse.BodyHandlers.ofInputStream());
+                response = client.send(request(uri, timeout), HttpResponse.BodyHandlers.ofInputStream());
+            } catch (java.net.http.HttpTimeoutException e) {
+                // the server took the connection and never answered: asking again would only wait again
+                throw new NetworkException(uri, e, !(e instanceof java.net.http.HttpConnectTimeoutException));
             } catch (IOException e) {
                 throw new NetworkException(uri, e);
             } catch (InterruptedException e) {
@@ -350,7 +364,7 @@ public final class JdkHttp implements Http {
                     throw tooBig(uri, max);
                 }
                 try (OutputStream out = sink.open()) {
-                    copyWithIdleTimeout(uri, in, out, total, progress, max, text);
+                    copyWithIdleTimeout(uri, in, out, total, progress, max, text, begun);
                 }
                 return;
             }
@@ -375,7 +389,7 @@ public final class JdkHttp implements Http {
      * than {@link #TEXT_DEADLINE}: a server dripping a byte at a time can't hang jkit.
      */
     private void copyWithIdleTimeout(URI uri, InputStream in, OutputStream out, long total, Progress progress,
-                                     long max, boolean text) throws IOException {
+                                     long max, boolean text, long begun) throws IOException {
         long started = System.nanoTime();
         AtomicLong lastData = new AtomicLong(started);
         AtomicLong received = new AtomicLong();
@@ -395,7 +409,7 @@ public final class JdkHttp implements Http {
             String why = null;
             if (now - lastData.get() > idle.toNanos()) {
                 why = "no data for " + idle.toSeconds() + " s";
-            } else if (text && now - started > TEXT_DEADLINE.toNanos()) {
+            } else if (text && now - begun > TEXT_DEADLINE.toNanos()) {
                 why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
                 final_.set(true);
             } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {

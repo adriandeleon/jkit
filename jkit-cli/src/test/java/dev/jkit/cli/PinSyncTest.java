@@ -121,6 +121,11 @@ class PinSyncTest {
         assertThat(Files.readString(project.resolve("ci/jkit.toml"))).contains("jdk = \"21\"");
         env.put("JKIT_PROJECT_FILE", "nowhere/jkit.toml");
         assertThatThrownBy(() -> pin("jdk@21", null, false, false)).hasMessageContaining("its folder doesn't exist");
+        // an absolute one too
+        Path shared = Files.createDirectories(project.getParent().resolve("shared")).resolve("jkit.toml");
+        env.put("JKIT_PROJECT_FILE", shared.toString());
+        assertThat(pin("jdk@21", null, false, false)).isZero();
+        assertThat(Files.readString(shared)).contains("jdk = \"21\"");
     }
 
     @Test

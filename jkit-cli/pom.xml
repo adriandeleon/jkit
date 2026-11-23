@@ -129,6 +129,9 @@
                 <buildArg>-march=compatibility</buildArg>
                 <!-- HttpClient's proxy authentication (407) goes through java.net.URL with http -->
                 <buildArg>--enable-url-protocols=http,https</buildArg>
+                <!-- a native image reads -D, -X and -XX arguments as its own options, wherever they
+                     are, so "jkit exec mvn -DskipTests -Xmx2g" would lose -Xmx2g and set skipTests on jkit -->
+                <buildArg>-H:-ParseRuntimeOptions</buildArg>
               </buildArgs>
             </configuration>
           </plugin>

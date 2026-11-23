@@ -2,7 +2,9 @@ name: CI
 
 # Builds and tests every pull request and every push to main on Linux, macOS and Windows, on the
 # JVM (the native binary is built by release.yml). Linux also checks that THIRD-PARTY-NOTICES
-# matches the libraries the binary bundles, and dry-runs the packaging scripts.
+# matches the libraries the binary bundles, and dry-runs the packaging scripts. The workflows job
+# lints the workflow files; a pull request that changes the build or packaging also gets
+# release.yml's dry run, which builds the native binary and the packages.
 
 on:
   pull_request:
@@ -17,6 +19,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint the workflows
+        # the Go module proxy checks the download against sum.golang.org. Shell scripts aren't
+        # linted: shellcheck can't see through ${{ }}, and the scripts split words on purpose
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" -shellcheck= -pyflakes=
+
   verify:
     strategy:
       fail-fast: false
