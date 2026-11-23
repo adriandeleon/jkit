@@ -48,7 +48,7 @@ final class UseCommand implements Callable<Integer> {
         Installed chosen = Resolve.installed(ctx, spec, vendor, vendorText, fx).getFirst();
         Tool tool = spec.tool();
         if (global) {
-            ctx.os.pointLink(ctx.home.global(tool), chosen.home());
+            Resolve.pointGlobal(ctx, ctx.home.global(tool), chosen.home());
             Changes changes = new Changes(ctx).link(ctx.home.global(tool), chosen.home()).globalEffect(tool);
             PinnedTool pin = projectPin(ctx, tool);
             if (pin != null) {

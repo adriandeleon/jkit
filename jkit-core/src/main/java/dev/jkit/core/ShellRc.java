@@ -58,19 +58,23 @@ public final class ShellRc {
         lines.add(START);
         lines.add("# added by jkit hook " + shell + " --install; remove with jkit hook " + shell + " --uninstall");
         if (self == null || root == null) {
+            // conf.d is read by every fish, scripts and fish -c too; ~/.bashrc and ~/.zshrc only by interactive shells
             lines.add(shell.equals("fish")
-                    ? "if type -q jkit; jkit hook fish | source; end"
+                    ? "if status is-interactive; and type -q jkit; jkit hook fish | source; end"
                     : "if command -v jkit >/dev/null 2>&1; then eval \"$(jkit hook " + shell + ")\"; fi");
         } else {
             String bin = ShellQuote.quote(shell, self);
             String under = ShellQuote.quote(shell, root.toAbsolutePath().normalize() + "/");
             switch (shell) {
                 case "fish" -> {
-                    lines.add("set -l __jkit " + bin);
-                    lines.add("if not test -x $__jkit; set __jkit; for d in $PATH; if not string match -q -- "
+                    // conf.d is read by every fish, scripts and fish -c too: only interactive ones get the hook
+                    lines.add("if status is-interactive");
+                    lines.add("  set -l __jkit " + bin);
+                    lines.add("  if not test -x $__jkit; set __jkit; for d in $PATH; if not string match -q -- "
                             + ShellQuote.quote("fish", root.toAbsolutePath().normalize() + "/*") + " \"$d/\"; "
                             + "and test -x $d/jkit; set __jkit $d/jkit; break; end; end; end");
-                    lines.add("if test -n \"$__jkit\"; $__jkit hook fish | source; end");
+                    lines.add("  if test -n \"$__jkit\"; $__jkit hook fish | source; end");
+                    lines.add("end");
                 }
                 default -> {
                     lines.add("__jkit=" + bin);

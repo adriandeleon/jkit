@@ -131,7 +131,10 @@
                 <buildArg>--enable-url-protocols=http,https</buildArg>
                 <!-- a native image reads -D, -X and -XX arguments as its own options, wherever they
                      are, so "jkit exec mvn -DskipTests -Xmx2g" would lose -Xmx2g and set skipTests on jkit -->
+                <!-- experimental: Liberica NIK already warns that it will need unlocking -->
+                <buildArg>-H:+UnlockExperimentalVMOptions</buildArg>
                 <buildArg>-H:-ParseRuntimeOptions</buildArg>
+                <buildArg>-H:-UnlockExperimentalVMOptions</buildArg>
               </buildArgs>
             </configuration>
           </plugin>

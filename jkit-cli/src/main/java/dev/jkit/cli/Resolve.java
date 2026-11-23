@@ -166,4 +166,20 @@ final class Resolve {
         throw new JkitException(JkitException.NOT_INSTALLED,
                 "no installed " + what + " matches " + versionText + vendorText, hints.toArray(String[]::new));
     }
+
+    /**
+     * Points a global link at an install while holding the store lock, after checking the install is
+     * still there: a jkit remove running at the same time must not leave the link on a deleted folder.
+     */
+    @SuppressWarnings("try")
+    static void pointGlobal(Context ctx, java.nio.file.Path link, java.nio.file.Path target) throws Exception {
+        try (AutoCloseable lock = ctx.store.lock()) {
+            if (!java.nio.file.Files.isRegularFile(target.resolve(dev.jkit.core.Store.MARKER),
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                throw new JkitException(Changes.tilde(target.toString()) + " was removed by another jkit meanwhile",
+                        "nothing changed; install it again, or pick another version");
+            }
+            ctx.os.pointLink(link, target);
+        }
+    }
 }

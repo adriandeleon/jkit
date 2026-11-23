@@ -116,6 +116,13 @@ public final class Archives {
             while ((entry = tar.getNextEntry()) != null) {
                 budget.entry();
                 Path out = safe(target, entry.getName());
+                // ArchiveScan refuses these; checked again in case the two ever read an archive differently
+                if (entry.isCharacterDevice() || entry.isBlockDevice() || entry.isFIFO() || entry.isSparse()) {
+                    throw unsafe("it holds a device, pipe or sparse file: " + entry.getName());
+                }
+                if (entry.isDirectory() && entry.getSize() > 0) {
+                    throw unsafe("a folder entry in it carries data");
+                }
                 if (entry.isDirectory()) {
                     createDirectories(target, out);
                 } else if (entry.isSymbolicLink()) {

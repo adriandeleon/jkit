@@ -41,10 +41,11 @@ final class ArchiveScan {
             int entries = 0;
             long total = 0;
             long paxSize = -1;
-            long globalSize = -1;
             String longName = null;
             String paxPath = null;
-            String globalPath = null;
+            // the extended headers (x, L, K) seen since the last entry, and global (g) headers in all
+            String pending = "";
+            int globals = 0;
             while (true) {
                 if (in.readNBytes(header, 0, 512) < 512 || isZero(header)) {
                     return; // end of archive (or a short one, which the real read reports)
@@ -56,6 +57,24 @@ final class ArchiveScan {
                 long size = size(header);
                 if (size < 0) {
                     throw Archives.unsafe("a tar entry has a negative size");
+                }
+                if (type == 'x' || type == 'L' || type == 'K') {
+                    // commons-compress reads these recursively and applies them inside out, so two of
+                    // a kind before one entry (or both a PAX path and a long name) mean different
+                    // names and sizes to it and to this scan: refuse rather than guess its order
+                    if (pending.indexOf(type) >= 0) {
+                        throw Archives.unsafe("an entry in it has two '" + type + "' headers");
+                    }
+                    pending += type;
+                    if (++entries > maxEntries) {
+                        throw Archives.unsafe("more than " + maxEntries + " entries");
+                    }
+                    total += size;
+                } else if (type == 'g') {
+                    if (++globals > 8) {
+                        throw Archives.unsafe("it has more than 8 global headers");
+                    }
+                    total += size;
                 }
                 switch (type) {
                     case 'L', 'K' -> {
@@ -77,10 +96,7 @@ final class ArchiveScan {
                         skip(in, pad(size) - size);
                         String[] path = new String[1];
                         long sz = pax(meta, type == 'g', path);
-                        if (type == 'g') {
-                            globalSize = sz >= 0 ? sz : globalSize;
-                            globalPath = path[0] != null ? path[0] : globalPath;
-                        } else {
+                        if (type == 'x') {
                             paxSize = sz;
                             paxPath = path[0];
                         }
@@ -97,12 +113,15 @@ final class ArchiveScan {
                 if (++entries > maxEntries) {
                     throw Archives.unsafe("more than " + maxEntries + " entries");
                 }
-                long data = paxSize >= 0 ? paxSize : globalSize >= 0 ? globalSize : size;
-                String name = paxPath != null ? paxPath : longName != null ? longName
-                        : globalPath != null ? globalPath : cString(header, 0, 100);
+                if (paxPath != null && longName != null) {
+                    throw Archives.unsafe("an entry in it has both a PAX path and a long name");
+                }
+                long data = paxSize >= 0 ? paxSize : size;
+                String name = paxPath != null ? paxPath : longName != null ? longName : cString(header, 0, 100);
                 paxSize = -1;
                 paxPath = null;
                 longName = null;
+                pending = "";
                 if (data > 0 && (type == '5' || name.endsWith("/"))) {
                     // commons-compress never reads a folder's data, so it would parse that data as
                     // headers this scan never saw: refuse rather than read two different archives
@@ -121,7 +140,7 @@ final class ArchiveScan {
     /**
      * A PAX header's records, parsed as commons-compress does: each is {@code <length> key=value\n},
      * the length counting the whole record, and the last {@code size} wins. Returns that size or -1, and puts a {@code path} record in {@code path[0]}.
-     * Sparse-file records and over-long names are refused; a global header may not set a size.
+     * Sparse-file records and over-long names are refused; a global header may not set a size or a name.
      */
     private static long pax(byte[] meta, boolean global, String[] path) {
         long size = -1;
@@ -157,6 +176,10 @@ final class ArchiveScan {
             }
             if (key.equals("path")) {
                 path[0] = value;
+            }
+            if (global && (key.equals("path") || key.equals("linkpath"))) {
+                // commons-compress merges these into the next entry's own headers in an order of its own
+                throw Archives.unsafe("a global PAX header sets a name");
             }
             if (key.equals("size")) {
                 if (global) {
@@ -223,17 +246,77 @@ final class ArchiveScan {
             ByteBuffer h = ByteBuffer.wrap(fixed).order(ByteOrder.LITTLE_ENDIAN);
             long entries = 0;
             long bytes = 0;
+            java.util.List<Long> locals = new java.util.ArrayList<>();
             while (in.readNBytes(fixed, 0, 46) == 46 && h.getInt(0) == 0x02014b50) {
                 if (++entries > maxEntries) {
                     throw Archives.unsafe("more than " + maxEntries + " entries");
                 }
-                long rest = Short.toUnsignedInt(h.getShort(28)) + Short.toUnsignedInt(h.getShort(30))
-                        + Short.toUnsignedInt(h.getShort(32));
-                bytes += 46 + rest;
+                int nameLength = Short.toUnsignedInt(h.getShort(28));
+                int extraLength = Short.toUnsignedInt(h.getShort(30));
+                int commentLength = Short.toUnsignedInt(h.getShort(32));
+                bytes += 46 + nameLength + extraLength + commentLength;
                 if (bytes > MAX_CENTRAL_DIRECTORY) {
                     throw Archives.unsafe("its directory is over " + (MAX_CENTRAL_DIRECTORY >> 20) + " MB");
                 }
-                skip(in, rest);
+                skip(in, nameLength);
+                byte[] extra = in.readNBytes(extraLength);
+                skip(in, commentLength);
+                locals.add(localOffset(h, extra));
+            }
+            localHeaders(ch, length, locals);
+        }
+    }
+
+    /** Where an entry's local header is: the 32-bit field, or its zip64 extra when that is all ones. */
+    private static long localOffset(ByteBuffer central, byte[] extra) {
+        long offset = Integer.toUnsignedLong(central.getInt(42));
+        if (offset != 0xffffffffL) {
+            return offset;
+        }
+        boolean bigSize = central.getInt(24) == -1;
+        boolean bigCompressed = central.getInt(20) == -1;
+        ByteBuffer e = ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN);
+        while (e.remaining() >= 4) {
+            int id = Short.toUnsignedInt(e.getShort());
+            int size = Short.toUnsignedInt(e.getShort());
+            if (size > e.remaining()) {
+                break;
+            }
+            if (id == 0x0001) {
+                int skip = (bigSize ? 8 : 0) + (bigCompressed ? 8 : 0);
+                if (size >= skip + 8) {
+                    return e.getLong(e.position() + skip);
+                }
+                break;
+            }
+            e.position(e.position() + size);
+        }
+        return offset;
+    }
+
+    /**
+     * ZipFile reads every entry's local header, extra field and all, and keeps it: thousands of
+     * entries pointing at one header with a 64 KB extra field would take gigabytes from a small
+     * file. So each entry must have a local header of its own, ending before the next one starts.
+     */
+    private static void localHeaders(SeekableByteChannel ch, long length, java.util.List<Long> offsets) throws IOException {
+        long[] sorted = offsets.stream().mapToLong(Long::longValue).sorted().toArray();
+        ByteBuffer local = ByteBuffer.allocate(30).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < sorted.length; i++) {
+            if (i > 0 && sorted[i] == sorted[i - 1]) {
+                throw Archives.unsafe("entries in it share or overlap a local header");
+            }
+            if (sorted[i] < 0 || sorted[i] + 30 > length) {
+                return; // ZipFile reports the damage
+            }
+            local.clear();
+            ch.position(sorted[i]);
+            while (local.hasRemaining() && ch.read(local) > 0) {
+                // fill
+            }
+            long end = sorted[i] + 30 + Short.toUnsignedInt(local.getShort(26)) + Short.toUnsignedInt(local.getShort(28));
+            if (i + 1 < sorted.length && end > sorted[i + 1]) {
+                throw Archives.unsafe("entries in it share or overlap a local header");
             }
         }
     }

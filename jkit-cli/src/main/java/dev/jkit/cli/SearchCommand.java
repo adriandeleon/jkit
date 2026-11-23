@@ -186,6 +186,8 @@ final class SearchCommand implements Callable<Integer> {
     }
 
     private static final String AVAILABLE = "✓";
+    /** The most vendors search asks for a version's builds, one request each. */
+    static final int MAX_VENDOR_LOOKUPS = 64;
     private static final String GAP = "  ";
 
     /** One column per major (maintained first, then end of life), one row per vendor. */
@@ -335,12 +337,19 @@ final class SearchCommand implements Callable<Integer> {
         List<Pkg> out = new ArrayList<>();
         List<String> failed = new ArrayList<>();
         Exception last = null;
+        int lookups = 0;
         for (Pkg p : index) {
             if (p.major() != spec.major()) {
                 continue;
             }
             if (p.version().matches(spec.version())) {
                 out.add(p);
+                continue;
+            }
+            if (++lookups > MAX_VENDOR_LOOKUPS) {
+                // one request per vendor: real lists name about 30, a hostile one could name thousands
+                failed.add(p.vendor().name());
+                last = new java.io.IOException("more than " + MAX_VENDOR_LOOKUPS + " vendors to ask");
                 continue;
             }
             try {
@@ -358,8 +367,10 @@ final class SearchCommand implements Callable<Integer> {
             if (out.isEmpty()) {
                 throw last;
             }
-            ctx.err.println("warning: couldn't list " + String.join(", ", failed) + " builds ("
-                    + last.getMessage() + "), so they're left out");
+            String names = failed.size() <= 5 ? String.join(", ", failed)
+                    : String.join(", ", failed.subList(0, 5)) + " and " + (failed.size() - 5) + " more";
+            ctx.err.println("warning: couldn't list " + names + " builds (" + last.getMessage()
+                    + "), so they're left out");
         }
         return out;
     }

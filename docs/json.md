@@ -232,7 +232,8 @@ the same lines on stderr, under a `jkit: using …` or `jkit: left the project �
   install; `action` is `create` or `delete`.
 - `kind: file`: a cached version list under `index/` (checksums are fetched fresh, never cached);
   `action` is `create` or `update`,
-  `value` is where it came from.
+  `value` is where it came from. Or `delete` with `value` null: the cache keeps at most 32 MB and
+  nothing older than 30 days, so writing to it can remove the oldest answers.
   Text mode folds these into one `cache` line. Also a project file `pin` or `unpin` wrote, with
   `value` null.
 - `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
@@ -266,7 +267,8 @@ link (in `changes`), unless `--no-default`.
     { "tool": "jdk", "major": 21, "vendor": "temurin", "fx": false,
       "from": "21.0.5+11", "to": "21.0.9+10", "status": "available" }
   ],
-  "changes": [ { "kind": "file", "name": "/home/me/.jkit/index/3f9a….cache", "action": "update", "value": null } ]
+  "changes": [ { "kind": "file", "name": "/home/me/.jkit/index/3f9a….cache", "action": "update",
+                 "value": "https://api.foojay.io/disco/v3.0/packages?version=21&…" } ]
 }
 ```
 

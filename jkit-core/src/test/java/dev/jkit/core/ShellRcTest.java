@@ -53,7 +53,7 @@ class ShellRcTest {
     void anEmptyFileGetsJustTheBlockAndFishUsesItsOwnSyntax() {
         assertThat(ShellRc.add("", "fish").text())
                 .isEqualTo(String.join("\n", ShellRc.block("fish")) + "\n")
-                .contains("if type -q jkit; jkit hook fish | source; end");
+                .contains("if status is-interactive; and type -q jkit; jkit hook fish | source; end");
         assertThat(ShellRc.remove(ShellRc.add("", "fish").text()).text()).isEmpty();
     }
 

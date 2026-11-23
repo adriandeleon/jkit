@@ -140,6 +140,18 @@ class ExecTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS) // symlinks
+    void aGlobalLinkIsNeverPointedAtAnInstallRemovedMeanwhile() throws Exception {
+        // jkit use --global resolved zulu 17, then a jkit remove took it away before the link was set
+        Context ctx = Context.forEnv(env);
+        Files.delete(zulu17.resolve("jkit-install.properties"));
+        assertThatThrownBy(() -> Resolve.pointGlobal(ctx, home.resolve("global/jdk"), zulu17))
+                .isInstanceOf(JkitException.class).hasMessageContaining("removed by another jkit");
+        assertThat(Files.readSymbolicLink(home.resolve("global/jdk"))).isEqualTo(temurin21);
+        Resolve.pointGlobal(ctx, home.resolve("global/jdk"), temurin21); // still works for one that's there
+    }
+
+    @Test
     @DisabledOnOs(OS.WINDOWS)
     void theCommandIsFoundOnTheNewPath() throws Exception {
         Path java = Files.writeString(zulu17.resolve("bin/java"), "#!/bin/sh\n");

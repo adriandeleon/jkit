@@ -118,6 +118,28 @@ class HookInstallTest {
     }
 
     @Test
+    void whatInstallCreatesUninstallTakesAwayAndBothSaySo() throws Exception {
+        // fish: every new folder is reported, not just conf.d
+        env.put("SHELL", "/usr/bin/fish");
+        HookCommand.install(ctx(), "fish", user);
+        assertThat(output()).contains("folder " + user.resolve(".config") + " created")
+                .contains("folder " + user.resolve(".config/fish") + " created")
+                .contains("folder " + user.resolve(".config/fish/conf.d") + " created");
+        // bash: a ~/.bashrc that --install created goes again
+        Path rc = user.resolve(".bashrc");
+        HookCommand.install(ctx(), "bash", user);
+        assertThat(rc).exists();
+        HookCommand.uninstall(ctx(), "bash", user);
+        assertThat(rc).doesNotExist();
+        assertThat(output()).contains("file   " + rc + " deleted");
+        // without $SHELL, the hint repeats what was asked
+        env.remove("SHELL");
+        assertThatThrownBy(() -> HookCommand.loginShell(ctx(), "--uninstall"))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).contains("name it: jkit hook bash --uninstall (or zsh, fish)"))
+                .hasMessageContaining("to take the hook out of");
+    }
+
+    @Test
     void anUnknownLoginShellMustBeNamed() {
         env.put("SHELL", "/bin/tcsh");
         assertThatThrownBy(() -> HookCommand.loginShell(ctx())).isInstanceOf(JkitException.class)
