@@ -96,8 +96,11 @@ final class SearchCommand implements Callable<Integer> {
                 pkgs = new ArrayList<>(foojay.builds(spec.major(), vendor, ctx.platform, fx, pre));
             } else {
                 pkgs = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx, pre));
+                if (spec.tool() == Tool.GRAALVM) {
+                    pkgs.removeIf(p -> !p.vendor().isGraalVmBased());
+                }
                 if (spec.version() != null) {
-                    pkgs.removeIf(p -> p.major() != spec.major());
+                    pkgs = newestMatchingPerVendor(ctx, foojay, pkgs);
                 }
             }
             pkgs.removeIf(p -> spec.version() != null && !p.version().matches(spec.version()));
@@ -128,7 +131,7 @@ final class SearchCommand implements Callable<Integer> {
                         "lts", m != null && m.isLts(),
                         "maintained", m == null || m.maintained(),
                         "preRelease", p.version().isPreRelease(),
-                        "installed", !mark(installed, p.version(), p.vendor()).isEmpty()));
+                        "installed", !mark(installed, p.version(), p.vendor(), fx).isEmpty()));
             }
         } else {
             doc.put("majors", List.of());
@@ -145,7 +148,7 @@ final class SearchCommand implements Callable<Integer> {
                             "version", v.raw(),
                             "major", v.part(0),
                             "preRelease", v.isPreRelease(),
-                            "installed", !mark(installed, v, null).isEmpty()));
+                            "installed", !mark(installed, v, null, false).isEmpty()));
                 }
             }
         }
@@ -161,14 +164,19 @@ final class SearchCommand implements Callable<Integer> {
             index.removeIf(p -> !p.vendor().isGraalVmBased());
         }
         List<Installed> installed = ctx.store.list(spec.tool());
+        if (index.isEmpty()) {
+            ctx.out.println("no " + (fx ? "JavaFX " : "") + spec.tool() + " builds for " + ctx.platform
+                    + (pre ? "" : " (pre-releases: --pre)"));
+            return;
+        }
         if (spec.version() == null) {
             majorTable(ctx, foojay.majors(), index, vendor, installed);
         } else if (vendorText == null) {
-            vendorRows(ctx, index, vendor, installed);
+            vendorRows(ctx, newestMatchingPerVendor(ctx, foojay, index), vendor, installed);
         } else {
             for (Pkg p : foojay.builds(spec.major(), vendor, ctx.platform, fx, pre)) {
                 if (p.version().matches(spec.version())) {
-                    ctx.out.println(p.version() + mark(installed, p.version(), p.vendor()));
+                    ctx.out.println(p.version() + mark(installed, p.version(), p.vendor(), fx));
                 }
             }
         }
@@ -228,10 +236,10 @@ final class SearchCommand implements Callable<Integer> {
             Set<Integer> has = byVendor.get(v);
             String label = v.equals(chosen) ? v + " *" : v;
             StringBuilder line = new StringBuilder(String.format("%-" + nameWidth + "s", label));
-            cells(line, current, has, v, installed);
+            cells(line, current, has, v, installed, fx);
             if (!ended.isEmpty()) {
                 line.append(GAP);
-                cells(line, ended, has, v, installed);
+                cells(line, ended, has, v, installed, fx);
             }
             ctx.out.println(line.toString().stripTrailing());
         }
@@ -251,25 +259,28 @@ final class SearchCommand implements Callable<Integer> {
             lts.append(sep).append((m != null && m.isLts() ? "‾" : " ").repeat(n.length()));
         }
         int span = numbers.length() - start;
+        if (span == 0) {
+            return;
+        }
         String t = title.length() <= span ? title : title.substring(0, span);
         groups.append(String.format("%-" + span + "s", t));
     }
 
     private static void cells(StringBuilder line, List<Integer> majors, Set<Integer> has, String vendor,
-                              List<Installed> installed) {
+                              List<Installed> installed, boolean fx) {
         for (int i = 0; i < majors.size(); i++) {
             int major = majors.get(i);
             String n = String.valueOf(major);
-            String mark = !has.contains(major) ? " " : isInstalled(installed, major, vendor) ? "●" : AVAILABLE;
+            String mark = !has.contains(major) ? " " : isInstalled(installed, major, vendor, fx) ? "●" : AVAILABLE;
             line.append(i == 0 ? "" : " ").append(" ".repeat(n.length() - 1)).append(mark);
         }
     }
 
-    private static boolean isInstalled(List<Installed> installed, int major, String vendor) {
+    private static boolean isInstalled(List<Installed> installed, int major, String vendor, boolean fx) {
         for (Installed i : installed) {
             Version v = i.version();
             int m = v.part(0) == 1 ? v.part(1) : v.part(0);
-            if (m == major && i.vendor() != null && i.vendor().name().equals(vendor)) {
+            if (m == major && i.fx() == fx && i.vendor() != null && i.vendor().name().equals(vendor)) {
                 return true;
             }
         }
@@ -277,16 +288,13 @@ final class SearchCommand implements Callable<Integer> {
     }
 
     private void vendorRows(Context ctx, List<Pkg> index, Vendor vendor, List<Installed> installed) {
-        int major = spec.major();
         TreeMap<String, Pkg> byVendor = new TreeMap<>();
         for (Pkg p : index) {
-            if (p.major() == major && p.version().matches(spec.version())) {
-                byVendor.put(p.vendor().name(), p);
-            }
+            byVendor.put(p.vendor().name(), p);
         }
         for (Pkg p : byVendor.values()) {
             String name = p.vendor().equals(vendor) ? p.vendor().name() + " *" : p.vendor().name();
-            ctx.out.println(String.format("%-16s %s", name, p.version() + mark(installed, p.version(), p.vendor())));
+            ctx.out.println(String.format("%-16s %s", name, p.version() + mark(installed, p.version(), p.vendor(), fx)));
         }
         ctx.out.println("* default vendor   ● installed   · all builds of one vendor: jkit search "
                 + spec + " <vendor>");
@@ -305,7 +313,7 @@ final class SearchCommand implements Callable<Integer> {
             List<Version> list = g.getValue();
             for (int i = 0; i < Math.min(8, list.size()); i++) {
                 Version v = list.get(i);
-                line.append(v).append(mark(installed, v, null)).append(v.isPreRelease() ? " (pre-release)" : "")
+                line.append(v).append(mark(installed, v, null, false)).append(v.isPreRelease() ? " (pre-release)" : "")
                         .append("  ");
             }
             if (list.size() > 8) {
@@ -315,9 +323,32 @@ final class SearchCommand implements Callable<Integer> {
         }
     }
 
-    private static String mark(List<Installed> installed, Version v, Vendor vendor) {
+    /**
+     * Each vendor's newest build of the spec's major that matches it. The index holds only the newest
+     * build per vendor and major, so for {@code jdk@21.0.5} a vendor whose newest is 21.0.9 is looked
+     * up build by build.
+     */
+    private List<Pkg> newestMatchingPerVendor(Context ctx, FoojaySource foojay, List<Pkg> index) throws Exception {
+        List<Pkg> out = new ArrayList<>();
+        for (Pkg p : index) {
+            if (p.major() != spec.major()) {
+                continue;
+            }
+            if (p.version().matches(spec.version())) {
+                out.add(p);
+                continue;
+            }
+            foojay.builds(spec.major(), p.vendor(), ctx.platform, fx, pre).stream()
+                    .filter(b -> b.version().matches(spec.version()))
+                    .max(java.util.Comparator.comparing(Pkg::version))
+                    .ifPresent(out::add);
+        }
+        return out;
+    }
+
+    private static String mark(List<Installed> installed, Version v, Vendor vendor, boolean fx) {
         for (Installed i : installed) {
-            if (i.version().equals(v) && (vendor == null || vendor.equals(i.vendor()))) {
+            if (i.version().equals(v) && i.fx() == fx && (vendor == null || vendor.equals(i.vendor()))) {
                 return INSTALLED;
             }
         }

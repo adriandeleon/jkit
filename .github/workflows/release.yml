@@ -274,7 +274,7 @@ jobs:
           name: unsigned-${{ matrix.platform }}
           path: stage
 
-      # Needs these repository secrets (Settings → Secrets and variables → Actions):
+      # Needs these secrets, in the `release` environment limited to v* tags (Settings → Environments):
       #   MACOS_CERTIFICATE_P12       base64 of the "Developer ID Application" certificate + key (.p12)
       #   MACOS_CERTIFICATE_PASSWORD  the .p12 export password
       #   APPLE_API_KEY_P8            base64 of an App Store Connect API key (.p8, Developer role)
@@ -440,8 +440,11 @@ jobs:
     # explicit: a skipped macos-sign (a manual run) would otherwise skip everything after it
     if: >-
       !cancelled() && needs.build.result == 'success' && needs.macos-pack.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -477,8 +480,11 @@ jobs:
       && needs.packaging-check.result == 'success'
     outputs:
       latest: ${{ steps.publish.outputs.latest }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
     permissions:
       contents: write
       id-token: write       # build provenance: the OIDC token Sigstore signs with
@@ -531,8 +537,10 @@ jobs:
           case "$tag" in
             *-*) ;;
             *)
-              highest=$( { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
-                             --limit 200 --json tagName --jq '.[].tagName'; echo "$tag"; } \
+              # fails the step if the list can't be read: never guess that this tag is the highest
+              published=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+                            --limit 200 --json tagName --jq '.[].tagName')
+              highest=$(printf '%s\n%s\n' "$published" "$tag" \
                          | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
               [ "$highest" = "$tag" ] && latest=true ;;
           esac
@@ -549,8 +557,11 @@ jobs:
       && needs.release.outputs.latest == 'true'
     # the tokens can live in this environment, limited to v* tags (Settings → Environments)
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

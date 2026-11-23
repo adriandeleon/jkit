@@ -93,6 +93,19 @@ class HooksTest {
     }
 
     @Test
+    void hooksCallJkitByItsPathWhenKnown() {
+        // a JDK's bin/jkit, first on PATH in a project, must not be what runs on cd
+        String self = "/opt/jk it's/bin/jkit";
+        assertThat(Hooks.posix("bash", Path.of("/home/u/.jkit"), self))
+                .contains("command '/opt/jk it'\\''s/bin/jkit' \"$@\"").doesNotContain("command jkit");
+        assertThat(Hooks.autoSwitch("bash", self)).contains("eval \"$(command '/opt/jk it'\\''s/bin/jkit' hook-env bash)\"");
+        assertThat(Hooks.autoSwitch("zsh", self)).contains("command '/opt/jk it'\\''s/bin/jkit' hook-env zsh");
+        assertThat(Hooks.fish(Path.of("/home/u/.jkit"), self)).contains("env JKIT_ENV_FILE=$envfile '/opt/jk it\\'s/bin/jkit' $argv");
+        assertThat(Hooks.autoSwitch("fish", self)).contains("command '/opt/jk it\\'s/bin/jkit' hook-env fish | source");
+        assertThat(Hooks.powershell(Path.of("/home/u/.jkit"), self)).contains("& '/opt/jk it''s/bin/jkit' @args");
+    }
+
+    @Test
     void fishHookKeepsAnExistingJavaHomeAndSetsTheOtherHomes() {
         String fish = Hooks.fish(Path.of("/home/u/.jkit"));
         assertThat(fish).contains("if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end");

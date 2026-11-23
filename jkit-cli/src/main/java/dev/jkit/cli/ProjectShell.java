@@ -73,6 +73,20 @@ final class ProjectShell {
                 throw new JkitException(ProjectFile.OVERRIDE + " is set but empty, which turns project files off",
                         "unset it, or write to this folder's jkit.toml: " + retry + " --here");
             }
+            if (override != null) {
+                // the override names the file jkit reads, so that is the one to create, not ./jkit.toml
+                Path file = cwd.resolve(override).toAbsolutePath().normalize();
+                if (!file.getFileName().toString().endsWith(".toml")) {
+                    throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                            + ", which doesn't exist, and jkit only creates jkit.toml files",
+                            "point " + ProjectFile.OVERRIDE + " at a .toml file, or unset it and run: " + retry);
+                }
+                if (!Files.isDirectory(file.getParent())) {
+                    throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                            + ", but its folder doesn't exist", "create the folder, then run: " + retry);
+                }
+                return file;
+            }
             return cwd.resolve(ProjectFile.JKIT_TOML);
         }
         Path file = found.get().files().getFirst();

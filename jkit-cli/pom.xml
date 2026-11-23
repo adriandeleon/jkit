@@ -321,6 +321,16 @@
                     <require>
                       <name>libz.so.1()(64bit)</name>
                     </require>
+                    <!-- what rpmbuild declares for a version with ~ (0.3.0~rc.1): rpm 4.10 and later -->
+                    <require>
+                      <name>rpmlib(TildeInVersions)</name>
+                      <version>4.10.0-1</version>
+                      <flags>
+                        <flag>RPMLIB</flag>
+                        <flag>LESS</flag>
+                        <flag>EQUAL</flag>
+                      </flags>
+                    </require>
                   </requires>
                   <entries>
                     <!-- the package owns its own folders, so removing it removes them -->

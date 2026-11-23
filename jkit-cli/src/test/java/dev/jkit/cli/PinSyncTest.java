@@ -103,6 +103,27 @@ class PinSyncTest {
     }
 
     @Test
+    void latestPinsTheNewestNotWhatThisShellUses() throws Exception {
+        env.put("JAVA_HOME", zulu17.toString());
+        PinCommand pin = new PinCommand();
+        pin.spec = ToolSpec.parse("jdk@latest");
+        pin.latest = true;
+        assertThat(pin.run(ctx(), project)).isZero();
+        assertThat(toml()).contains("jdk = \"latest\"");
+    }
+
+    @Test
+    void aRelativeOverrideThatDoesNotExistYetIsTheFileCreated() throws Exception {
+        Files.createDirectories(project.resolve("ci"));
+        env.put("JKIT_PROJECT_FILE", "ci/jkit.toml");
+        assertThat(pin("jdk@21", null, false, false)).isZero();
+        assertThat(project.resolve("jkit.toml")).doesNotExist();
+        assertThat(Files.readString(project.resolve("ci/jkit.toml"))).contains("jdk = \"21\"");
+        env.put("JKIT_PROJECT_FILE", "nowhere/jkit.toml");
+        assertThatThrownBy(() -> pin("jdk@21", null, false, false)).hasMessageContaining("its folder doesn't exist");
+    }
+
+    @Test
     void withoutAVersionPinsWhatThisShellUses() throws Exception {
         env.put("JAVA_HOME", zulu17.toString());
         pin("jdk", null, false, false);

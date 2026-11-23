@@ -108,7 +108,7 @@ final class EnvCommand implements Callable<Integer> {
         if (!Files.isDirectory(dir)) {
             throw new JkitException(dir + " is not a folder");
         }
-        Map<String, String> env = new HashMap<>(ctx.env);
+        Map<String, String> env = dev.jkit.model.Envs.copy(ctx.env);
         if (ignoreProject) {
             env.put(ProjectFile.OVERRIDE, "");
         }

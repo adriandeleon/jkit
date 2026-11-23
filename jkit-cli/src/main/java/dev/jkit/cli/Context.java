@@ -112,7 +112,7 @@ final class Context {
     }
 
     static Context create(boolean refresh, boolean offline) {
-        return new Context(System.getenv(), refresh, offline, System.out);
+        return new Context(dev.jkit.model.Envs.system(), refresh, offline, System.out);
     }
 
     /**
@@ -128,7 +128,7 @@ final class Context {
      * failure, so they can still say what is going on. Never online.
      */
     static Context readOnly() {
-        Context ctx = lenient(System.getenv(), System.out);
+        Context ctx = lenient(dev.jkit.model.Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError + "; using the built-in defaults");
         }

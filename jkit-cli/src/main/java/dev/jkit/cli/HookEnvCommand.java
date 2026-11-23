@@ -31,7 +31,7 @@ final class HookEnvCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         try {
-            Context ctx = Context.lenient(System.getenv(), System.out);
+            Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
             String name = shell != null ? shell : ctx.env.getOrDefault("JKIT_SHELL", "bash");
             ctx.out.print(run(ctx, Path.of("").toAbsolutePath(), name, ctx.err));
         } catch (Exception | Error e) {

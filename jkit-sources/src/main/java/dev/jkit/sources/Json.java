@@ -7,7 +7,17 @@ import java.net.URI;
 
 /** Jackson tree model only: no data binding, so no reflection setup for native-image. */
 final class Json {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /**
+     * Limits for answers from a source or mirror: a few megabytes of {@code [[],[],…]} would
+     * otherwise become millions of tree nodes. foojay's largest answer has about 50,000 tokens.
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
+            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                    .maxNestingDepth(64)
+                    .maxTokenCount(1_000_000)
+                    .maxStringLength(1 << 20)
+                    .build())
+            .build());
 
     private Json() { }
 

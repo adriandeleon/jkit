@@ -60,7 +60,7 @@ final class DoctorCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.lenient(System.getenv(), System.out);
+        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
         List<Finding> findings = run(ctx, Path.of("").toAbsolutePath(), network);
         if (json.json) {
             ctx.out.println(JsonOut.write(json(findings)));
@@ -350,7 +350,7 @@ final class DoctorCommand implements Callable<Integer> {
             try (Stream<Path> children = Files.list(dir)) {
                 for (Path child : children.sorted().toList()) {
                     if (Files.isDirectory(child) && !Files.isSymbolicLink(child)
-                            && !Files.isRegularFile(child.resolve(Store.MARKER))) {
+                            && !Files.isRegularFile(child.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                         any = true;
                         r.warn("unfinished install (no " + Store.MARKER + "): " + tilde(child),
                                 "remove it: " + removeAll(arg(child)));

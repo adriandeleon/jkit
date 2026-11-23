@@ -37,7 +37,7 @@ public final class Store {
                     continue; // stable aliases are links
                 }
                 Path marker = child.resolve(MARKER);
-                if (!Files.isRegularFile(marker)) {
+                if (!Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
                     continue;
                 }
                 Installed installed = read(tool, child, marker);
@@ -59,8 +59,8 @@ public final class Store {
 
     private static Installed read(Tool tool, Path dir, Path marker) {
         Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(marker)) {
-            p.load(in);
+        try {
+            p = load(marker);
             String version = p.getProperty("version", "").trim();
             if (version.isEmpty()) {
                 return null;
@@ -84,7 +84,8 @@ public final class Store {
 
     /** True when that build is installed: its folder exists and carries jkit's marker. */
     public boolean contains(Tool tool, Version version, Vendor vendor, boolean fx) throws IOException {
-        return Files.isRegularFile(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor, fx)).resolve(MARKER));
+        return Files.isRegularFile(home.tools(tool.storeTool()).resolve(Installed.dirName(version, vendor, fx)).resolve(MARKER),
+                LinkOption.NOFOLLOW_LINKS);
     }
 
     /**
@@ -117,9 +118,9 @@ public final class Store {
 
     /** Whether the install was checked against a strong checksum; false for installs made before jkit recorded it. */
     public static boolean verified(Path dir) {
-        Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(dir.resolve(MARKER))) {
-            p.load(in);
+        Properties p;
+        try {
+            p = load(dir.resolve(MARKER));
         } catch (IOException e) {
             return false;
         }
@@ -135,11 +136,29 @@ public final class Store {
         p.setProperty("url", url);
         p.setProperty("verified", Boolean.toString(verified));
         Path marker = dir.resolve(MARKER);
-        if (!Files.exists(marker)) {
-            Files.createFile(marker, dev.jkit.model.Perms.file());
-        }
-        try (var out = Files.newOutputStream(marker)) {
+        // never through a link: an archive could ship one at this name pointing at a file of its own
+        Files.deleteIfExists(marker);
+        try (var out = java.nio.channels.Channels.newOutputStream(Files.newByteChannel(marker,
+                java.util.Set.of(java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE),
+                dev.jkit.model.Perms.file()))) {
             p.store(out, "written by jkit");
         }
+    }
+
+    /** The largest marker jkit reads; its own are a few hundred bytes. */
+    static final long MAX_MARKER = 64 * 1024;
+
+    /** Reads a marker: a regular file of its own, not a link, and small. */
+    static Properties load(Path marker) throws IOException {
+        var attrs = Files.readAttributes(marker, java.nio.file.attribute.BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attrs.isRegularFile() || attrs.size() > MAX_MARKER) {
+            throw new IOException(marker + " is not jkit's install record");
+        }
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(marker, LinkOption.NOFOLLOW_LINKS)) {
+            p.load(in);
+        }
+        return p;
     }
 }

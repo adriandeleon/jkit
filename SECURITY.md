@@ -49,9 +49,11 @@ refused. `JKIT_PROJECT_FILE` set to an absolute path is your own choice and is u
 
 Version and vendor names from a source must be plain text (letters, digits, `.`, `+`, `_`, `~`,
 `-`); anything else is skipped, so a source can't put a path or PATH separator into an install
-folder name. Download links from a remote source must be https. Version lists and checksum
-files are limited to 32 MB and two minutes, downloads to 2 GB and three hours (and given up on
-when they average under 32 KB/s), and an archive to 3 GB and 200,000 entries unpacked. Archives
+folder name. Download links from a remote source must be https (an https link may still name
+a host on your network: jkit only sends it a plain GET, and checks what comes back). Version lists and checksum
+files are limited to 8 MB and two minutes (and JSON to a million tokens), downloads to 2 GB and
+three hours (and given up on when they average under 32 KB/s; a request given up on for time or
+speed isn't tried again), and an archive to 3 GB and 200,000 entries unpacked. Archives
 are checked before they are unpacked: only ordinary files, folders, links, GNU long names and
 PAX headers are accepted (no sparse files, devices or other entry types), names stay under
 4,096 bytes, and symlink entries are read only that far. Archive entries can't escape their

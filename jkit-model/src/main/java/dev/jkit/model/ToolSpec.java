@@ -18,6 +18,12 @@ public record ToolSpec(Tool tool, String version) {
         return major == 8 || major == 11 || (major >= 17 && (major - 17) % 4 == 0);
     }
 
+    /** Whether {@code text} asks for {@code @latest} by name (parse makes it a missing version). */
+    public static boolean saysLatest(String text) {
+        int at = text.indexOf('@');
+        return at >= 0 && text.substring(at + 1).trim().equalsIgnoreCase("latest");
+    }
+
     public static ToolSpec parse(String text) {
         int at = text.indexOf('@');
         if (at < 0) {

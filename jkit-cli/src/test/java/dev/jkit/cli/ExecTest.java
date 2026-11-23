@@ -127,6 +127,19 @@ class ExecTest {
     }
 
     @Test
+    void windowsPathIsFoundWhateverItsCase() throws Exception {
+        // Windows names it "Path"; System.getenv() is case-sensitive, so jkit reads it through Envs
+        env.remove("PATH");
+        env.put("Path", "/usr/bin");
+        env = dev.jkit.model.Envs.of(env, true);
+        ExecCommand.Plan plan = plan("jdk@21");
+        assertThat(plan.variables().get("PATH")).endsWith(File.pathSeparator + "/usr/bin");
+        Map<String, String> child = ExecCommand.childEnv(env, plan);
+        assertThat(child.keySet().stream().filter(k -> k.equalsIgnoreCase("path")).count()).isEqualTo(1);
+        assertThat(child.get("Path")).isEqualTo(plan.variables().get("PATH"));
+    }
+
+    @Test
     @DisabledOnOs(OS.WINDOWS)
     void theCommandIsFoundOnTheNewPath() throws Exception {
         Path java = Files.writeString(zulu17.resolve("bin/java"), "#!/bin/sh\n");

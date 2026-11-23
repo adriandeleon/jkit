@@ -96,6 +96,9 @@ final class RemoveCommand implements Callable<Integer> {
             removed.add(JsonOut.installed(ctx, i));
             try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
                 changes.addAll(remove(ctx, i, here, json.json ? ctx.err : ctx.out).json());
+            } catch (PartialFailure e) {
+                changes.addAll(e.changes()); // this one's folder is gone, though a link step failed
+                throw new PartialFailure(e, changes);
             } catch (Exception e) {
                 if (changes.isEmpty()) {
                     throw e;
@@ -150,14 +153,17 @@ final class RemoveCommand implements Callable<Integer> {
             removedLinks.note("warning: couldn't delete " + Changes.tilde(trash.getParent().toString()) + " ("
                     + e.getMessage() + "); the next jkit install cleans it up");
         }
+        try {
+            unlink(ctx, i, removedLinks);
+        } catch (IOException | RuntimeException e) {
+            // the folder is already gone: the error must say so, with any links removed before it
+            removedLinks.print(say);
+            JkitException why = Errors.describe(e);
+            throw new PartialFailure(new JkitException(why.exitCode(), "removed " + i.tool() + " " + i.label()
+                    + ", but couldn't remove its global link: " + why.getMessage(),
+                    why.hints().toArray(String[]::new)), removedLinks.json());
+        }
         for (Tool t : Tool.values()) {
-            Path link = ctx.home.global(t);
-            Path target = ctx.os.readLink(link);
-            if (t.storeTool() == i.tool() && Resolve.same(target, i.home())) {
-                ctx.os.removeLink(link);
-                removedLinks.link(link, null);
-                removedLinks.note("warning: there is no global " + t + " any more");
-            }
             String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
             if (t.storeTool() == i.tool() && shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
@@ -178,5 +184,18 @@ final class RemoveCommand implements Callable<Integer> {
         say.println("removed " + i.tool() + " " + i.label());
         removedLinks.print(say);
         return removedLinks;
+    }
+
+    /** Removes the global links to the removed install. */
+    private static void unlink(Context ctx, Installed i, Changes removedLinks) throws IOException {
+        for (Tool t : Tool.values()) {
+            Path link = ctx.home.global(t);
+            Path target = ctx.os.readLink(link);
+            if (t.storeTool() == i.tool() && Resolve.same(target, i.home())) {
+                ctx.os.removeLink(link);
+                removedLinks.link(link, null);
+                removedLinks.note("warning: there is no global " + t + " any more");
+            }
+        }
     }
 }

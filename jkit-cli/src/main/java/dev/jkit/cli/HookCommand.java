@@ -51,7 +51,7 @@ final class HookCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         // lenient: a typo in config.toml must not leave every new shell without the hook
-        Context ctx = Context.lenient(System.getenv(), System.out);
+        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError);
         }
@@ -64,9 +64,10 @@ final class HookCommand implements Callable<Integer> {
             return action.install ? install(ctx, name, userHome(ctx), autoSwitch) : uninstall(ctx, name, userHome(ctx));
         }
         String name = shell != null ? shell : ctx.platform.isWindows() ? "pwsh" : "bash";
-        ctx.out.print(ctx.os.hook(name, ctx.home.root()));
+        String self = self(ctx);
+        ctx.out.print(ctx.os.hook(name, ctx.home.root(), self));
         if (ctx.config.autoSwitch()) {
-            String auto = ctx.os.autoSwitchHook(name);
+            String auto = ctx.os.autoSwitchHook(name, self);
             if (auto != null) {
                 ctx.out.print(auto);
             } else {
@@ -260,5 +261,43 @@ final class HookCommand implements Callable<Integer> {
         report.note("open shells keep the hook until they exit");
         report.print(ctx.out);
         return 0;
+    }
+
+    /**
+     * This binary's absolute path, for the hook to call: a tool's bin folder comes first on PATH
+     * once it is active, and a {@code jkit} in it must not be what runs on every cd. A PATH entry that
+     * leads to this binary is preferred (Homebrew's bin/jkit link outlives an upgrade; the Cellar path
+     * doesn't). Null when unknown, or when running on a JVM (tests): the hook then looks jkit up on PATH.
+     */
+    static String self(Context ctx) {
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") == null) {
+            return null;
+        }
+        try {
+            java.util.Optional<String> command = ProcessHandle.current().info().command();
+            if (command.isEmpty()) {
+                return null;
+            }
+            Path real = Path.of(command.get()).toRealPath();
+            String file = real.getFileName().toString();
+            Path tools = ctx.home.root().toAbsolutePath().normalize();
+            for (String dir : ctx.env.getOrDefault("PATH", "").split(java.io.File.pathSeparator)) {
+                try {
+                    Path entry = Path.of(dir);
+                    if (!entry.isAbsolute() || entry.normalize().startsWith(tools)) {
+                        continue;
+                    }
+                    Path candidate = entry.resolve(file);
+                    if (java.nio.file.Files.exists(candidate) && java.nio.file.Files.isSameFile(candidate, real)) {
+                        return candidate.toString();
+                    }
+                } catch (java.nio.file.InvalidPathException | java.io.IOException e) {
+                    // not usable: the next entry
+                }
+            }
+            return real.toString();
+        } catch (java.io.IOException | RuntimeException e) {
+            return null;
+        }
     }
 }

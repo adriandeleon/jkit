@@ -151,7 +151,7 @@ final class ExecCommand implements Callable<Integer> {
 
     /** The child environment: the parent's, with the plan's changes applied. */
     static Map<String, String> childEnv(Map<String, String> parent, Plan plan) {
-        Map<String, String> env = new HashMap<>(parent);
+        Map<String, String> env = dev.jkit.model.Envs.copy(parent);
         plan.variables().forEach((k, v) -> {
             if (v == null) {
                 env.remove(k);

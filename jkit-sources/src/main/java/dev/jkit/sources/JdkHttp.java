@@ -240,7 +240,7 @@ public final class JdkHttp implements Http {
     }
 
     /** Version lists and checksums are small: anything bigger is a broken or hostile server. */
-    static final long MAX_TEXT = 32L << 20;
+    static final long MAX_TEXT = 8L << 20; // foojay's largest answer is about 0.3 MB
     /** The largest JDK archives are under 500 MB. */
     static final long MAX_DOWNLOAD = 2L << 30;
     /** A text answer must be complete within this, however slowly it trickles in. */
@@ -289,6 +289,9 @@ public final class JdkHttp implements Http {
                 }
                 last = e;
             } catch (NetworkException e) {
+                if (e.gaveUp()) {
+                    throw e;
+                }
                 last = e;
             }
             if (attempt < attempts) {
@@ -379,6 +382,8 @@ public final class JdkHttp implements Http {
         AtomicLong windowStart = new AtomicLong(started);
         AtomicLong windowBytes = new AtomicLong();
         java.util.concurrent.atomic.AtomicReference<String> stalled = new java.util.concurrent.atomic.AtomicReference<>();
+        // past a deadline or too slow on average: trying again would only multiply the time limit
+        java.util.concurrent.atomic.AtomicBoolean final_ = new java.util.concurrent.atomic.AtomicBoolean();
         ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "jkit-http-watchdog");
             t.setDaemon(true);
@@ -392,12 +397,15 @@ public final class JdkHttp implements Http {
                 why = "no data for " + idle.toSeconds() + " s";
             } else if (text && now - started > TEXT_DEADLINE.toNanos()) {
                 why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
+                final_.set(true);
             } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {
                 why = "not finished after " + DOWNLOAD_DEADLINE.toHours() + " hours";
+                final_.set(true);
             } else if (!text && now - started > AVERAGE_GRACE.toNanos()
                     && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
                 // a server can stay above the per-window minimum and still take months for 2 GB
                 why = "under " + MIN_AVERAGE_BYTES_PER_SECOND / 1024 + " KB/s on average";
+                final_.set(true);
             } else if (!text && now - windowStart.get() > idle.toNanos()) {
                 if (received.get() - windowBytes.get() < MIN_BYTES_PER_WINDOW) {
                     why = "under " + MIN_BYTES_PER_WINDOW / 1024 + " KB in " + idle.toSeconds() + " s";
@@ -442,7 +450,7 @@ public final class JdkHttp implements Http {
             throw new IOException("cannot write the download: " + e.getMessage(), e.getCause());
         } catch (IOException e) {
             if (stalled.get() != null) {
-                throw new NetworkException(uri, new IOException(stalled.get()));
+                throw new NetworkException(uri, new IOException(stalled.get()), final_.get());
             }
             throw new NetworkException(uri, e);
         } finally {

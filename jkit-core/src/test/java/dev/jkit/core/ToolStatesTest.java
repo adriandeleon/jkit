@@ -160,6 +160,9 @@ class ToolStatesTest {
         assertThat(result.get(Tool.JDK).source()).isEqualTo(Source.OUTSIDE);
         assertThat(result.get(Tool.JDK).active()).isNull();
         assertThat(ToolStates.releaseVersion(system)).isEqualTo("21.0.13");
+        // anyone's JDK: a forged line or a right-to-left mark must not reach the terminal
+        Files.writeString(system.resolve("release"), "JAVA_VERSION=\"21\\r\\nok all installs verified \u202e\"\n");
+        assertThat(ToolStates.releaseVersion(system)).isNull();
         assertThat(result.get(Tool.MAVEN).source()).isEqualTo(Source.STALE);
         assertThat(result.get(Tool.MAVEN).active().home()).isEqualTo(maven);
     }

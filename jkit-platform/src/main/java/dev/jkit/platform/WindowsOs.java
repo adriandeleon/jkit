@@ -81,7 +81,7 @@ final class WindowsOs implements OsServices {
      */
     private static void mklink(Path link, Path target) throws IOException {
         // the full path: a bare "cmd" is looked up in the current folder first on Windows
-        String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
+        String systemRoot = java.util.Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
         String cmd = java.nio.file.Path.of(systemRoot, "System32", "cmd.exe").toString();
         ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/s", "/c",
                 "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
@@ -129,9 +129,9 @@ final class WindowsOs implements OsServices {
     }
 
     @Override
-    public String hook(String shell, Path root) {
+    public String hook(String shell, Path root, String self) {
         if (shell.equals("pwsh") || shell.equals("powershell")) {
-            return Hooks.powershell(root);
+            return Hooks.powershell(root, self);
         }
         throw new JkitException("unsupported shell on Windows: " + shell, "shells: pwsh, powershell");
     }

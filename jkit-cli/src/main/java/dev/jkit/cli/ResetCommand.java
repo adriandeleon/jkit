@@ -44,7 +44,7 @@ final class ResetCommand implements Callable<Integer> {
         }
         // the project's install applies again only while this folder's project still pins it
         String projectVar = ShellEnv.projectVariable(tool);
-        java.util.Map<String, String> env = new java.util.HashMap<>(ctx.env);
+        java.util.Map<String, String> env = dev.jkit.model.Envs.copy(ctx.env);
         String applied = env.get(projectVar);
         Path project = null;
         if (applied != null && !applied.isBlank()) {

@@ -83,6 +83,7 @@ final class UpgradeCommand implements Callable<Integer> {
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");
             return 0;
         }
+        lists = new Changes(ctx);
         List<Object> rows = new ArrayList<>();
         int failures = 0;
         int available = 0;
@@ -96,7 +97,7 @@ final class UpgradeCommand implements Callable<Integer> {
             }
         }
         // version lists fetched to check the lines (the upgrades report their own changes)
-        Changes lists = new Changes(ctx).disk();
+        lists.disk();
         if (!lists.isEmpty()) {
             say.println("checked for newer builds");
             lists.print(say);
@@ -119,6 +120,9 @@ final class UpgradeCommand implements Callable<Integer> {
      * and on failure an {@code error}. A failure on one line never stops the others, so what
      * earlier lines changed is always reported.
      */
+    /** The cached files written to check the lines: the top-level {@code changes}. */
+    private Changes lists;
+
     private Map<String, Object> upgrade(Context ctx, java.io.PrintStream say, Line line, Installed newest) {
         Map<String, Object> row = JsonOut.fields(
                 "tool", line.userTool().id(),
@@ -130,6 +134,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 "status", null);
         try {
             Artifact artifact = resolve(ctx, line);
+            lists.disk(); // the lists fetched so far go to the top level, not to this line's install
             row.put("to", artifact.version().raw());
             if (artifact.version().compareTo(newest.version()) <= 0
                     || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {

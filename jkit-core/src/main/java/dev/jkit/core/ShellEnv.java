@@ -72,7 +72,7 @@ public final class ShellEnv {
      */
     public static Map<String, String> reset(Map<String, String> env, JkitHome home, Tool tool,
                                             boolean projectJdkIsGraalVm) {
-        Map<String, String> after = new HashMap<>(env);
+        Map<String, String> after = dev.jkit.model.Envs.copy(env);
         after.remove(stateVariable(tool));
         Map<Tool, String> active = active(after);
         String project = blankToNull(env.get(projectVariable(tool)));
@@ -118,7 +118,7 @@ public final class ShellEnv {
         if (recordKey && (projectKey != null || env.containsKey(PROJECT))) {
             out.put(PROJECT, projectKey);
         }
-        Map<String, String> after = new HashMap<>(env);
+        Map<String, String> after = dev.jkit.model.Envs.copy(env);
         for (Tool t : Tool.values()) {
             boolean shellChoice = blankToNull(env.get(stateVariable(t))) != null;
             if (homes.containsKey(t)) {

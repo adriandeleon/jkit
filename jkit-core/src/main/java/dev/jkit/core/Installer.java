@@ -51,7 +51,7 @@ public final class Installer {
                 java.util.Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), dev.jkit.model.Perms.file());
              FileLock ignored = lock(channel)) {
             if (Files.isDirectory(dest)) {
-                if (!Files.isRegularFile(dest.resolve(Store.MARKER))) {
+                if (!Files.isRegularFile(dest.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                     throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
                             "move or delete that folder, then install again");
                 }
@@ -83,6 +83,7 @@ public final class Installer {
                             "try again; if it keeps happening, the source has a broken file: pick another version");
                 }
                 Path toolHome = locateHome(out);
+                requireLinksInside(toolHome);
                 requireExecutable(storeTool, toolHome, artifact.label());
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
                 dev.jkit.model.Perms.mkdirs(dest.getParent());
@@ -170,6 +171,24 @@ public final class Installer {
             return candidate;
         }
         return real ? macHome : candidate;
+    }
+
+    /**
+     * Archives checks links against the archive's top folder, but only part of it may be installed
+     * (macOS's Contents/Home): a link that climbs out of that part would point into tools/ once moved.
+     */
+    static void requireLinksInside(Path toolHome) throws IOException {
+        Path root = toolHome.toAbsolutePath().normalize();
+        try (Stream<Path> all = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) all::iterator) {
+                if (Files.isSymbolicLink(p)) {
+                    Path target = Files.readSymbolicLink(p);
+                    if (target.isAbsolute() || !p.getParent().resolve(target).normalize().startsWith(root)) {
+                        throw Archives.unsafe("its symbolic link " + root.relativize(p) + " points outside the folder jkit installs");
+                    }
+                }
+            }
+        }
     }
 
     private static final boolean POSIX =

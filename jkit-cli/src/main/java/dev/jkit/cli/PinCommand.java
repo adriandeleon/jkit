@@ -52,6 +52,12 @@ final class PinCommand implements Callable<Integer> {
     @Mixin
     Options options;
 
+    @picocli.CommandLine.Spec
+    picocli.CommandLine.Model.CommandSpec commandSpec;
+
+    /** {@code jdk@latest}: pin "latest" (the newest), not the version active here like a bare {@code jdk}. */
+    boolean latest;
+
     @Mixin
     JsonOut.Flag json = new JsonOut.Flag();
 
@@ -60,12 +66,14 @@ final class PinCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
+        latest = commandSpec.commandLine().getParseResult().matchedPositional(0).originalStringValues().stream()
+                .anyMatch(ToolSpec::saysLatest);
         return run(options.context(), Path.of("").toAbsolutePath());
     }
 
     int run(Context ctx, Path cwd) throws Exception {
         spec = Resolve.lts(ctx, spec, true);
-        String retry = "jkit pin " + spec + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "")
+        String retry = "jkit pin " + spec + (latest ? "@latest" : "") + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "")
                 + (exact ? " --exact" : "");
         Path file = ProjectShell.target(ctx, cwd, here, retry);
         Choice choice = choose(ctx, cwd);
@@ -120,7 +128,7 @@ final class PinCommand implements Callable<Integer> {
             throw new JkitException(tool + " has no JavaFX builds; drop --fx");
         }
         String version = spec.version();
-        if (version == null) {
+        if (version == null && !latest) {
             Installed current = current(ctx, cwd, tool);
             if (current == null) {
                 throw new JkitException("no " + tool + " is active here to pin",
@@ -136,7 +144,8 @@ final class PinCommand implements Callable<Integer> {
                     installed, null);
         }
         Vendor source = Resolve.knownVendor(ctx, wanted.spec(), vendorText);
-        Artifact artifact = InstallCommand.artifact(ctx, wanted.spec(), source, fx, Version.parse(version).isPreRelease());
+        Artifact artifact = InstallCommand.artifact(ctx, wanted.spec(), source, fx,
+                version != null && Version.parse(version).isPreRelease());
         return new Choice(exact ? exactPin(tool, artifact.version(), artifact.vendor(), artifact.fx()) : wanted,
                 null, artifact);
     }

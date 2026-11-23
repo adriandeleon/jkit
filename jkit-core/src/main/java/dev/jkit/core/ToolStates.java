@@ -175,17 +175,21 @@ public final class ToolStates {
      */
     public static String releaseVersion(Path jdkHome) {
         Path release = jdkHome.resolve("release");
-        if (!Files.isRegularFile(release)) {
-            return null;
-        }
         Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(release)) {
-            p.load(in);
-        } catch (IOException e) {
+        try {
+            // a JDK set outside jkit is anyone's: a small file, and only a plain version is shown
+            if (!Files.isRegularFile(release) || Files.size(release) > 64 * 1024) {
+                return null;
+            }
+            try (InputStream in = Files.newInputStream(release)) {
+                p.load(in);
+            }
+        } catch (IOException | IllegalArgumentException e) {
             return null;
         }
         String version = p.getProperty("JAVA_VERSION");
-        return version == null ? null : version.replace("\"", "").trim();
+        version = version == null ? null : version.replace("\"", "").trim();
+        return dev.jkit.model.Version.isSafeText(version) ? version : null;
     }
 
     private static Installed installAt(Store store, Tool tool, Path path) throws IOException {

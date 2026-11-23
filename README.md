@@ -47,7 +47,9 @@ macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (
 hyphen) are on the releases page only.
 
 To check a download: `sha256sum -c SHA256SUMS --ignore-missing`, and for where it was built,
-`gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM.
+`gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM,
+made from the Linux x64 build: the other builds compile in the same libraries, and the macOS x64
+binary is built with Liberica NIK instead of GraalVM CE.
 
 ### Windows (preview)
 
