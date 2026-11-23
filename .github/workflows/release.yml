@@ -115,20 +115,23 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # RPM: no "-" in a version, and "~" sorts a pre-release before the release (1.2.0~rc.1 < 1.2.0)
+          echo "RPM_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
           ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
       - name: Test, build the native binary and the packages
-        run: ./mvnw -B -P${{ matrix.profiles }} verify
+        run: ./mvnw -B -P${{ matrix.profiles }} verify "-Drpm.version=$RPM_VERSION"
 
       # The notices must list exactly the libraries compiled in; CI checks this on every PR too.
       - name: Check THIRD-PARTY-NOTICES and make the SBOM
         if: matrix.platform == 'linux-x64'
         run: |
           packaging/third-party-notices.sh --check
-          ./mvnw -B -q compile org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
+          # per module, not aggregate: jkit-cli's SBOM has jkit-cli as its subject and everything it ships
+          ./mvnw -B -q -pl jkit-cli -am compile org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeBom \
             -DoutputFormat=json -DoutputName=sbom -DprojectType=application
-          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' target/sbom.json
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["metadata"]["component"]["name"] == "jkit-cli"; print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' jkit-cli/target/sbom.json
 
       - name: Check the glibc the binary needs
         if: runner.os == 'Linux'
@@ -256,12 +259,18 @@ jobs:
               --format=gnu -cf - "${files[@]}" | gzip -9n > "dist/$base.tar.gz"
             (cd stage && TZ=UTC zip -q -X "../dist/$base.zip" "${files[@]}")
             cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+            # GitHub turns "~" (jdeb's pre-release marker, jkit_1.2.0~rc.1_amd64.deb) into "." on
+            # upload, and SHA256SUMS must name the files as they are published
+            for f in dist/*~*; do
+              if [ -e "$f" ]; then mv "$f" "${f//\~/.}"; fi
+            done
           else
-            tar -C stage -czf "dist/$base.tar.gz" "${files[@]}"
+            # bsdtar: fixed owner and order; the binary itself differs per build (signature)
+            tar -C stage --uid 0 --gid 0 --uname root --gname wheel -czf "dist/$base.tar.gz" "${files[@]}"
             (cd stage && zip -q -X "../dist/$base.zip" "${files[@]}")
           fi
           if [ "${{ matrix.platform }}" = linux-x64 ]; then
-            cp target/sbom.json "dist/jkit-$VERSION-sbom.cdx.json"
+            cp jkit-cli/target/sbom.json "dist/jkit-$VERSION-sbom.cdx.json"
           fi
           ls -l dist
 
@@ -343,8 +352,10 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$TAP_TOKEN" ]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew formula was not updated"
-            exit 0
+            # a release that silently skips Homebrew looks done but isn't: fail, so it shows
+            echo "::error::HOMEBREW_TAP_TOKEN is not set, so the Homebrew formula was not updated." \
+              "Add the secret, then re-run this job."
+            exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
@@ -393,8 +404,9 @@ jobs:
           WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
         run: |
           if [ -z "$WINGET_TOKEN" ]; then
-            echo "::warning::WINGET_TOKEN is not set; no winget pull request was opened"
-            exit 0
+            echo "::error::WINGET_TOKEN is not set, so no winget pull request was opened." \
+              "Add the secret, then re-run this job."
+            exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
@@ -407,5 +419,6 @@ jobs:
             echo "::error::wingetcreate.exe has SHA-256 $actual, expected $WINGETCREATE_SHA256"
             exit 1
           fi
-          "$exe" submit --token "$WINGET_TOKEN" \
+          # --no-open: there is no browser on the runner to show the pull request in
+          "$exe" submit --no-open --token "$WINGET_TOKEN" \
             --prtitle "New version: AdrianDeLeon.jkit version $version" manifests

@@ -32,7 +32,8 @@ import picocli.CommandLine.Parameters;
                 "Exits with the command's exit code (126: can't start it, 127: not found).",
                 "Never uses the network and installs nothing: a missing version exits 3.",
                 "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits); to stop it",
-                "from another process, send jkit SIGTERM."})
+                "from another process, send jkit SIGTERM: it passes it on, waits, and exits with the",
+                "command's code (a second SIGTERM kills the command)."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",
@@ -119,7 +120,7 @@ final class ExecCommand implements Callable<Integer> {
         homes.putAll(base.homes());
         boolean jdkIsGraalVm = EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK));
         for (Choice c : choices) {
-            ToolSpec cs = Resolve.lts(ctx, c.spec(), false);
+            ToolSpec cs = Resolve.lts(ctx, c.spec(), c.vendor(), false);
             Vendor vendor = Resolve.vendor(ctx, cs, c.vendor());
             Installed chosen = Resolve.installed(ctx, cs, vendor, c.vendor(), false).getFirst();
             homes.put(c.spec().tool(), chosen.home());
@@ -195,9 +196,19 @@ final class ExecCommand implements Callable<Integer> {
             throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
         }
         // Ctrl-C reaches the whole foreground process group, so the child gets its own SIGINT: a REPL
-        // handles it and keeps going, and its exit code is ours. Only SIGTERM/SIGHUP stop it from here.
+        // handles it and keeps going, and its exit code is ours. SIGTERM and SIGHUP are passed on as
+        // SIGTERM (a second one kills it), and jkit still waits, so its exit code is the child's and
+        // a child that ignores TERM is never left running on its own.
         List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
-        Thread stop = new Thread(process::destroy);
+        java.util.concurrent.atomic.AtomicInteger stops = new java.util.concurrent.atomic.AtomicInteger();
+        ignored.addAll(Signals.handle(() -> {
+            if (stops.getAndIncrement() == 0) {
+                process.destroy();
+            } else {
+                process.destroyForcibly();
+            }
+        }, "TERM", "HUP"));
+        Thread stop = new Thread(process::destroy); // where those signals can't be handled
         Runtime.getRuntime().addShutdownHook(stop);
         try {
             return process.waitFor();

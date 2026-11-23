@@ -13,7 +13,6 @@ import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -82,7 +81,7 @@ final class PinCommand implements Callable<Integer> {
         } else {
             String text = created ? ProjectWriter.fresh(pin)
                     : ProjectWriter.set(file, ProjectFile.text(file), pin).text();
-            Files.writeString(file, text, StandardCharsets.UTF_8);
+            ProjectShell.write(file, text);
             report.file(file, created);
             say.println(previous == null
                     ? "pinned " + StatusCommand.pinText(pin) + " in " + name

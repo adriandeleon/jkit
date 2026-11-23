@@ -72,6 +72,23 @@ class PinSyncTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void pinNeverWritesThroughALinkedProjectFile() throws Exception {
+        // a cloned repo's jkit.toml pointing at the user's own files, existing or not yet
+        Path victim = tmp.resolve("user/victim.toml");
+        Files.writeString(victim, "# mine\n");
+        Files.createSymbolicLink(project.resolve("jkit.toml"), victim);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> pin("jdk@21", null, false, true))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symbolic link");
+        assertThat(Files.readString(victim)).isEqualTo("# mine\n");
+        Files.delete(project.resolve("jkit.toml"));
+        Files.createSymbolicLink(project.resolve("jkit.toml"), tmp.resolve("user/.bash_profile"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> pin("jdk@21", null, false, true))
+                .hasMessageContaining("symbolic link");
+        assertThat(tmp.resolve("user/.bash_profile")).doesNotExist();
+    }
+
+    @Test
     void pinCreatesJkitTomlWithTheVersionAsTyped() throws Exception {
         assertThat(pin("jdk@21", null, false, false)).isZero();
         assertThat(toml()).endsWith("[tools]\njdk = \"21\"\n");

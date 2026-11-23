@@ -103,6 +103,7 @@ Never uses the network. Reads the project file found from the working directory 
   "schemaVersion": 1,
   "project": { "dir": "/home/me/src/app", "files": ["/home/me/src/app/jkit.toml"], "warnings": [] },
   "projectError": null,
+  "projectSkipped": null,
   "tools": [
     {
       "tool": "jdk",
@@ -130,7 +131,8 @@ Never uses the network. Reads the project file found from the working directory 
   jkit install; `version` then comes from a JDK's `release` file when it has one.
 - `pin` and `pinInstalled` are null without a project pin. `global` is null without a global link.
 - `project` is null without a project file. `projectError` is the error message when the
-  file can't be read.
+  file can't be read. `projectSkipped` says which project file was ignored, and why, when its
+  folder or the file belongs to another user or every user can write to it; otherwise null.
 - `matches` is true when `source` is what jkit would pick; `hint` says what to do when it isn't.
 
 ## `jkit env [--no-project] [--dir <path>] --json`
@@ -329,8 +331,9 @@ lists the variables of this shell that now follow the project.
 }
 ```
 
-`status` per tool: `already-installed`, `installed` or `would-install` (dry run; `installed` is
-null). `changes` lists new install folders and, with the shell hook active, the variables of this
+`status` per tool: `already-installed`, `installed`, or in a dry run `would-install` or
+`would-refuse` (the source publishes no checksum, so the real sync needs `--allow-unverified`);
+`installed` is null in a dry run. `changes` lists new install folders and, with the shell hook active, the variables of this
 shell that now follow the project; without the hook `notes` says the shell is unchanged.
 
 ## `jkit remove <tool>@<version> [vendor] --json`

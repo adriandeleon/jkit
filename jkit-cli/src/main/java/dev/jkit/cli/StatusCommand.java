@@ -65,6 +65,8 @@ final class StatusCommand implements Callable<Integer> {
         }
         if (result.projectError() != null) {
             out.println("project file error: " + result.projectError());
+        } else if (result.projectSkipped() != null) {
+            out.println("project: none (" + Changes.tilde(result.projectSkipped()) + ")");
         } else if (result.project().isPresent()) {
             ProjectSpec p = result.project().get();
             out.println("project: " + Changes.tilde(p.dir().toString()) + " (" + p.source() + ")");
@@ -117,7 +119,7 @@ final class StatusCommand implements Callable<Integer> {
         }
         if (s.matches()) {
             return s.source() == Source.SHELL && s.pin() != null && s.pinInstall() != null
-                    && !s.pinInstall().home().equals(s.shellChoice())
+                    && !Resolve.same(s.pinInstall().home(), s.shellChoice())
                     ? projectFile(result) + " wants " + pinText(s.pin()) + "; this shell chose another with jkit use"
                             + ", to follow it: jkit reset " + tool
                     : null;
@@ -185,6 +187,7 @@ final class StatusCommand implements Callable<Integer> {
         doc.put("project", result.project().map(p -> (Object) JsonOut.fields(
                 "dir", p.dir(), "files", p.files(), "warnings", p.warnings())).orElse(null));
         doc.put("projectError", result.projectError());
+        doc.put("projectSkipped", result.projectSkipped());
         List<Object> tools = new ArrayList<>();
         for (ToolState s : result.tools()) {
             tools.add(JsonOut.fields(

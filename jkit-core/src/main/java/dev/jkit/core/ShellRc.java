@@ -96,7 +96,8 @@ public final class ShellRc {
      * function that merely mentions it ({@code alias jh='jkit hook bash'}).
      */
     private static final java.util.regex.Pattern LOADS_HOOK = java.util.regex.Pattern.compile(
-            "(eval\\s+[\"']?\\$\\(\\s*(command\\s+)?\\S*jkit\\s+hook"
+            // eval "$(jkit hook bash)", eval "`jkit hook bash`", eval "$(JKIT_AUTO_SWITCH=1 jkit hook bash)"
+            "(eval\\s+[\"']?(\\$\\(|`)\\s*(command\\s+|env\\s+|\\w+=\\S*\\s+)*\\S*jkit\\s+hook"
                     + "|\\S*jkit\\s+hook\\b[^|#]*\\|\\s*(source|\\.|iex|Invoke-Expression|Out-String)"
                     + "|(source|\\.)\\s+<\\(\\s*\\S*jkit\\s+hook)");
 

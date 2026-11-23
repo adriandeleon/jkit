@@ -79,6 +79,16 @@ class JsonOutputTest {
     }
 
     @Test
+    void controlCharactersAreJsonEscapesNotTerminalCodes() throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        doc.put("text", "a\u001b[2Jb\u007fc\u009bd");
+        String out = JsonOut.write(doc);
+        assertThat(out).doesNotContain("\u001b").doesNotContain("\u007f").doesNotContain("\u009b")
+                .contains("\\u001B").contains("\\u007F").contains("\\u009b");
+        assertThat(JSON.readTree(out).path("text").asText()).isEqualTo("a\u001b[2Jb\u007fc\u009bd");
+    }
+
+    @Test
     void aFailureAfterChangesStillListsThem() throws Exception {
         // sync installed one pin, then the next download failed: the new folder must not go unreported
         List<Object> changes = List.of(JsonOut.fields("kind", "folder", "name", "/h/tools/jdk/21", "action", "create",

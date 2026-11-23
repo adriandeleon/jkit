@@ -24,6 +24,44 @@ final class JsonOut {
     static final String FLAG = "--json";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    static {
+        MAPPER.getFactory().setCharacterEscapes(new TerminalSafeEscapes());
+    }
+
+    /**
+     * Jackson escapes C0 controls already; this adds DEL and the C1 controls ({@code \u007f},
+     * {@code \u0080..\u009f}), so a document printed to a terminal can't carry an escape sequence.
+     * stdout under {@code --json} skips {@link SafeOutput}, whose {@code \xNN} isn't valid JSON.
+     */
+    private static final class TerminalSafeEscapes extends com.fasterxml.jackson.core.io.CharacterEscapes {
+        private final int[] table = standardAsciiEscapesForJSON();
+
+        TerminalSafeEscapes() {
+            table[0x7f] = ESCAPE_STANDARD;
+        }
+
+        @Override
+        public int[] getEscapeCodesForAscii() {
+            return table;
+        }
+
+        @Override
+        public com.fasterxml.jackson.core.SerializableString getEscapeSequence(int ch) {
+            return ch >= 0x80 && ch <= 0x9f
+                    ? new com.fasterxml.jackson.core.io.SerializedString(String.format("\\u%04x", ch))
+                    : null;
+        }
+    }
+
+    /** Pretty JSON text with the escapes above. */
+    static String pretty(com.fasterxml.jackson.databind.JsonNode node) {
+        try {
+            return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** Mixin for commands that support {@code --json}. */
     static final class Flag {
         @Option(names = FLAG, description = "Print one JSON document on stdout instead of text (see docs/json.md).")
@@ -44,7 +82,7 @@ final class JsonOut {
     }
 
     static void print(PrintStream out, ObjectNode doc) {
-        out.println(doc.toPrettyString());
+        out.println(pretty(doc));
         out.flush();
     }
 
@@ -122,7 +160,7 @@ final class JsonOut {
 
     /** Maps, collections, Jackson nodes, strings, numbers, booleans, paths (absolute) and null, pretty-printed. */
     static String write(Object value) {
-        return toNode(value).toPrettyString();
+        return pretty(toNode(value));
     }
 
     private static com.fasterxml.jackson.databind.JsonNode toNode(Object value) {

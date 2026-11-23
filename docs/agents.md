@@ -37,7 +37,9 @@ shows Maven's help.
 
 While the command runs, jkit ignores SIGINT: a terminal's Ctrl-C reaches the command directly, so a
 REPL keeps running and its exit code comes through. To stop it from another process (a timeout, an
-agent's cancel), send jkit SIGTERM, which it passes on; a SIGINT sent to jkit's pid alone does nothing.
+agent's cancel), send jkit SIGTERM (or SIGHUP): it passes SIGTERM on, waits for the command and
+exits with its exit code; a second SIGTERM kills the command. A SIGINT sent to jkit's pid alone does
+nothing.
 
 ## A typical agent loop
 

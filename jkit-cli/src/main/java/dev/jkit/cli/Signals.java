@@ -25,6 +25,20 @@ final class Signals {
         return saved;
     }
 
+    /** Runs {@code action} on each signal this platform has, instead of exiting; returns what to restore. */
+    static List<Saved> handle(Runnable action, String... names) {
+        List<Saved> saved = new ArrayList<>();
+        for (String name : names) {
+            try {
+                Signal signal = new Signal(name);
+                saved.add(new Saved(signal, Signal.handle(signal, s -> action.run())));
+            } catch (IllegalArgumentException | UnsupportedOperationException notHere) {
+                // no such signal on this OS, or the VM reserves it
+            }
+        }
+        return saved;
+    }
+
     static void restore(List<Saved> saved) {
         for (Saved s : saved) {
             try {

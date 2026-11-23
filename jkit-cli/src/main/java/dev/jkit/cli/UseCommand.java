@@ -43,7 +43,7 @@ final class UseCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
-        spec = Resolve.lts(ctx, spec, false);
+        spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         Installed chosen = Resolve.installed(ctx, spec, vendor, vendorText, fx).getFirst();
         Tool tool = spec.tool();

@@ -34,8 +34,10 @@ public final class ToolStates {
     /**
      * @param project      the project found from the working directory, or empty
      * @param projectError why the project file couldn't be read (broken TOML), or null
+     * @param projectSkipped a project file that was ignored because its folder isn't safe, and why; or null
      */
-    public record Result(Optional<ProjectSpec> project, String projectError, List<ToolState> tools) {
+    public record Result(Optional<ProjectSpec> project, String projectError, List<ToolState> tools,
+                         String projectSkipped) {
         public ToolState get(Tool tool) {
             return tools.stream().filter(t -> t.tool() == tool).findFirst().orElseThrow();
         }
@@ -64,7 +66,8 @@ public final class ToolStates {
             }
             tools.add(state);
         }
-        return new Result(project, projectError, List.copyOf(tools));
+        String skipped = project.isEmpty() && projectError == null ? ProjectFile.skipped(cwd, env).orElse(null) : null;
+        return new Result(project, projectError, List.copyOf(tools), skipped);
     }
 
     private static ToolState read(Tool tool, Map<String, String> env, JkitHome home, Store store, Config config,

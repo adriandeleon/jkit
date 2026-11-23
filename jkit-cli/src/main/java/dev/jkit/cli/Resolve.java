@@ -48,19 +48,40 @@ final class Resolve {
             }
             throw new JkitException("foojay lists no LTS release");
         }
-        int best = -1;
+        return lts(ctx, spec, null, false);
+    }
+
+    /**
+     * Offline {@code lts}: the newest installed LTS release that {@link #installed} would accept with
+     * this vendor ({@code typedVendor}, else the default) and {@code fx}, so {@code jkit use jdk@lts zulu}
+     * doesn't pick a release only another vendor has.
+     */
+    static ToolSpec lts(Context ctx, ToolSpec spec, String typedVendor, boolean fx) throws Exception {
+        if (spec == null || !spec.isLts()) {
+            return spec;
+        }
+        java.util.TreeSet<Integer> majors = new java.util.TreeSet<>(java.util.Comparator.reverseOrder());
         for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
             int major = JsonOut.major(i.tool(), i.version());
             boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
-            if (ToolSpec.isLtsMajor(major) && major > best && (spec.tool() != dev.jkit.model.Tool.GRAALVM || graal)) {
-                best = major;
+            if (ToolSpec.isLtsMajor(major) && (spec.tool() != dev.jkit.model.Tool.GRAALVM || graal)) {
+                majors.add(major);
             }
         }
-        if (best < 0) {
+        if (majors.isEmpty()) {
             throw new JkitException(JkitException.NOT_INSTALLED, "no LTS " + spec.tool() + " is installed",
                     "install one: jkit install " + spec.tool() + "@lts");
         }
-        return new ToolSpec(spec.tool(), String.valueOf(best));
+        for (int major : majors) {
+            ToolSpec candidate = new ToolSpec(spec.tool(), String.valueOf(major));
+            try {
+                installed(ctx, candidate, vendor(ctx, candidate, typedVendor), typedVendor, fx);
+                return candidate;
+            } catch (JkitException notThisOne) {
+                // try the next older LTS
+            }
+        }
+        return new ToolSpec(spec.tool(), String.valueOf(majors.first())); // the caller says what is missing
     }
 
     /** The vendor typed, or the default; an error for tools without vendors. */

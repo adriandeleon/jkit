@@ -66,6 +66,11 @@ public final class CachingHttp implements Http {
     }
 
     @Override
+    public boolean offline() {
+        return offline;
+    }
+
+    @Override
     public String getFresh(URI uri) throws IOException {
         if (offline) {
             throw new dev.jkit.model.JkitException("--offline, but " + uri.getHost() + " has to be asked for a checksum",

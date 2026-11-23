@@ -35,8 +35,8 @@ jkit upgrade                           # newest build within each installed rele
 | Platform | |
 | --- | --- |
 | macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
-| Debian, Ubuntu (x64, arm64) | the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` |
-| Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` |
+| Debian, Ubuntu (x64, arm64) | the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
+| Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
 | Windows x64 (preview) | `winget install AdrianDeLeon.jkit` |
 | Anything else | a `.tar.gz` or `.zip` from the releases |
 
@@ -59,6 +59,9 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   once, and add `%JAVA_HOME%\bin` to your user `PATH`.
 - Switching on `cd` isn't available in PowerShell yet.
 - Windows on ARM runs the x64 build under emulation.
+- `jkit.exe` needs the Microsoft Visual C++ Redistributable (2015 or newer, x64). winget installs
+  it along with jkit; with the `.zip`, install it first if jkit doesn't start
+  (`winget install Microsoft.VCRedist.2015+.x64`). Most machines already have it.
 
 ## How it works
 
@@ -80,7 +83,7 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 | `~/.jkit/index/` | version lists, cached 24 h (`--refresh` refetches, `--offline` uses only the cache) |
 | `~/.jkit/config.toml` | settings (below) |
 
-`JKIT_HOME` moves all of it. It must be a folder you own that other users can't write to.
+`JKIT_HOME` moves all of it. It must be an absolute path to a folder you (or root) own that other users can't write to.
 
 ### Settings
 

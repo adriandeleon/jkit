@@ -48,6 +48,10 @@ NestedInstallerFiles:
 Commands:
 - jkit
 ReleaseDate: $(date -u +%Y-%m-%d)
+# jkit.exe (a GraalVM native image) links the Visual C++ runtime: VCRUNTIME140.dll, VCRUNTIME140_1.dll
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Microsoft.VCRedist.2015+.x64
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/$repo/releases/download/v$version/$file

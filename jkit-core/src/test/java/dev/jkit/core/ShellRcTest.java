@@ -62,6 +62,8 @@ class ShellRcTest {
         assertThat(ShellRc.manualLine("alias jh='jkit hook bash'\n")).isZero(); // mentions it, doesn't load it
         assertThat(ShellRc.manualLine("jkit hook fish | source\n")).isEqualTo(1);
         assertThat(ShellRc.manualLine("source <(jkit hook zsh)\n")).isEqualTo(1);
+        assertThat(ShellRc.manualLine("eval \"`jkit hook bash`\"\n")).isEqualTo(1);
+        assertThat(ShellRc.manualLine("eval \"$(JKIT_AUTO_SWITCH=1 jkit hook bash)\"\n")).isEqualTo(1);
         assertThat(ShellRc.manualLine("[ -x \"$(command -v jkit)\" ] && eval \"$(~/bin/jkit hook bash)\"\n")).isEqualTo(1);
         assertThat(ShellRc.manualLine("jkit hook pwsh | Out-String | Invoke-Expression\n")).isEqualTo(1);
     }

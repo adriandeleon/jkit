@@ -222,6 +222,7 @@ final class Changes {
 
     /** Shortens the home folder to ~ for display. */
     static String tilde(String text) {
+        text = dev.jkit.model.Visible.of(text); // a folder name can hold a newline or an RTL override
         String userHome = System.getProperty("user.home");
         if (text == null || userHome == null || userHome.isEmpty()) {
             return text;

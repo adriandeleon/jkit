@@ -74,7 +74,7 @@ final class UpgradeCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
-        spec = Resolve.lts(ctx, spec, false);
+        spec = Resolve.lts(ctx, spec, vendorText, fx);
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
         java.io.PrintStream say = json ? ctx.err : ctx.out;
@@ -209,12 +209,12 @@ final class UpgradeCommand implements Callable<Integer> {
             }
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
-            if (target != null && target.equals(previous.home())) {
+            if (target != null && Resolve.same(target, previous.home())) {
                 ctx.os.pointLink(link, newHome);
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Path.of(shell).equals(previous.home())) {
+            if (shell != null && Resolve.same(Path.of(shell), previous.home())) {
                 changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }

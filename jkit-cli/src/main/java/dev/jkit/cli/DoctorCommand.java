@@ -362,6 +362,13 @@ final class DoctorCommand implements Callable<Integer> {
             r.fail(states.projectError(), "fix the file, or set JKIT_PROJECT_FILE= (empty) to ignore project files");
             return;
         }
+        if (states.project().isEmpty() && states.projectSkipped() != null) {
+            r.warn(tilde(states.projectSkipped()), states.projectSkipped().contains("UTF-8")
+                    ? "rename the folder, or set JKIT_PROJECT_FILE to the file's absolute path"
+                    : "jkit ignores project files in folders other users can change (as git does); fix the "
+                            + "folder's owner or permissions, or set JKIT_PROJECT_FILE to the file's absolute path");
+            return;
+        }
         if (states.project().isEmpty()) {
             r.info("no project file here or above (jkit.toml, .jkit.toml, .sdkmanrc, .tool-versions, .java-version)");
             return;
@@ -571,9 +578,9 @@ final class DoctorCommand implements Callable<Integer> {
 
     static void print(List<Finding> findings, PrintStream out) {
         for (Finding f : findings) {
-            out.println(String.format("%-6s%s", f.level().id(), f.message()));
+            out.println(String.format("%-6s%s", f.level().id(), dev.jkit.model.Visible.of(f.message())));
             if (f.fix() != null) {
-                out.println("      fix: " + f.fix());
+                out.println("      fix: " + dev.jkit.model.Visible.of(f.fix()));
             }
         }
         Map<Level, Integer> counts = counts(findings);

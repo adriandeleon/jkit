@@ -6,8 +6,11 @@ Comment: /usr/bin/jkit is compiled ahead of time with GraalVM Native Image. It
  contains jkit's own code and the Java libraries below, compiled in; the
  stanzas after "Files: *" name each library by its Maven coordinates rather
  than by a path in this package. /usr/share/doc/jkit/THIRD-PARTY-NOTICES holds
- their NOTICE files verbatim. The binary also contains the GraalVM Community
- Edition and OpenJDK runtime, licensed GPL-2 with the Classpath Exception.
+ their NOTICE files verbatim. The binary also contains parts of the GraalVM
+ Community Edition and OpenJDK runtime, licensed GPL-2 with the Classpath
+ Exception, and the third-party code the OpenJDK class library carries (Xerces,
+ Xalan, ICU, Unicode CLDR data, zlib and others): THIRD-PARTY-NOTICES has their
+ notices under "Java runtime", the full license text, and where to get the source.
 
 Files: *
 Copyright: 2026 Adrián Arturo De León Saldivar

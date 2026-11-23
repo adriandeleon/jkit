@@ -285,6 +285,12 @@ public final class JdkHttp implements Http {
             throw new IOException("interrupted", e);
         }
         try (InputStream in = response.body()) {
+            if (!Http.isSecure(response.uri())) {
+                // HttpClient only refuses https → http; a local http mirror must not hand jkit on to
+                // a plain-http host either
+                throw new JkitException("refusing a redirect from " + uri + " to " + response.uri(),
+                        "jkit only uses https (or http to this machine)");
+            }
             if (response.statusCode() / 100 != 2) {
                 throw new HttpStatusException(response.statusCode(), uri);
             }

@@ -141,9 +141,17 @@ public final class Installer {
 
     /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */
     private static void makeExecutable(Path bin) {
+        makeExecutable(bin, null);
+    }
+
+    /** Like {@link #makeExecutable(Path)}, only the file {@code only} when it isn't null. */
+    private static void makeExecutable(Path bin, String only) {
         try (var files = Files.list(bin)) {
             for (Path f : files.toList()) {
                 String n = f.getFileName().toString();
+                if (only != null && !n.equals(only)) {
+                    continue;
+                }
                 if (Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS) && !n.endsWith(".bat")
                         && !n.endsWith(".cmd") && !n.endsWith(".exe")) {
                     java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
@@ -171,6 +179,13 @@ public final class Installer {
             if (Files.isRegularFile(launcher)) {
                 if (POSIX && !name.contains(".") && !Files.isExecutable(launcher)) {
                     makeExecutable(toolHome.resolve("bin")); // a zip made without Unix modes
+                    // the JDK starts child processes through these: without +x, ProcessBuilder fails
+                    for (String helper : List.of("jspawnhelper", "jexec")) {
+                        Path file = toolHome.resolve("lib").resolve(helper);
+                        if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                            makeExecutable(file.getParent(), helper);
+                        }
+                    }
                 }
                 return;
             }

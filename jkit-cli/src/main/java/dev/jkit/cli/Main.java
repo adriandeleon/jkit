@@ -46,8 +46,29 @@ public final class Main implements Runnable {
     public static void main(String[] args) {
         // messages carry text from project files and the network: never raw escape sequences
         System.setErr(SafeOutput.wrap(System.err));
-        if (args.length == 0 || !MACHINE_STDOUT.contains(args[0])) {
+        // --json documents escape their own control characters (JsonOut); \xNN would break the JSON
+        java.util.List<String> own = java.util.Arrays.asList(args);
+        if (own.contains("--")) {
+            own = own.subList(0, own.indexOf("--"));
+        }
+        if (args.length == 0 || !MACHINE_STDOUT.contains(args[0]) && !own.contains(JsonOut.FLAG)) {
             System.setOut(SafeOutput.wrap(System.out));
+        }
+        if (!cwdExists()) {
+            // the folder was deleted under the shell: say so plainly instead of a stack trace
+            if (args.length >= 1 && args[0].equals("hook-env")) {
+                System.exit(0); // nothing to switch; the next cd runs the hook again
+            }
+            JkitException gone = new JkitException("the current folder no longer exists",
+                    "cd to another folder, then run jkit again");
+            printError(gone);
+            if (own.contains(JsonOut.FLAG)) {
+                // written by hand: Jackson's setup reads system properties, which fail without a folder
+                System.out.println("{\n  \"schemaVersion\" : " + JsonOut.SCHEMA_VERSION + ",\n  \"error\" : {\n"
+                        + "    \"message\" : \"" + gone.getMessage() + "\",\n    \"hints\" : [ \"" + gone.hints().getFirst()
+                        + "\" ],\n    \"exitCode\" : " + gone.exitCode() + "\n  }\n}");
+            }
+            System.exit(gone.exitCode());
         }
         if (args.length >= 1 && args.length <= 2 && args[0].equals("hook-env")) {
             // the cd hook runs this on every directory change: skip building the whole command line
@@ -58,12 +79,23 @@ public final class Main implements Runnable {
         System.exit(run(args));
     }
 
+    private static boolean cwdExists() {
+        try {
+            String dir = System.getProperty("user.dir");
+            return dir != null && !dir.isEmpty() && java.nio.file.Files.isDirectory(java.nio.file.Path.of(dir));
+        } catch (RuntimeException | Error e) { // a native image reads user.dir lazily and throws an Error
+            return false;
+        }
+    }
+
     static int run(String... args) {
         // only jkit's own arguments: everything after -- belongs to the command jkit exec runs
         java.util.List<String> all = java.util.Arrays.asList(args);
         java.util.List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
         boolean json = list.contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
+        // no colors: SafeOutput would print picocli's escape codes as text, and plain help reads fine
+        cli.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
             if (System.getenv("JKIT_DEBUG") != null) {
                 ex.printStackTrace();
@@ -133,9 +165,9 @@ public final class Main implements Runnable {
     }
 
     private static void printError(JkitException e) {
-        System.err.println("error: " + e.getMessage());
+        System.err.println("error: " + dev.jkit.model.Visible.of(e.getMessage()));
         for (String hint : e.hints()) {
-            System.err.println("  " + hint);
+            System.err.println("  " + dev.jkit.model.Visible.of(hint));
         }
     }
 }

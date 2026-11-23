@@ -58,6 +58,9 @@ public final class MavenSource {
      * Fetched fresh each time: a cached proxy error page would fail every install for a day.
      */
     private Checksum checksum(URI url, String file, Version v) throws IOException {
+        if (http.offline()) {
+            return null;
+        }
         boolean hasSha512 = v.compareTo(Version.parse("3.9.1")) >= 0
                 && !(v.part(0) == 4 && v.compareTo(Version.parse("4.0.0-alpha-5")) < 0);
         for (String ext : hasSha512 ? new String[] {"sha512"} : new String[] {"sha512", "sha1"}) {

@@ -62,9 +62,16 @@ one completely.
 - Below your home folder the search stops at `$HOME` (still checked, so `~/jkit.toml` can be a
   personal default). Elsewhere, such as a CI workspace, it goes up to `/`.
 - It stops at a folder that belongs to another user (other than root) or that every user can write
-  to, such as `/tmp`: someone else's `/tmp/jkit.toml` must not change your versions.
-- `JKIT_PROJECT_FILE=/path/to/jkit.toml` names the file directly; set but empty, it turns project
-  files off.
+  to, such as `/tmp`: someone else's `/tmp/jkit.toml` must not change your versions. A project
+  file that is itself world-writable, or owned by another user, is ignored the same way.
+  `jkit status`, `jkit sync` and `jkit doctor` say when they ignored one, and why. This often
+  affects WSL's `/mnt/c`, SMB shares and Docker bind mounts, where every file looks world-writable;
+  fix the mount options or permissions, or name the file with `JKIT_PROJECT_FILE`.
+- `JKIT_PROJECT_FILE=/path/to/jkit.toml` names the file directly and skips those checks (it's your
+  own choice); a relative path is looked up from each folder, so the checks still apply to it. Set
+  but empty, it turns project files off.
+- Project files over 256 KiB are refused, and `jkit pin` won't write through a `jkit.toml` that is
+  a symbolic link.
 
 ## Which version wins
 

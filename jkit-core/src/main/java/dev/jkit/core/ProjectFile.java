@@ -57,6 +57,12 @@ public final class ProjectFile {
                 throw new JkitException(OVERRIDE + " points to " + file + ", which is not a file",
                         "unset it to search for jkit.toml, or set it empty to turn project files off");
             }
+            String why = Path.of(override).isAbsolute() ? null : untrusted(file);
+            if (why != null) {
+                // a relative name is found in every folder you visit: the same rules as a search
+                throw new JkitException(OVERRIDE + " names " + file + ", but " + why,
+                        "give an absolute path to use that file anyway");
+            }
             return Optional.of(read(file));
         }
         List<Path> files = locate(start, env);
@@ -73,19 +79,66 @@ public final class ProjectFile {
         if (override != null) {
             return override.isBlank() ? List.of() : List.of(start.resolve(override).toAbsolutePath().normalize());
         }
+        return search(start, env).files();
+    }
+
+    /**
+     * Why a project file above {@code start} is being ignored, for status, sync and doctor to say so:
+     * its folder belongs to someone else or every user can write to it (common on WSL's /mnt/c, SMB
+     * shares and Docker bind mounts). Empty when nothing was skipped.
+     */
+    public static Optional<String> skipped(Path start, Map<String, String> env) {
+        if (env.get(OVERRIDE) != null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(search(start, env).skipped());
+    }
+
+    private record Search(List<Path> files, String skipped) { }
+
+    private static Search search(Path start, Map<String, String> env) {
         Path dir = start.toAbsolutePath().normalize();
         Path home = home(env);
         boolean belowHome = home != null && dir.startsWith(home);
+        String unreadable = null;
         for (; dir != null; dir = dir.getParent()) {
-            if (!trusted(dir)) {
-                return List.of(); // like git's safe.directory: someone else's folder can't steer this shell
+            if (dir.getFileName() != null && dir.getFileName().toString().indexOf('\uFFFD') >= 0) {
+                // a name that isn't UTF-8 comes back changed, so jkit can't look inside that folder
+                unreadable = unreadable != null ? unreadable : "project files in " + dir + " can't be read: "
+                        + "its name isn't valid UTF-8";
+                continue;
             }
             List<Path> found = filesIn(dir);
+            String why = found.isEmpty() ? trustProblem(dir) : untrusted(found.getFirst());
+            if (why != null) {
+                // like git's safe.directory: someone else's folder can't steer this shell
+                return new Search(List.of(), found.isEmpty() ? null
+                        : "ignoring " + found.getFirst() + ": " + why);
+            }
             if (!found.isEmpty() || (belowHome && dir.equals(home))) {
-                return found;
+                return new Search(found, found.isEmpty() ? unreadable : null);
             }
         }
-        return List.of();
+        return new Search(List.of(), unreadable);
+    }
+
+    /** Why {@code file} must not apply, or null: its folder or the file itself isn't safe. */
+    static String untrusted(Path file) {
+        String why = trustProblem(file.getParent());
+        if (why != null || !POSIX) {
+            return why;
+        }
+        try {
+            if (!Owners.mineOrRoot(file)) {
+                return "it belongs to " + Owners.owner(file);
+            }
+            if (Owners.othersWritable(file)) {
+                return "every user can write to it (chmod o-w to use it)";
+            }
+            return null;
+        } catch (IOException | RuntimeException e) {
+            return "cannot check its owner: " + e.getMessage();
+        }
     }
 
     /**
@@ -94,17 +147,23 @@ public final class ProjectFile {
      * text, in every shell that visits {@code /tmp/...}. Always true where there are no POSIX owners.
      */
     static boolean trusted(Path dir) {
+        return trustProblem(dir) == null;
+    }
+
+    private static String trustProblem(Path dir) {
         if (!POSIX) {
-            return true;
+            return null;
         }
         try {
-            String owner = Files.getOwner(dir).getName();
-            if (!owner.equals("root") && !owner.equals(System.getProperty("user.name"))) {
-                return false;
+            if (!Owners.mineOrRoot(dir)) {
+                return "the folder belongs to " + Owners.owner(dir);
             }
-            return !Files.getPosixFilePermissions(dir).contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE);
-        } catch (IOException | UnsupportedOperationException e) {
-            return false;
+            if (Owners.othersWritable(dir)) {
+                return "every user can write to the folder";
+            }
+            return null;
+        } catch (IOException | RuntimeException e) {
+            return "cannot check the folder's owner";
         }
     }
 
@@ -241,7 +300,7 @@ public final class ProjectFile {
 
     /** {@code text} read as the {@code jkit.toml} at {@code file}, which needn't exist (for checking an edit). */
     static ProjectSpec readToml(Path file, String text) {
-        TomlParseResult toml = Toml.parse(text);
+        TomlParseResult toml = parseToml(file, text);
         if (toml.hasErrors()) {
             TomlParseError error = toml.errors().getFirst();
             throw new JkitException(at(file, error.position()) + ": invalid TOML: " + error.getMessage());
@@ -465,7 +524,14 @@ public final class ProjectFile {
      * writes UTF-16), else UTF-8, else Latin-1. Never a decoding error.
      */
     public static String text(Path file) throws IOException {
-        byte[] bytes = Files.readAllBytes(file);
+        byte[] bytes;
+        try (var in = Files.newInputStream(file)) {
+            bytes = in.readNBytes(MAX_SIZE + 1);
+        }
+        if (bytes.length > MAX_SIZE) {
+            // project files are a few lines; a huge one would make every cd slow, or run out of memory
+            throw new JkitException(file + " is over " + MAX_SIZE / 1024 + " KiB, too big for a project or config file");
+        }
         if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
             return new String(bytes, 3, bytes.length - 3, java.nio.charset.StandardCharsets.UTF_8);
         }
@@ -480,6 +546,18 @@ public final class ProjectFile {
                     .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
         } catch (java.nio.charset.CharacterCodingException e) {
             return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+        }
+    }
+
+    /** The largest project or config file jkit reads. */
+    static final int MAX_SIZE = 256 * 1024;
+
+    /** TOML parsed; deep nesting ({@code a = [[[[...}) is an error, not a crash. */
+    public static TomlParseResult parseToml(Path file, String text) {
+        try {
+            return Toml.parse(text);
+        } catch (StackOverflowError e) {
+            throw new JkitException(file + ": invalid TOML: nested too deeply");
         }
     }
 

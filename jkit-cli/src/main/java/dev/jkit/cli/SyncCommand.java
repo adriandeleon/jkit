@@ -52,6 +52,12 @@ final class SyncCommand implements Callable<Integer> {
         if (states.projectError() != null) {
             throw new JkitException(states.projectError());
         }
+        if (states.project().isEmpty() && states.projectSkipped() != null) {
+            throw new JkitException(states.projectSkipped(), states.projectSkipped().contains("UTF-8")
+                    ? "rename the folder, or set JKIT_PROJECT_FILE to the file's absolute path"
+                    : "jkit ignores project files in folders other users can change; fix the folder's owner or "
+                            + "permissions, or set JKIT_PROJECT_FILE to the file's absolute path");
+        }
         if (states.project().isEmpty()) {
             throw new JkitException("no jkit.toml, .sdkmanrc, .tool-versions or .java-version here or above",
                     "create one: jkit pin jdk@<version>");
@@ -85,6 +91,8 @@ final class SyncCommand implements Callable<Integer> {
             say.println(StatusCommand.pinText(pin) + ": " + switch (step.status()) {
                 case "already-installed" -> step.label() + " (installed)";
                 case "would-install" -> "would install " + step.label();
+                case "would-refuse" -> "would not install " + step.label()
+                        + ": no published checksum (jkit sync --allow-unverified installs it anyway)";
                 default -> "installed " + step.label();
             });
         }
@@ -121,7 +129,9 @@ final class SyncCommand implements Callable<Integer> {
         Artifact artifact = InstallCommand.artifact(ctx, pin.spec(), Resolve.knownVendor(ctx, pin.spec(), vendorName),
                 pin.fx(), pre);
         if (dryRun) {
-            return new Step(pin, "would-install", artifact.label(), null);
+            // the real sync refuses a download it can't check; offline, the checksum isn't looked up
+            boolean refused = artifact.checksum() == null && !allowUnverified && !ctx.http().offline();
+            return new Step(pin, refused ? "would-refuse" : "would-install", artifact.label(), null);
         }
         Installer.Result result = InstallCommand.download(ctx, artifact, allowUnverified, "jkit sync --allow-unverified");
         report.disk();

@@ -156,7 +156,7 @@ public final class FoojaySource {
             }
             Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
             String checksumUri = Json.text(info, "checksum_uri");
-            if (checksum == null && !checksumUri.isEmpty()) {
+            if (checksum == null && !checksumUri.isEmpty() && !http.offline()) {
                 URI uri = Http.requireSecure(URI.create(checksumUri));
                 checksum = Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }

@@ -47,7 +47,7 @@ final class RemoveCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
-        spec = Resolve.lts(ctx, spec, false);
+        spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx);
         String vendorSuffix = (vendor == null ? "" : " " + vendor) + (fx ? " --fx" : "");
@@ -68,9 +68,15 @@ final class RemoveCommand implements Callable<Integer> {
                 List<String> notes = ListCommand.notes(ctx, i);
                 if (!notes.isEmpty()) {
                     List<String> hints = new ArrayList<>();
-                    if (notes.stream().anyMatch(n -> n.startsWith("global"))) {
-                        hints.add("make another version the default first: jkit use " + i.tool() + "@<version> --global");
-                        hints.add("or clear the default: jkit reset " + i.tool() + " --global");
+                    for (String note : notes) {
+                        // "global graalvm" and "graalvm in this shell" name the graalvm tool, not jdk
+                        String t = note.contains("graalvm") ? "graalvm" : i.tool().id();
+                        if (note.startsWith("global")) {
+                            hints.add("make another version the default first: jkit use " + t + "@<version> --global");
+                            hints.add("or clear the default: jkit reset " + t + " --global");
+                        } else {
+                            hints.add("stop using it in this shell: jkit reset " + t);
+                        }
                     }
                     hints.add("or remove it anyway (the link goes too): add --force");
                     throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)

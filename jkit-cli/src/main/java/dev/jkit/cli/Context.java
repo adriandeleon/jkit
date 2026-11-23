@@ -161,9 +161,23 @@ final class Context {
         return new Installer(home, http());
     }
 
+    /** A source's base URL: https, or http to this machine; a version list over plain http could be altered. */
     URI url(String variable, URI fallback) {
         String value = env.get(variable);
-        return value == null || value.isBlank() ? fallback : URI.create(value);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        URI uri;
+        try {
+            uri = URI.create(value.endsWith("/") ? value : value + "/");
+        } catch (IllegalArgumentException e) {
+            throw new dev.jkit.model.JkitException(variable + " is not a URL: " + value);
+        }
+        if (!Http.isSecure(uri)) {
+            throw new dev.jkit.model.JkitException(variable + " must be an https URL (or http to localhost), not " + value,
+                    "unset it to use the default source");
+        }
+        return uri;
     }
 
     /** Terminal width from COLUMNS, else 80. */

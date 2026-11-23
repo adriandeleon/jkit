@@ -73,6 +73,9 @@ public final class SbtSource {
 
     /** The .sha256 next to the zip; null for the early 1.3.x releases that have none. */
     private Checksum checksum(URI url, String file) throws IOException {
+        if (http.offline()) {
+            return null;
+        }
         try {
             return Checksum.parse(http.getFresh(URI.create(url + ".sha256")), file, "sha256");
         } catch (HttpStatusException e) {

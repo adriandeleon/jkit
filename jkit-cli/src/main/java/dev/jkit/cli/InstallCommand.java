@@ -1,6 +1,7 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.Installer;
+import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.sources.Artifact;
@@ -57,6 +58,10 @@ final class InstallCommand implements Callable<Integer> {
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
+        if (ctx.http().offline()) {
+            throw new dev.jkit.model.JkitException("--offline, so " + artifact.label() + " can't be downloaded",
+                    "run the command without --offline");
+        }
         if (artifact.checksum() == null) {
             if (!allowUnverified) {
                 throw new dev.jkit.model.JkitException(artifact.label() + " from " + artifact.url().getHost()
@@ -94,12 +99,16 @@ final class InstallCommand implements Callable<Integer> {
             }
             return 0;
         }
+        // only the very first build of a tool: after jkit reset --global, no default was a choice
+        boolean first = ctx.store.list(spec.tool()).stream().noneMatch(i -> spec.tool() != Tool.GRAALVM
+                || i.vendor() != null && i.vendor().isGraalVmBased());
         Installer.Result result = download(ctx, artifact, allowUnverified, "jkit install " + spec
-                + (vendorText == null ? "" : " " + vendorText) + " --allow-unverified");
+                + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "") + (pre ? " --pre" : "")
+                + " --allow-unverified");
         Changes changes = installed(ctx, result);
         // the first one of a tool becomes the default, as most people would do next anyway
         Path globalLink = ctx.home.global(spec.tool());
-        boolean madeDefault = !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
+        boolean madeDefault = first && !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
         if (madeDefault) {
             ctx.os.pointLink(globalLink, result.installed().home());
             changes.link(globalLink, result.installed().home()).globalEffect(spec.tool());

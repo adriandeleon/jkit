@@ -15,6 +15,9 @@
 
   <properties>
     <main.class>dev.jkit.cli.Main</main.class>
+    <!-- the release workflow sets 1.2.0~rc.1 for a pre-release: in RPM a "-" may not appear in
+         the version, and "~" makes the pre-release sort before 1.2.0 -->
+    <rpm.version>${project.version}</rpm.version>
   </properties>
 
   <dependencies>
@@ -266,6 +269,7 @@
                 </goals>
                 <configuration>
                   <packageName>jkit</packageName>
+                  <version>${rpm.version}</version>
                   <architecture>${rpm.arch}</architecture>
                   <summary>Installs and switches JDKs, Maven, Gradle and sbt</summary>
                   <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven, Gradle and sbt. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
@@ -283,6 +287,21 @@
                     </require>
                   </requires>
                   <entries>
+                    <!-- the package owns its own folders, so removing it removes them -->
+                    <entry>
+                      <name>/usr/share/doc/jkit</name>
+                      <directory>true</directory>
+                      <mode>0755</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
+                    <entry>
+                      <name>/usr/share/licenses/jkit</name>
+                      <directory>true</directory>
+                      <mode>0755</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
                     <entry>
                       <name>/usr/bin/jkit</name>
                       <file>${project.build.directory}/jkit</file>

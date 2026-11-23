@@ -25,6 +25,27 @@ final class ProjectShell {
      * yet). With {@code here}, always {@code cwd}'s. Refuses other formats, which jkit only reads.
      */
     static Path target(Context ctx, Path cwd, boolean here, String retry) {
+        if (cwd.toString().indexOf('\uFFFD') >= 0) {
+            throw new JkitException("this folder's path isn't valid UTF-8, so jkit can't write a project file in it",
+                    "rename the folder, or edit jkit.toml by hand");
+        }
+        Path file = targetName(ctx, cwd, here, retry);
+        if (Files.isSymbolicLink(file)) {
+            // a cloned repo's jkit.toml could point at ~/.bash_profile or jkit's config.toml
+            throw new JkitException(Changes.tilde(file.toString()) + " is a symbolic link, and jkit only writes "
+                    + "the file itself", "replace the link with a plain file, or edit the file it points to by hand");
+        }
+        return file;
+    }
+
+    /** Writes a project file without following a link put there since {@link #target} checked. */
+    static void write(Path file, String text) throws IOException {
+        Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                java.nio.file.StandardOpenOption.WRITE);
+    }
+
+    private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {
         if (here) {
             Path hidden = cwd.resolve(ProjectFile.HIDDEN_TOML);
             return !Files.isRegularFile(cwd.resolve(ProjectFile.JKIT_TOML)) && Files.isRegularFile(hidden)

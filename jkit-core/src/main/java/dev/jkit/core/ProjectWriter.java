@@ -208,7 +208,8 @@ public final class ProjectWriter {
     }
 
     private static JkitException cantEdit(Path file, Tool tool) {
-        return new JkitException("can't edit " + tool + " in " + file + " safely: its layout is more than one "
-                + "'" + tool.id() + " = …' line under [tools]", "edit the file by hand");
+        return new JkitException("can't edit " + tool + " in " + file + " safely: jkit only changes plain "
+                + "'" + tool.id() + " = …' lines under a [tools] header, and this file sets its tools another way "
+                + "(an inline table, dotted keys, or a value over several lines)", "edit the file by hand");
     }
 }

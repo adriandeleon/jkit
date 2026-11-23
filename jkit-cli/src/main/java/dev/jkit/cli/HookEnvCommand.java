@@ -35,7 +35,7 @@ final class HookEnvCommand implements Callable<Integer> {
             String name = shell != null ? shell : ctx.env.getOrDefault("JKIT_SHELL", "bash");
             ctx.out.print(run(ctx, Path.of("").toAbsolutePath(), name, ctx.err));
         } catch (Exception | Error e) {
-            System.err.println("jkit: couldn't check for a project file here: " + e.getMessage());
+            System.err.println("jkit: couldn't check for a project file here: " + dev.jkit.model.Visible.of(e.getMessage()));
         }
         return 0;
     }
@@ -59,7 +59,7 @@ final class HookEnvCommand implements Callable<Integer> {
             plan = ProjectShell.plan(ctx, cwd);
         } catch (JkitException e) {
             // a broken project file: say so once (until it changes), and leave the versions alone
-            err.println("jkit: " + e.getMessage() + "; this shell's versions are unchanged");
+            err.println("jkit: " + dev.jkit.model.Visible.of(e.getMessage()) + "; this shell's versions are unchanged");
             Map<String, String> remember = new LinkedHashMap<>();
             remember.put(ShellEnv.PROJECT, key);
             return ShellEnv.format(remember, shell);
@@ -111,13 +111,19 @@ final class HookEnvCommand implements Callable<Integer> {
     }
 
     /** The folder of the first file in a {@link ShellEnv#PROJECT} value, or null. */
-    private static String appliedDir(String applied) {
+    static String appliedDir(String applied) {
         if (applied == null || applied.isBlank()) {
             return null;
         }
-        String first = applied.split(";", 2)[0];
-        int colon = first.lastIndexOf(':');
-        Path file = Path.of(colon > 0 ? first.substring(0, colon) : first);
-        return file.getParent() == null ? null : file.getParent().toString();
+        // path:mtime;path:mtime... - a path may hold ; or :, so the first file ends at :<digits>; or the end
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?):-?\\d+(;|" + ProjectShell.MISSING
+                + "|$)").matcher(applied);
+        String first = m.find() ? m.group(1) : applied;
+        try {
+            Path file = Path.of(first);
+            return file.getParent() == null ? null : file.getParent().toString();
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
     }
 }

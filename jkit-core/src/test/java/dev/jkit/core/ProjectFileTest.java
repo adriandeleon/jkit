@@ -239,6 +239,52 @@ class ProjectFileTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void anIgnoredProjectFileIsReportedWithTheReason() throws IOException {
+        write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
+        dir("shared/repo");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThat(ProjectFile.skipped(tmp.resolve("shared/repo"), env).orElseThrow())
+                .contains("shared/jkit.toml").contains("every user can write to the folder");
+        write("home/ok/jkit.toml", "[tools]\njdk = \"21\"\n");
+        assertThat(ProjectFile.skipped(tmp.resolve("home/ok"), env)).isEmpty();
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aProjectFileEveryoneCanWriteIsIgnored() throws IOException {
+        write("home/p/jkit.toml", "[tools]\njdk = \"21\"\n");
+        Files.setPosixFilePermissions(tmp.resolve("home/p/jkit.toml"),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains("every user can write to it");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aRelativeOverrideFollowsTheSameRules() throws IOException {
+        write("shared/x.toml", "[tools]\njdk = \"21\"\n");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThatThrownBy(() -> ProjectFile.find(tmp.resolve("shared"), Map.of(ProjectFile.OVERRIDE, "x.toml")))
+                .isInstanceOf(JkitException.class).hasMessageContaining("every user can write");
+        // an absolute path is the user's own choice
+        assertThat(ProjectFile.find(tmp.resolve("shared"),
+                Map.of(ProjectFile.OVERRIDE, tmp.resolve("shared/x.toml").toString()))).isPresent();
+    }
+
+    @Test
+    void aHugeProjectFileIsAnErrorNotAHang() throws IOException {
+        write("home/big/jkit.toml", "# " + "x".repeat(300 * 1024) + "\n[tools]\njdk = \"21\"\n");
+        assertThatThrownBy(() -> find("home/big")).isInstanceOf(JkitException.class).hasMessageContaining("too big");
+    }
+
+    @Test
+    void deepNestingIsAnErrorNotACrash() throws IOException {
+        write("home/deep/jkit.toml", "a = " + "[".repeat(200_000) + "\n");
+        assertThatThrownBy(() -> find("home/deep")).isInstanceOf(JkitException.class).hasMessageContaining("invalid TOML");
+    }
+
+    @Test
     void pinsWithControlCharactersAreSkipped() throws IOException {
         write("home/p/jkit.toml", "[tools]\njdk = { version = \"21\", vendor = \"zulu\\u001b]0;x\\u0007\" }\n"
                 + "maven = \"3.9\\u001b[2J\"\ngradle = \"8.14\"\n");
