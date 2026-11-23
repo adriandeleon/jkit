@@ -437,6 +437,9 @@ jobs:
   # them from this run's files and check their syntax on every run, the manual ones included.
   packaging-check:
     needs: [build, macos-pack]
+    # explicit: a skipped macos-sign (a manual run) would otherwise skip everything after it
+    if: >-
+      !cancelled() && needs.build.result == 'success' && needs.macos-pack.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -468,7 +471,10 @@ jobs:
 
   release:
     needs: [build, macos-pack, packaging-check]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: >-
+      github.event_name == 'push' && github.ref_type == 'tag' && !cancelled()
+      && needs.build.result == 'success' && needs.macos-pack.result == 'success'
+      && needs.packaging-check.result == 'success'
     outputs:
       latest: ${{ steps.publish.outputs.latest }}
     runs-on: ubuntu-latest
