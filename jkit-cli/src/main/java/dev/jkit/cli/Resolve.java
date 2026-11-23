@@ -14,6 +14,25 @@ final class Resolve {
     private Resolve() { }
 
     /**
+     * Whether two paths name the same folder: equal as written, or the same file on disk. Windows
+     * reads a junction back with long names (runneradmin) where jkit was given short ones (RUNNER~1),
+     * so comparing the text alone says a global link points elsewhere when it doesn't.
+     */
+    static boolean same(java.nio.file.Path a, java.nio.file.Path b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize())) {
+            return true;
+        }
+        try {
+            return java.nio.file.Files.exists(a) && java.nio.file.Files.exists(b) && java.nio.file.Files.isSameFile(a, b);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
      * {@code jdk@lts} as a feature release: online, the newest GA LTS foojay lists; offline (use,
      * exec, remove, upgrade), the newest LTS release installed. Any other spec is returned as is.
      */

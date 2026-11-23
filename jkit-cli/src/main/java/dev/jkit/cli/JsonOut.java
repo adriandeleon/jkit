@@ -86,11 +86,11 @@ final class JsonOut {
                 continue;
             }
             Path link = ctx.os.readLink(ctx.home.global(t));
-            if (link != null && link.equals(i.home())) {
+            if (Resolve.same(link, i.home())) {
                 global.add(t.id());
             }
             String state = ctx.env.get(ShellEnv.stateVariable(t));
-            if (state != null && Path.of(state).equals(i.home())) {
+            if (state != null && Resolve.same(Path.of(state), i.home())) {
                 shell.add(t.id());
             }
         }
