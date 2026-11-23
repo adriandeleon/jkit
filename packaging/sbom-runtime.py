@@ -6,6 +6,11 @@ the OpenJDK class library and GraalVM's Substrate VM, and the third-party code t
 the "Java runtime" part of THIRD-PARTY-NOTICES.
 
 Usage: sbom-runtime.py <sbom.json> <graalvm home> <graalvm download url>
+       sbom-runtime.py --check-embedded <components.tsv>
+
+The second form only checks that EMBEDDED below names the versions components.tsv lists, so
+third-party-notices.sh --check (run by CI on every pull request) catches a bump that needs it updated,
+not only the release build.
 
 The versions come from the GraalVM the binary was built with, so they can't drift from the pin in
 release.yml: the JDK version from its release file, the GraalVM version from its download's
@@ -120,7 +125,28 @@ def main(path, home, url):
         f.write("\n")
     print(f"added {len(added)} runtime components to {path}")
 
+def check_embedded(table):
+    listed = {}
+    with open(table, encoding="utf-8") as f:
+        for line in f:
+            if line.strip() and not line.startswith("#"):
+                cols = line.rstrip("\n").split("\t")
+                listed[cols[0]] = cols[1]
+    stale = []
+    for purl, version in EMBEDDED:
+        ga = purl.removeprefix("pkg:maven/").replace("/", ":")
+        if listed.get(ga) != version:
+            stale.append(f"{ga} is {listed.get(ga, 'not listed')} in {table}, but EMBEDDED in {__file__} "
+                         f"is for {version}: check what it embeds now and update EMBEDDED (and the Debian "
+                         f"copyright file)")
+    if stale:
+        sys.exit("\n".join(stale))
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-embedded":
+        check_embedded(sys.argv[2])
+    elif len(sys.argv) == 4:
+        main(*sys.argv[1:])
+    else:
         sys.exit(__doc__)
-    main(*sys.argv[1:])

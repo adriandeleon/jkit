@@ -90,6 +90,16 @@ class DoctorTest {
     }
 
     @Test
+    void doctorNeverCreatesTheJkitHome() {
+        // "changes nothing": on a fresh machine it says the home doesn't exist, and leaves it so
+        Path fresh = tmp.resolve("fresh/.jkit");
+        env.put("JKIT_HOME", fresh.toString());
+        DoctorCommand.run(Context.lenient(env, System.out), project, false);
+        assertThat(fresh).doesNotExist();
+        assertThat(fresh.getParent()).satisfiesAnyOf(p -> assertThat(p).doesNotExist(), p -> assertThat(p).isEmptyDirectory());
+    }
+
+    @Test
     void healthySetupHasNoProblems() {
         List<Finding> findings = run();
         assertThat(findings).noneMatch(f -> f.level() == Level.WARN || f.level() == Level.FAIL);

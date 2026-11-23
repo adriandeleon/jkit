@@ -23,8 +23,9 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 @Command(name = "env",
-        description = {"Prints the environment for a new process here: global versions, overridden by the project file.",
-                "For CI, IDEs and scripts without the hook: eval \"$(jkit env)\". Never uses the network.",
+        description = {"Prints the environment for a new process here.",
+                "Global versions, overridden by the project file. For CI, IDEs and scripts",
+                "without the hook: eval \"$(jkit env)\". Never uses the network.",
                 "To switch the current shell to the project's versions, use jkit sync."})
 final class EnvCommand implements Callable<Integer> {
     static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh", "powershell"); // powershell: Windows PowerShell 5.1

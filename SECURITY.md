@@ -53,7 +53,7 @@ folder name. Download links from a remote source must be https (an https link ma
 a host on your network: jkit only sends it a plain GET, and checks what comes back). Version lists and checksum
 files are limited to 8 MB and two minutes (and JSON to a million tokens), downloads to 2 GB and
 three hours (and given up on when they average under 32 KB/s; a request given up on for time or
-speed isn't tried again), and an archive to 3 GB and 200,000 entries unpacked. Archives
+speed isn't tried again), and an archive to 3 GB and 50,000 entries unpacked. Archives
 are checked before they are unpacked: only ordinary files, folders, links, GNU long names and
 PAX headers are accepted (no sparse files, devices or other entry types), names stay under
 4,096 bytes, and symlink entries are read only that far. Archive entries can't escape their

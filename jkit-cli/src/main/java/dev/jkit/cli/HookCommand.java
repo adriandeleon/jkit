@@ -16,12 +16,13 @@ import picocli.CommandLine.Parameters;
 
 @Command(name = "hook", description = {"Prints the shell hook, or adds it to your shell's startup file.",
         "The hook puts the global versions on PATH and lets jkit use change this shell.",
-        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1), it also",
-        "switches to a project's versions on cd, and says what it changed.",
+        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1),",
+        "it also switches to a project's versions on cd, and says what it changed.",
         "",
         "  jkit hook --install                 add it for your login shell ($SHELL)",
         "  jkit hook --install --auto-switch   and switch on cd",
-        "  eval \"$(jkit hook bash)\"           load it by hand (zsh alike; fish: jkit hook fish | source)",
+        "  eval \"$(jkit hook bash)\"           load it by hand (zsh alike)",
+        "  jkit hook fish | source             load it by hand in fish",
         "  jkit hook --uninstall               take it out again"})
 final class HookCommand implements Callable<Integer> {
 
@@ -140,11 +141,14 @@ final class HookCommand implements Callable<Integer> {
             if (!exists) {
                 Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
             }
-            Files.writeString(file, ShellRc.add(text, shell, self, ctx.home.root()).text(), charset);
+            String written = ShellRc.add(text, shell, self, ctx.home.root(), !exists).text();
+            Files.writeString(file, written, charset);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
-            for (String line : ShellRc.block(shell, self, ctx.home.root())) {
+            // exactly the lines written, from the marker on
+            List<String> lines = written.lines().toList();
+            for (String line : lines.subList(lines.indexOf(ShellRc.START), lines.size())) {
                 ctx.out.println("    " + line);
             }
             if (Files.isSymbolicLink(file)) {
@@ -261,9 +265,10 @@ final class HookCommand implements Callable<Integer> {
             return 0;
         }
         Changes report = new Changes(ctx);
-        if (edit.text().isBlank() && !Files.isSymbolicLink(file)) {
-            // nothing but jkit's block: fish's conf.d file is jkit's own, and a ~/.bashrc that held
-            // only the block is one --install created
+        // fish's conf.d file is jkit's own; a ~/.bashrc or ~/.zshrc only when --install created it
+        // (an empty ~/.zshrc a user made keeps zsh's first-run wizard away)
+        boolean jkitsFile = shell.equals("fish") || ShellRc.createdByJkit(text);
+        if (edit.text().isBlank() && jkitsFile && !Files.isSymbolicLink(file)) {
             Files.delete(file);
             report.fileDeleted(file);
         } else {

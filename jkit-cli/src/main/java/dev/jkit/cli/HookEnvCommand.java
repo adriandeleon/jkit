@@ -78,12 +78,22 @@ final class HookEnvCommand implements Callable<Integer> {
             new Changes(ctx).env(changes).print(err);
             return ShellEnv.format(changes, shell);
         }
-        err.println("jkit: " + headline(plan, applied));
+        err.println("jkit: " + headline(plan, applied, versionsChange(ctx.env, changes)));
         Changes report = new Changes(ctx);
         report.env(changes);
         plan.notes().forEach(report::note);
         report.print(err);
         return ShellEnv.format(changes, shell);
+    }
+
+    /** Whether {@code changes} touch anything but jkit's own JKIT_* bookkeeping (a *_HOME, PATH). */
+    private static boolean versionsChange(Map<String, String> env, Map<String, String> changes) {
+        for (Map.Entry<String, String> e : changes.entrySet()) {
+            if (!e.getKey().startsWith("JKIT_") && !java.util.Objects.equals(env.get(e.getKey()), e.getValue())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasProjectState(Map<String, String> env) {
@@ -106,10 +116,16 @@ final class HookEnvCommand implements Callable<Integer> {
 
     /** {@code using ~/src/app/jkit.toml: jdk 21.0.9+10 temurin, maven 3.9.11}, or what leaving means. */
     static String headline(ProjectShell.Plan plan, String applied) {
+        return headline(plan, applied, true);
+    }
+
+    /** {@link #headline(ProjectShell.Plan, String)}; {@code versionsChange} false when only jkit's own notes do. */
+    static String headline(ProjectShell.Plan plan, String applied, boolean versionsChange) {
         if (plan.project().isEmpty()) {
             String left = appliedDir(applied);
+            // a tool chosen with jkit use stays when leaving: "back to global" would be wrong then
             return "left the project" + (left == null ? "" : " in " + Changes.tilde(left))
-                    + ": back to the global versions";
+                    + (versionsChange ? ": back to the global versions" : "; this shell's own choices stay");
         }
         String where = Changes.tilde(plan.project().get().dir().toString()) + "/" + plan.project().get().source();
         List<String> tools = new ArrayList<>();

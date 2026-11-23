@@ -233,6 +233,31 @@ class SourcesTest {
     }
 
     @Test
+    void manyBuildsWithoutADownloadAreSkippedUpToALimit() throws IOException {
+        // Oracle lists its newer 17 updates without a download link; the newest one with a link is
+        // further down the list every quarter
+        java.util.List<String> pkgs = new java.util.ArrayList<>();
+        java.util.Map<String, String> routes = new java.util.HashMap<>();
+        String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
+        for (int u = 40; u >= 1; u--) {
+            pkgs.add(pkg("o" + u, "oracle", 17, "17.0." + u, "glibc", ""));
+            routes.put("ids/o" + u, none);
+        }
+        routes.put("jdk_version=17", "{\"result\":[" + String.join(",", pkgs) + "]}");
+        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o9.tar.gz\",\"checksum\":\"\"}]}");
+        Artifact a = new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
+                .resolve(Tool.JDK, "17", Vendor.of("oracle"), Platform.LINUX_X64, false, false);
+        assertThat(a.version().raw()).isEqualTo("17.0.9"); // the 32nd build looked up
+
+        routes.put("ids/o9", none);
+        assertThatThrownBy(() -> new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
+                .resolve(Tool.JDK, "17", Vendor.of("oracle"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("nor do the next 31 builds")
+                .satisfies(e -> assertThat(((dev.jkit.model.JkitException) e).hints())
+                        .contains("an older build may have one: jkit install jdk@17.0.8 oracle"));
+    }
+
+    @Test
     void gradleTreatsOldMilestonesAsPreReleases() throws IOException {
         String all = """
                 [{"version":"8.10.2","downloadUrl":"https://example.invalid/gradle-8.10.2-bin.zip","checksum":"%s",

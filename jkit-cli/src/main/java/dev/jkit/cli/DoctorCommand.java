@@ -221,8 +221,10 @@ final class DoctorCommand implements Callable<Integer> {
             return;
         }
         List<String> problems = new ArrayList<>();
-        boolean checked = true;
-        for (Tool tool : List.of(Tool.JDK, Tool.GRAALVM)) {
+        // no cache yet: nothing to check against, and opening it would create the jkit home, which
+        // doctor never does (it changes nothing)
+        boolean checked = Files.isDirectory(r.ctx.home.index());
+        for (Tool tool : checked ? List.of(Tool.JDK, Tool.GRAALVM) : List.<Tool>of()) {
             Vendor vendor = r.ctx.config.defaultVendor(tool);
             try {
                 r.ctx.foojay().requireKnown(vendor, vendor.name(), tool == Tool.JDK

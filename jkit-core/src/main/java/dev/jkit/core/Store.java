@@ -94,15 +94,28 @@ public final class Store {
      * another jkit holds it.
      */
     public AutoCloseable lock() throws IOException {
+        return lock(home.lockFile(), "waiting for another jkit to finish (an install can take a few minutes)…");
+    }
+
+    /**
+     * Holds the link lock until closed: global links change, and install folders are moved away,
+     * one process at a time. Short-lived, so a jkit use --global doesn't wait for a download. Taken
+     * after {@link #lock()} when both are needed, never before.
+     */
+    public AutoCloseable linkLock() throws IOException {
+        return lock(home.linkLockFile(), "waiting for another jkit to finish changing links…");
+    }
+
+    private AutoCloseable lock(Path file, String waiting) throws IOException {
         home.create();
-        java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(home.lockFile(),
+        java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file,
                 java.util.Set.of(java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE),
                 dev.jkit.model.Perms.file());
         java.nio.channels.FileLock lock;
         try {
             lock = channel.tryLock();
             if (lock == null) {
-                System.err.println("waiting for another jkit to finish (an install can take a few minutes)…");
+                System.err.println(waiting);
                 lock = channel.lock();
             }
         } catch (IOException | RuntimeException e) {

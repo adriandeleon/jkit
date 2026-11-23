@@ -31,9 +31,9 @@ import picocli.CommandLine.Parameters;
                 "",
                 "Exits with the command's exit code (126: can't start it, 127: not found).",
                 "Never uses the network and installs nothing: a missing version exits 3.",
-                "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits); to stop it",
-                "from another process, send jkit SIGTERM: it passes it on, waits, and exits with the",
-                "command's code (a second SIGTERM kills the command)."})
+                "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits).",
+                "To stop it from another process, send jkit SIGTERM: it passes it on, waits,",
+                "and exits with the command's code (a second SIGTERM kills the command)."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",

@@ -149,6 +149,10 @@ class ExecTest {
                 .isInstanceOf(JkitException.class).hasMessageContaining("removed by another jkit");
         assertThat(Files.readSymbolicLink(home.resolve("global/jdk"))).isEqualTo(temurin21);
         Resolve.pointGlobal(ctx, home.resolve("global/jdk"), temurin21); // still works for one that's there
+        // and doesn't wait for an install running meanwhile, which holds the store lock for its download
+        try (AutoCloseable install = ctx.store.lock()) {
+            Resolve.pointGlobal(ctx, home.resolve("global/jdk"), temurin21);
+        }
     }
 
     @Test

@@ -27,9 +27,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
   pull_request:
-    # also the native-image metadata: the JVM tests in ci.yml don't exercise it
+    # also the native-image metadata (the JVM tests in ci.yml don't exercise it) and what the packages ship
     paths: ['pom.xml', '*/pom.xml', '.mvn/**', 'packaging/**', '.github/workflows/release.yml',
-            '**/META-INF/native-image/**']
+            '**/META-INF/native-image/**', 'jkit-cli/src/deb/**', 'LICENSE', 'THIRD-PARTY-NOTICES']
 
 permissions:
   contents: read
@@ -289,7 +289,8 @@ jobs:
       #   APPLE_API_ISSUER_ID         the issuer ID shown on the App Store Connect keys page
       # A bare binary cannot carry a stapled ticket, so Gatekeeper looks the notarization up online
       # the first time a downloaded copy runs. Without the secrets, a pre-release tag (with a hyphen)
-      # ships the linker's ad-hoc signature with a warning; a release tag fails.
+      # ships an ad-hoc signature with a warning (made here: the x86_64 linker leaves no signature at
+      # all, and macos-pack verifies one); a release tag fails.
       - name: Sign and notarize
         env:
           CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
@@ -305,6 +306,7 @@ jobs:
              || [ -z "$API_ISSUER_ID" ]; then
             case "$GITHUB_REF_NAME" in
               *-*) echo "::warning::signing secrets are not set; this pre-release ships unsigned for macOS"
+                   codesign --force --sign - "$bin"   # ad-hoc, so macos-pack's codesign --verify passes
                    exit 0 ;;
               *)   echo "::error::signing secrets are not set; a release needs a notarized macOS binary"
                    exit 1 ;;

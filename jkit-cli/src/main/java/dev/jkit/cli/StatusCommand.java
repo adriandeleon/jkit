@@ -16,7 +16,8 @@ import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 
-@Command(name = "status", description = "Shows which version of each tool is active here, and why. Never uses the network.")
+@Command(name = "status", description = {"Shows which version of each tool is active here, and why.",
+        "Never uses the network."})
 final class StatusCommand implements Callable<Integer> {
 
     @Mixin

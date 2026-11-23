@@ -132,6 +132,13 @@ class HookInstallTest {
         HookCommand.uninstall(ctx(), "bash", user);
         assertThat(rc).doesNotExist();
         assertThat(output()).contains("file   " + rc + " deleted");
+        // but not a blank startup file the user made (an empty ~/.zshrc keeps zsh's new-user wizard away)
+        Path zshrc = Files.writeString(user.resolve(".zshrc"), "\n\n");
+        HookCommand.install(ctx(), "zsh", user);
+        assertThat(Files.readString(zshrc)).doesNotContain(ShellRc.CREATED);
+        HookCommand.uninstall(ctx(), "zsh", user);
+        assertThat(zshrc).exists();
+        assertThat(Files.readString(zshrc)).doesNotContain(ShellRc.START);
         // without $SHELL, the hint repeats what was asked
         env.remove("SHELL");
         assertThatThrownBy(() -> HookCommand.loginShell(ctx(), "--uninstall"))

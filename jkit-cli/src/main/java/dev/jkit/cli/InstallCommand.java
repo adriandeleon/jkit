@@ -118,8 +118,8 @@ final class InstallCommand implements Callable<Integer> {
         Path globalLink = ctx.home.global(spec.tool());
         boolean madeDefault = false;
         if (result.fresh() && first && !noDefault) {
-            // checked and set under the store lock: another jkit may set a default or remove this meanwhile
-            try (AutoCloseable lock = ctx.store.lock()) {
+            // checked and set under the link lock: another jkit may set a default or remove this meanwhile
+            try (AutoCloseable lock = ctx.store.linkLock()) {
                 if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, java.nio.file.LinkOption.NOFOLLOW_LINKS)
                         && Files.isRegularFile(result.installed().home().resolve(dev.jkit.core.Store.MARKER),
                                 java.nio.file.LinkOption.NOFOLLOW_LINKS)) {

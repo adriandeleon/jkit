@@ -26,10 +26,10 @@ import picocli.CommandLine.Parameters;
  */
 @Command(name = "upgrade",
         description = {"Installs the newest build of each installed major version.",
-                "A global default that pointed at the old build moves to the new one. Old builds stay",
-                "(jkit remove them).",
+                "A global default that pointed at the old build moves to the new one.",
+                "Old builds stay (jkit remove them).",
                 "",
-                "  jkit upgrade --dry-run           what would change (21.0.5 → 21.0.9, maven 3.9.11 → 3.10.2)",
+                "  jkit upgrade --dry-run   what would change (21.0.5 → 21.0.9, 3.9.11 → 3.10.2)",
                 "  jkit upgrade jdk"})
 final class UpgradeCommand implements Callable<Integer> {
 
@@ -223,9 +223,9 @@ final class UpgradeCommand implements Callable<Integer> {
                 continue;
             }
             Path link = ctx.home.global(t);
-            // read and moved under the store lock: a jkit use --global in between must not be undone
+            // read and moved under the link lock: a jkit use --global in between must not be undone
             boolean moved = false;
-            try (AutoCloseable lock = ctx.store.lock()) {
+            try (AutoCloseable lock = ctx.store.linkLock()) {
                 Path target = ctx.os.readLink(link);
                 if (target != null && Resolve.same(target, previous.home())
                         && java.nio.file.Files.isRegularFile(newHome.resolve(dev.jkit.core.Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {

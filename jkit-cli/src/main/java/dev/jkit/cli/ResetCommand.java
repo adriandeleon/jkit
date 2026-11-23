@@ -10,8 +10,10 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
 @Command(name = "reset",
-        description = {"Clears a shell-level choice; the project's version (from jkit sync) or the global one applies again.",
-                "With --global, clears the global default instead: new shells get no version of that tool from jkit.",
+        description = {"Clears a choice made in this shell with jkit use.",
+                "The project's version (from jkit sync) or the global one applies again.",
+                "With --global, clears the global default instead: new shells get no version",
+                "of that tool from jkit.",
                 "",
                 "  jkit reset jdk",
                 "  jkit reset maven --global"})
@@ -81,7 +83,7 @@ final class ResetCommand implements Callable<Integer> {
             ctx.out.println("no global " + tool + " to clear");
             return 0;
         }
-        try (AutoCloseable lock = ctx.store.lock()) {
+        try (AutoCloseable lock = ctx.store.linkLock()) {
             ctx.os.removeLink(link);
         }
         report.link(link, null);

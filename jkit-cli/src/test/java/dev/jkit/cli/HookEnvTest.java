@@ -154,6 +154,9 @@ class HookEnvTest {
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", zulu17.toString()).containsEntry("JKIT_PROJECT_JDK", temurin21.toString());
         assertThat(said()).contains("this shell chose its own jdk with jkit use, which wins over jkit.toml");
+        cd(elsewhere); // leaving changes no version: the shell's own choice stays, and that is what it says
+        assertThat(env).containsEntry("JAVA_HOME", zulu17.toString());
+        assertThat(said()).contains("this shell's own choices stay").doesNotContain("back to the global versions");
     }
 
     @Test

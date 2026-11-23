@@ -15,6 +15,8 @@ import java.util.Map;
 public final class ShellRc {
     public static final String START = "# >>> jkit >>>";
     public static final String END = "# <<< jkit <<<";
+    /** The block line that says --install made the file, so --uninstall may delete it once blank. */
+    public static final String CREATED = "# jkit created this file: --uninstall deletes it if nothing else is in it";
 
     /** The new text, and whether it differs from the old. */
     public record Edit(String text, boolean changed) { }
@@ -103,6 +105,11 @@ public final class ShellRc {
 
     /** {@link #add(String, String)} with the block for the jkit at {@code self}. */
     public static Edit add(String text, String shell, String self, Path root) {
+        return add(text, shell, self, root, false);
+    }
+
+    /** {@link #add(String, String, String, Path)}; {@code created} when the file didn't exist before. */
+    public static Edit add(String text, String shell, String self, Path root, boolean created) {
         if (hasBlock(text) || manualLine(text) > 0) {
             return new Edit(text, false);
         }
@@ -114,7 +121,11 @@ public final class ShellRc {
         if (!text.isBlank()) {
             sb.append(nl);
         }
-        for (String line : block(shell, self, root)) {
+        List<String> lines = new ArrayList<>(block(shell, self, root));
+        if (created) {
+            lines.add(2, CREATED);
+        }
+        for (String line : lines) {
             sb.append(line).append(nl);
         }
         return new Edit(sb.toString(), true);
@@ -134,6 +145,21 @@ public final class ShellRc {
         }
         String nl = text.contains("\r\n") ? "\r\n" : "\n";
         return new Edit(lines.isEmpty() ? "" : String.join(nl, lines) + nl, true);
+    }
+
+    /** Whether jkit's block says --install created the file. */
+    public static boolean createdByJkit(String text) {
+        boolean inBlock = false;
+        for (String line : text.lines().toList()) {
+            if (line.equals(START)) {
+                inBlock = true;
+            } else if (line.equals(END)) {
+                inBlock = false;
+            } else if (inBlock && line.equals(CREATED)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean hasBlock(String text) {

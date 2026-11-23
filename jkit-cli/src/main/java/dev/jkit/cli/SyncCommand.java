@@ -23,7 +23,8 @@ import picocli.CommandLine.Option;
         description = {"Installs what the project file asks for, then switches this shell to it.",
                 "Reads jkit.toml (or .sdkmanrc, .tool-versions, .java-version) here or above.",
                 "A tool chosen in this shell with jkit use keeps winning until jkit reset.",
-                "Without the shell hook it only installs; then use jkit exec or eval \"$(jkit env)\"."})
+                "Without the shell hook it only installs; then use jkit exec, or",
+                "eval \"$(jkit env)\"."})
 final class SyncCommand implements Callable<Integer> {
 
     @Option(names = "--allow-unverified",

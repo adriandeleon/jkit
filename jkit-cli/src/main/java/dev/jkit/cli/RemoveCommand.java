@@ -19,7 +19,8 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "remove", description = {"Removes installed versions. Refuses anything global or chosen in this shell without --force.",
+@Command(name = "remove", description = {"Removes installed versions.",
+        "Refuses anything global or chosen in this shell without --force.",
         "Warns, but doesn't refuse, when the project file here pins it.",
         "",
         "  jkit remove jdk@17.0.12 temurin",
@@ -94,7 +95,8 @@ final class RemoveCommand implements Callable<Integer> {
         ToolStates.Result here = StatusCommand.read(ctx, Path.of("").toAbsolutePath());
         for (Installed i : matches) {
             removed.add(JsonOut.installed(ctx, i));
-            try (AutoCloseable lock = ctx.store.lock()) { // not while an install of it runs
+            // not while an install of it runs (lock), nor while a link is pointed at it (linkLock)
+            try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
                 changes.addAll(remove(ctx, i, here, json.json ? ctx.err : ctx.out).json());
             } catch (PartialFailure e) {
                 changes.addAll(e.changes()); // this one's folder is gone, though a link step failed
