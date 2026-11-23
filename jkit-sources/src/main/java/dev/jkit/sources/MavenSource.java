@@ -68,7 +68,7 @@ public final class MavenSource {
                 && !(v.part(0) == 4 && v.compareTo(Version.parse("4.0.0-alpha-5")) < 0);
         for (String ext : hasSha512 ? new String[] {"sha512"} : new String[] {"sha512", "sha1"}) {
             try {
-                Checksum c = Checksum.parse(http.getFresh(URI.create(url + "." + ext)), file, ext);
+                Checksum c = Checksum.parseStrict(http.getFresh(URI.create(url + "." + ext)), file, ext);
                 if (c != null) {
                     return c;
                 }

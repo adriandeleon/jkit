@@ -153,7 +153,9 @@ final class Resolve {
         if (vendor != null) {
             TreeSet<String> others = new TreeSet<>();
             for (Installed i : ctx.store.find(spec.tool(), spec.version(), null)) {
-                others.add(i.vendor().name());
+                if (i.fx() == fx || !fx) { // with --fx, only vendors that have an fx build
+                    others.add(i.vendor().name());
+                }
             }
             for (String other : others) {
                 hints.add((command.equals("remove") ? "installed:           " : "or use installed:    ") + "jkit "

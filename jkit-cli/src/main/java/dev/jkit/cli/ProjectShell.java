@@ -77,6 +77,13 @@ final class ProjectShell {
         if (found.get().files().size() > 1 || name.equals(ProjectFile.SDKMANRC) || name.equals(ProjectFile.TOOL_VERSIONS)
                 || name.equals(ProjectFile.JAVA_VERSION)) {
             String files = found.get().source();
+            String override = ctx.env.get(ProjectFile.OVERRIDE);
+            if (override != null && !override.isBlank()) {
+                // the override wins over any jkit.toml, so --here wouldn't change what applies
+                throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                        + ", which jkit reads but doesn't write",
+                        "point " + ProjectFile.OVERRIDE + " at a jkit.toml, or unset it and run: " + retry + " --here");
+            }
             throw new JkitException("the project file here is " + Changes.tilde(found.get().dir().toString())
                     + "/" + files + ", which jkit reads but doesn't write",
                     "create a jkit.toml in this folder instead: " + retry + " --here"

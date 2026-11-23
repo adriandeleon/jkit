@@ -85,7 +85,11 @@ final class ExecCommand implements Callable<Integer> {
         List<Choice> out = new ArrayList<>();
         for (String word : words) {
             ToolSpec parsed = asSpec(word);
-            if (parsed != null) {
+            // "graalvm" is a tool and Oracle GraalVM's vendor name: right after a JDK without a
+            // vendor it is the vendor, as in jkit use jdk@21 graalvm (graalvm@21 names the tool)
+            boolean vendorAfterJdk = word.equals("graalvm") && !out.isEmpty() && out.getLast().vendor() == null
+                    && out.getLast().spec().tool() == Tool.JDK;
+            if (parsed != null && !vendorAfterJdk) {
                 out.add(new Choice(parsed, null));
             } else if (!out.isEmpty() && out.getLast().vendor() == null && out.getLast().spec().tool().hasVendors()) {
                 out.set(out.size() - 1, new Choice(out.getLast().spec(), word));
@@ -169,12 +173,19 @@ final class ExecCommand implements Callable<Integer> {
         boolean windows = File.separatorChar == '\\';
         // Windows: mvn.cmd before mvn, the Unix script next to it that CreateProcess can't start
         List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
-        for (String entry : path.split(File.pathSeparator)) {
-            if (entry.isEmpty()) {
+        for (String raw : path.split(File.pathSeparator)) {
+            // some installers add quoted entries ("C:\Program Files\x"), which aren't valid paths
+            Path entry = dev.jkit.core.Fs.path(raw);
+            if (entry == null) {
                 continue;
             }
             for (String suffix : suffixes) {
-                Path candidate = dir.resolve(entry).resolve(name + suffix);
+                Path candidate;
+                try {
+                    candidate = dir.resolve(entry).resolve(name + suffix);
+                } catch (java.nio.file.InvalidPathException e) {
+                    continue;
+                }
                 if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
                     return candidate.toString();
                 }

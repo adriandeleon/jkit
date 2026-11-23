@@ -95,11 +95,11 @@ public record JkitHome(Path root) {
                     if (!Owners.mineOrRoot(dir)) {
                         throw new dev.jkit.model.JkitException(dir + " belongs to " + Owners.owner(dir) + ", not to you",
                                 dir.equals(root) ? "use a JKIT_HOME of your own, e.g. ~/.jkit"
-                                        : "fix it: chown -R \"$(id -u)\" " + root);
+                                        : "fix it: chown -R \"$(id -u)\" " + dev.jkit.model.ShellQuote.quote("bash", root.toString()));
                     }
                     if (Owners.othersWritable(dir)) {
                         throw new dev.jkit.model.JkitException(dir + " is writable by every user, so anyone could put "
-                                + "programs on your PATH", "fix it: chmod o-w " + dir);
+                                + "programs on your PATH", "fix it: chmod o-w " + dev.jkit.model.ShellQuote.quote("bash", dir.toString()));
                     }
                 }
             }

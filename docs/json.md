@@ -229,7 +229,8 @@ the same lines on stderr, under a `jkit: using â€¦` or `jkit: left the project â
 
 - `kind: folder`: an install folder, the jkit home on first use, or a leftover of an interrupted
   install; `action` is `create` or `delete`.
-- `kind: file`: a cached version list or checksum under `index/`; `action` is `create` or `update`,
+- `kind: file`: a cached version list under `index/` (checksums are fetched fresh, never cached);
+  `action` is `create` or `update`,
   `value` is where it came from.
   Text mode folds these into one `cache` line. Also a project file `pin` or `unpin` wrote, with
   `value` null.

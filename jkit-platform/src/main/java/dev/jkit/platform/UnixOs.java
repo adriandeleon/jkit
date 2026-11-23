@@ -10,7 +10,7 @@ final class UnixOs implements OsServices {
 
     @Override
     public void pointLink(Path link, Path target) throws IOException {
-        Files.createDirectories(link.getParent());
+        dev.jkit.model.Perms.mkdirs(link.getParent());
         // a name of its own, so two jkit runs switching at once don't trip over each other's temp link
         Path tmp = link.resolveSibling("." + link.getFileName() + ".new-" + ProcessHandle.current().pid()
                 + "-" + Long.toHexString(System.nanoTime()));

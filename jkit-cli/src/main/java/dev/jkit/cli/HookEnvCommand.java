@@ -68,6 +68,11 @@ final class HookEnvCommand implements Callable<Integer> {
         if (recheck && !changesMoreThanTheKey(ctx.env, changes)) {
             return ShellEnv.format(changes, shell);
         }
+        if (plan.project().isEmpty() && !hasProjectState(ctx.env)) {
+            // leaving a project that never applied anything (nothing installed, or a broken file):
+            // only the bookkeeping changes, so there is nothing to announce
+            return ShellEnv.format(changes, shell);
+        }
         err.println("jkit: " + headline(plan, applied));
         Changes report = new Changes(ctx);
         report.env(changes);

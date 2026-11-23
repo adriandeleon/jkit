@@ -62,6 +62,9 @@ class ExecTest {
 
     @Test
     void aWordThatIsNoToolOrVendorIsAUsageError() {
+        // "graalvm" right after a JDK is Oracle GraalVM, the vendor, as in jkit use jdk@21 graalvm
+        assertThat(ExecCommand.choices(List.of("jdk@21", "graalvm")))
+                .containsExactly(new ExecCommand.Choice(dev.jkit.model.ToolSpec.parse("jdk@21"), "graalvm"));
         assertThatThrownBy(() -> ExecCommand.choices(List.of("mvn", "test")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("vendor for maven");
         assertThatThrownBy(() -> ExecCommand.choices(List.of("./build.sh")))

@@ -94,7 +94,8 @@ public final class Store {
     public AutoCloseable lock() throws IOException {
         home.create();
         java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(home.lockFile(),
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
+                java.util.Set.of(java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE),
+                dev.jkit.model.Perms.file());
         java.nio.channels.FileLock lock;
         try {
             lock = channel.lock();
@@ -128,7 +129,11 @@ public final class Store {
         p.setProperty("fx", Boolean.toString(installed.fx()));
         p.setProperty("url", url);
         p.setProperty("verified", Boolean.toString(verified));
-        try (var out = Files.newOutputStream(dir.resolve(MARKER))) {
+        Path marker = dir.resolve(MARKER);
+        if (!Files.exists(marker)) {
+            Files.createFile(marker, dev.jkit.model.Perms.file());
+        }
+        try (var out = Files.newOutputStream(marker)) {
             p.store(out, "written by jkit");
         }
     }

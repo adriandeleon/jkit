@@ -39,6 +39,8 @@ class HttpTest {
         assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("proxy.corp:abc")).hasMessageContaining("is not a port");
         assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("socks5://proxy:1080")).hasMessageContaining("only http proxies");
         assertThat(JdkHttp.ProxySpec.redact("http://me:secret@proxy:3128")).isEqualTo("http://me:***@proxy:3128");
+        assertThat(JdkHttp.ProxySpec.redact("me:Secr3t@proxy:x")).isEqualTo("me:***@proxy:x");
+        assertThat(JdkHttp.ProxySpec.redact("http://me:a/b@c@proxy:1")).isEqualTo("http://me:***@proxy:1");
     }
 
     @Test

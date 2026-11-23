@@ -262,6 +262,27 @@ class ProjectFileTest {
 
     @Test
     @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aProjectFileLinkingOutOfItsFolderIsIgnored() throws IOException {
+        // .java-version -> /proc/self/environ would print every variable in a warning
+        Path secret = write("home/secret.txt", "TOKEN=ghp_x\n");
+        dir("home/p");
+        Files.createSymbolicLink(tmp.resolve("home/p/.java-version"), secret);
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains("link to a file outside");
+        write("home/q/real.txt", "21\n");
+        Files.createSymbolicLink(tmp.resolve("home/q/.java-version"), tmp.resolve("home/q/real.txt"));
+        assertThat(find("home/q").get(Tool.JDK).version()).isEqualTo("21");
+    }
+
+    @Test
+    void warningsQuoteAtMostAShortExcerpt() throws IOException {
+        write("home/w/.java-version", "x".repeat(500) + "\n");
+        String warning = find("home/w").warnings().getFirst();
+        assertThat(warning).hasSizeLessThan(200).contains("…");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
     void everyFileReadTogetherIsChecked() throws IOException {
         // .sdkmanrc, .tool-versions and .java-version are read together: a bad second one counts too
         write("home/p/.sdkmanrc", "java=21.0.2-tem\n");
@@ -318,7 +339,11 @@ class ProjectFileTest {
         Map<String, String> off = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "");
         assertThat(ProjectFile.find(dir("home/p"), off)).isEqualTo(Optional.empty());
 
-        Map<String, String> missing = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "nope.toml");
+        // a relative name applies only where it exists; an absolute one must exist
+        Map<String, String> relative = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "nope.toml");
+        assertThat(ProjectFile.find(dir("home/p"), relative)).isEmpty();
+        Map<String, String> missing = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE,
+                tmp.resolve("nope.toml").toString());
         assertThatThrownBy(() -> ProjectFile.find(dir("home/p"), missing)).hasMessageContaining("is not a file");
     }
 }

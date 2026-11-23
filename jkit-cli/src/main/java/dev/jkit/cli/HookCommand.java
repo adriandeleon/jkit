@@ -111,7 +111,8 @@ final class HookCommand implements Callable<Integer> {
     static int install(Context ctx, String shell, Path userHome, boolean autoSwitch) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         boolean exists = Files.exists(file);
-        String text = exists ? Files.readString(file) : "";
+        java.nio.charset.Charset charset = charsetOf(file);
+        String text = exists ? Files.readString(file, charset) : "";
         String shown = Changes.tilde(file.toString());
         int manual = ShellRc.manualLine(text);
         Changes report = new Changes(ctx);
@@ -122,7 +123,7 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("line " + manual + " of " + shown + " already loads the jkit hook; nothing changed there");
         } else {
             createParent(ctx, file, report);
-            Files.writeString(file, ShellRc.add(text, shell).text());
+            Files.writeString(file, ShellRc.add(text, shell).text(), charset);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
@@ -191,7 +192,7 @@ final class HookCommand implements Callable<Integer> {
         for (String name : List.of(".bash_profile", ".bash_login", ".profile")) {
             Path profile = userHome.resolve(name);
             if (Files.isRegularFile(profile)) {
-                if (!Files.readString(profile).contains(".bashrc")) {
+                if (!Files.readString(profile, charsetOf(profile)).contains(".bashrc")) {
                     report.note("login shells read ~/" + name + ", which doesn't load ~/.bashrc; add to it:  "
                             + "[ -f ~/.bashrc ] && . ~/.bashrc");
                 }
@@ -200,11 +201,28 @@ final class HookCommand implements Callable<Integer> {
         }
     }
 
+    /**
+     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent):
+     * read and written back in the same charset, so every byte jkit doesn't change stays as it was.
+     */
+    static java.nio.charset.Charset charsetOf(Path file) throws java.io.IOException {
+        if (!Files.isRegularFile(file)) {
+            return java.nio.charset.StandardCharsets.UTF_8;
+        }
+        try {
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file)));
+            return java.nio.charset.StandardCharsets.UTF_8;
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return java.nio.charset.StandardCharsets.ISO_8859_1;
+        }
+    }
+
     /** Takes out the block --install added, and nothing else. */
     static int uninstall(Context ctx, String shell, Path userHome) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         String shown = Changes.tilde(file.toString());
-        String text = Files.exists(file) ? Files.readString(file) : "";
+        java.nio.charset.Charset charset = charsetOf(file);
+        String text = Files.exists(file) ? Files.readString(file, charset) : "";
         ShellRc.Edit edit = ShellRc.remove(text);
         int manual = ShellRc.manualLine(edit.text());
         if (!edit.changed()) {
@@ -219,7 +237,7 @@ final class HookCommand implements Callable<Integer> {
             Files.delete(file); // the file was jkit's own
             report.fileDeleted(file);
         } else {
-            Files.writeString(file, edit.text());
+            Files.writeString(file, edit.text(), charset);
             report.file(file, false);
         }
         ctx.out.println("removed the jkit hook from " + shown);

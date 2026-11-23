@@ -14,8 +14,9 @@ public final class Visible {
             return null;
         }
         StringBuilder out = null;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
+        for (int i = 0; i < text.length(); ) {
+            int c = text.codePointAt(i);
+            int width = Character.charCount(c);
             String escaped = escape(c);
             if (escaped != null && out == null) {
                 out = new StringBuilder(text.length() + 8).append(text, 0, i);
@@ -24,24 +25,25 @@ public final class Visible {
                 if (escaped != null) {
                     out.append(escaped);
                 } else {
-                    out.append(c);
+                    out.appendCodePoint(c);
                 }
             }
+            i += width;
         }
         return out == null ? text : out.toString();
     }
 
-    private static String escape(char c) {
+    private static String escape(int c) {
         if (c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f)) {
-            return String.format("\\x%02x", (int) c);
+            return String.format("\\x%02x", c);
         }
         boolean bidi = c == 0x061c || c == 0x200e || c == 0x200f || (c >= 0x202a && c <= 0x202e)
                 || (c >= 0x2066 && c <= 0x2069);
         // zero-width and invisible characters could hide text in a name
         boolean invisible = (c >= 0x200b && c <= 0x200d) || (c >= 0x2060 && c <= 0x2064) || c == 0xfeff
-                || c == 0x00ad;
+                || c == 0x00ad || c == 0x180e || (c >= 0xe0000 && c <= 0xe007f); // and Unicode tag characters
         if (bidi || invisible || c == 0x2028 || c == 0x2029) {
-            return String.format("\\u{%04x}", (int) c);
+            return String.format("\\u{%04x}", c);
         }
         return null;
     }

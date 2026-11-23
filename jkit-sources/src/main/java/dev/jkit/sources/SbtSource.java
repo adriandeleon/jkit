@@ -77,7 +77,7 @@ public final class SbtSource {
             return null;
         }
         try {
-            return Checksum.parse(http.getFresh(URI.create(url + ".sha256")), file, "sha256");
+            return Checksum.parseStrict(http.getFresh(URI.create(url + ".sha256")), file, "sha256");
         } catch (HttpStatusException e) {
             if (e.status() == 404) {
                 return null;

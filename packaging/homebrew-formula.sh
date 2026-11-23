@@ -33,14 +33,20 @@ class Jkit < Formula
   homepage "https://jkit-project.dev"
   version "$version"
   # jkit's own code is MIT; the binary also carries the libraries and Java runtime parts listed
-  # in THIRD-PARTY-NOTICES
+  # in THIRD-PARTY-NOTICES (the main licenses; the notices file has every one)
   license all_of: [
     "MIT",
     "Apache-2.0",
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
     { "GPL-2.0-only" => { with: "Classpath-exception-2.0" } },
   ]
+  # the binary links the system zlib (libz.so.1) on Linux
+  uses_from_macos "zlib"
 
   on_macos do
     depends_on macos: :sequoia

@@ -103,8 +103,13 @@ final class InstallCommand implements Callable<Integer> {
             return 0;
         }
         // only the very first build of a tool: after jkit reset --global, no default was a choice
-        boolean first = ctx.store.list(spec.tool()).stream().noneMatch(i -> spec.tool() != Tool.GRAALVM
-                || i.vendor() != null && i.vendor().isGraalVmBased());
+        // GraalVM builds count only for graalvm; for jdk, a GraalVM installed with jkit install graalvm
+        // doesn't make a plain JDK "not the first"
+        boolean installingGraal = artifact.vendor() != null && artifact.vendor().isGraalVmBased();
+        boolean first = ctx.store.list(spec.tool()).stream().noneMatch(i -> {
+            boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
+            return spec.tool() == Tool.GRAALVM ? graal : installingGraal || !graal;
+        });
         Installer.Result result = download(ctx, artifact, allowUnverified, "jkit install " + spec
                 + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "") + (pre ? " --pre" : "")
                 + " --allow-unverified");

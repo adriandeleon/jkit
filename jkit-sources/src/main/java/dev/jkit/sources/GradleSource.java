@@ -38,14 +38,14 @@ public final class GradleSource {
         String file = url.substring(url.lastIndexOf('/') + 1);
         Checksum checksum = Checksum.of(r.checksum(), "sha256");
         if (checksum == null && !r.checksumUrl().isEmpty() && !http.offline()) {
-            checksum = Checksum.parse(http.getFresh(Http.requireSecure(URI.create(r.checksumUrl()))), file, "sha256");
+            checksum = Checksum.parseStrict(http.getFresh(Http.sent(r.checksumUrl(), "a Gradle checksum")), file, "sha256");
         }
-        return new Artifact(Tool.GRADLE, r.version(), null, Http.requireSecure(URI.create(url)), file, "zip",
+        return new Artifact(Tool.GRADLE, r.version(), null, Http.sent(url, "a Gradle download"), file, "zip",
                 checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
     }
 
     private List<Release> releases(boolean pre) throws IOException {
-        JsonNode root = Json.parse(http.get(base.resolve("versions/all")));
+        JsonNode root = Json.fetch(http, base.resolve("versions/all"));
         List<Release> out = new ArrayList<>();
         for (JsonNode n : root) {
             if (n.path("snapshot").asBoolean() || n.path("nightly").asBoolean()

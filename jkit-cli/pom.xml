@@ -307,18 +307,12 @@
                   <summary>Installs and switches JDKs, Maven, Gradle and sbt</summary>
                   <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven, Gradle and sbt. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
                   <!-- jkit's own code, then what is compiled in (THIRD-PARTY-NOTICES) -->
-                  <license>MIT AND Apache-2.0 AND BSD-3-Clause AND BSL-1.0 AND GPL-2.0-only WITH Classpath-exception-2.0</license>
+                  <license>MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MPL-2.0 AND Unicode-3.0 AND Zlib AND GPL-2.0-only WITH Classpath-exception-2.0</license>
                   <group>Development/Tools</group>
                   <vendor>Adrian De Leon</vendor>
                   <packager>${package.maintainer}</packager>
                   <attach>false</attach>
                   <requires>
-                    <!-- what rpmbuild adds for a "~" in the version (pre-releases): rpm 4.10 or newer -->
-                    <require>
-                      <name>rpmlib(TildeInVersions)</name>
-                      <version>4.10.0-1</version>
-                      <lessOrEqual/>
-                    </require>
                     <require>
                       <name>libc.so.6(GLIBC_2.34)(64bit)</name>
                     </require>

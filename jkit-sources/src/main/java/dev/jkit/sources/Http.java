@@ -25,6 +25,21 @@ public interface Http {
         return false;
     }
 
+    /** Forgets a cached answer that turned out to be unusable. */
+    default void evict(URI uri) {
+    }
+
+    /** An address a source sent: a JkitException, not a crash, when it isn't a usable https URL. */
+    static URI sent(String text, String what) {
+        URI uri;
+        try {
+            uri = URI.create(text.strip());
+        } catch (IllegalArgumentException e) {
+            throw new dev.jkit.model.JkitException("the source sent an invalid address for " + what);
+        }
+        return requireSecure(uri);
+    }
+
     /**
      * Downloads and checksums must come over https: a checksum fetched over plain http proves
      * nothing. Loopback hosts are allowed for local mirrors and tests.
@@ -39,7 +54,10 @@ public interface Http {
 
     /** https, or plain http to this machine (a local mirror, tests). */
     static boolean isSecure(URI uri) {
-        String host = uri.getHost() == null ? "" : uri.getHost();
+        if (uri.getHost() == null || uri.getHost().isEmpty()) {
+            return false;
+        }
+        String host = uri.getHost();
         boolean loopback = host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1");
         return "https".equalsIgnoreCase(uri.getScheme()) || loopback && "http".equalsIgnoreCase(uri.getScheme());
     }

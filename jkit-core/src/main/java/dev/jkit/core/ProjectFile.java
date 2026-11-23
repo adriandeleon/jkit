@@ -53,6 +53,9 @@ public final class ProjectFile {
                 return Optional.empty();
             }
             Path file = start.resolve(override).toAbsolutePath().normalize();
+            if (!Path.of(override).isAbsolute() && !Files.exists(file)) {
+                return Optional.empty(); // a relative name (ci/jkit.toml) applies only where it exists
+            }
             if (!Files.isRegularFile(file)) {
                 throw new JkitException(OVERRIDE + " points to " + file + ", which is not a file",
                         "unset it to search for jkit.toml, or set it empty to turn project files off");
@@ -77,7 +80,11 @@ public final class ProjectFile {
     public static List<Path> locate(Path start, Map<String, String> env) {
         String override = env.get(OVERRIDE);
         if (override != null) {
-            return override.isBlank() ? List.of() : List.of(start.resolve(override).toAbsolutePath().normalize());
+            if (override.isBlank()) {
+                return List.of();
+            }
+            Path file = start.resolve(override).toAbsolutePath().normalize();
+            return Path.of(override).isAbsolute() || Files.exists(file) ? List.of(file) : List.of();
         }
         return search(start, env).files();
     }
@@ -132,8 +139,23 @@ public final class ProjectFile {
     /** Why {@code file} must not apply, or null: its folder or the file itself isn't safe. */
     static String untrusted(Path file) {
         String why = trustProblem(file.getParent());
-        if (why != null || !POSIX) {
+        if (why != null) {
             return why;
+        }
+        if (Files.isSymbolicLink(file)) {
+            // a link may only point at a file in the same folder or below: not at /proc/self/environ,
+            // ~/.ssh/id_rsa or anything else the warnings would then quote
+            try {
+                Path real = file.toRealPath();
+                if (!real.startsWith(file.getParent().toRealPath()) || !Files.isRegularFile(real)) {
+                    return "it is a link to a file outside its folder";
+                }
+            } catch (IOException | RuntimeException e) {
+                return "it is a link jkit can't follow";
+            }
+        }
+        if (!POSIX) {
+            return null;
         }
         try {
             if (!Owners.mineOrRoot(file)) {
@@ -317,7 +339,7 @@ public final class ProjectFile {
         Map<Tool, String> keyFor = new EnumMap<>(Tool.class);
         for (String key : toml.keySet()) {
             if (!key.equals("tools")) {
-                warnings.add(at(file, toml.inputPositionOf(List.of(key))) + ": unknown key '" + key + "', skipped");
+                warnings.add(at(file, toml.inputPositionOf(List.of(key))) + ": unknown key '" + shown(key) + "', skipped");
             }
         }
         if (toml.contains("tools") && !toml.isTable("tools")) {
@@ -330,11 +352,11 @@ public final class ProjectFile {
                 try {
                     tool = Tool.parse(key);
                 } catch (JkitException e) {
-                    warnings.add(where + ": unknown tool '" + key + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
+                    warnings.add(where + ": unknown tool '" + shown(key) + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
                     continue;
                 }
                 if (keyFor.containsKey(tool)) {
-                    throw new JkitException(where + ": '" + key + "' and '" + keyFor.get(tool) + "' both set " + tool,
+                    throw new JkitException(where + ": '" + shown(key) + "' and '" + shown(keyFor.get(tool)) + "' both set " + tool,
                             "keep one of them");
                 }
                 keyFor.put(tool, key);
@@ -353,7 +375,7 @@ public final class ProjectFile {
             return pinned(tool, key, text, null, false, where, warnings);
         }
         if (!(value instanceof TomlTable table)) {
-            warnings.add(where + ": " + key + " should be a version string or a table, skipped");
+            warnings.add(where + ": " + shown(key) + " should be a version string or a table, skipped");
             return null;
         }
         String version = null;
@@ -364,26 +386,26 @@ public final class ProjectFile {
             switch (field) {
                 case "version" -> {
                     if (!(v instanceof String s)) {
-                        warnings.add(where + ": " + key + ".version should be a string, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".version should be a string, skipped " + shown(key));
                         return null;
                     }
                     version = s;
                 }
                 case "vendor" -> {
                     if (!(v instanceof String s)) {
-                        warnings.add(where + ": " + key + ".vendor should be a string, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".vendor should be a string, skipped " + shown(key));
                         return null;
                     }
                     vendor = s;
                 }
                 case "fx" -> {
                     if (!(v instanceof Boolean b)) {
-                        warnings.add(where + ": " + key + ".fx should be true or false, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".fx should be true or false, skipped " + shown(key));
                         return null;
                     }
                     fx = b;
                 }
-                default -> warnings.add(where + ": unknown field '" + field + "' in " + key + ", ignored");
+                default -> warnings.add(where + ": unknown field '" + shown(field) + "' in " + shown(key) + ", ignored");
             }
         }
         return pinned(tool, key, version, vendor, fx, where, warnings);
@@ -396,7 +418,7 @@ public final class ProjectFile {
             version = null;
         }
         if (version != null && !Version.looksLikeVersion(version)) {
-            warnings.add(where + ": " + key + " = '" + versionText + "' is not a version, skipped");
+            warnings.add(where + ": " + shown(key) + " = '" + shown(versionText) + "' is not a version, skipped");
             return null;
         }
         Vendor vendor = null;
@@ -447,11 +469,11 @@ public final class ProjectFile {
             try {
                 tools.put(tool, SdkmanIds.parse(tool, id));
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + e.getMessage() + ", skipped");
+                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
-            warnings.add(file + ": jkit doesn't manage " + String.join(", ", unmanaged) + ", skipped");
+            warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
         return new ProjectSpec(List.of(file), tools, warnings);
     }
@@ -482,11 +504,11 @@ public final class ProjectFile {
             try {
                 tools.put(tool, ToolVersionsIds.parse(tool, words[1]));
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + e.getMessage() + ", skipped");
+                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
-            warnings.add(file + ": jkit doesn't manage " + String.join(", ", unmanaged) + ", skipped");
+            warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
         return new ProjectSpec(List.of(file), tools, warnings);
     }
@@ -502,7 +524,7 @@ public final class ProjectFile {
             }
             String version = legacyJavaVersion(text);
             if (!Version.looksLikeVersion(version)) {
-                return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + text
+                return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + shown(text)
                         + "' is not a Java version (jkit reads only numbers such as 21 or 17.0.2), skipped"));
             }
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
@@ -554,6 +576,18 @@ public final class ProjectFile {
         } catch (java.nio.charset.CharacterCodingException e) {
             return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
         }
+    }
+
+    /**
+     * Text from a project file as a warning shows it: at most 40 characters, escaped. A file can be
+     * a link to anything readable, and its content must not end up whole in a CI log.
+     */
+    static String shown(String text) {
+        if (text == null) {
+            return "";
+        }
+        String t = text.length() > 40 ? text.substring(0, 40) + "…" : text;
+        return dev.jkit.model.Visible.of(t);
     }
 
     /** The largest project or config file jkit reads. */

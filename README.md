@@ -73,9 +73,10 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   `~/.jkit/global/jdk` and it follows `jkit use … --global`.
 - `jkit use` without `--global` changes only the current shell, through the hook.
 - Every change jkit makes is printed: folders, links, cache files, and each variable it sets.
-- Downloads come over https only and are checked against the sha256/sha512 checksum their source
-  publishes; a download with no checksum is refused unless you pass `--allow-unverified`. No vendor
-  signatures are checked yet. See [SECURITY.md](SECURITY.md).
+- Downloads come over https only and are checked against the checksum their source publishes:
+  SHA-256 or stronger counts as verified; old Maven releases that only have SHA-1 install with a
+  warning, marked unverified; a download with no checksum is refused unless you pass
+  `--allow-unverified`. No vendor signatures are checked yet. See [SECURITY.md](SECURITY.md).
 
 | Path | What |
 | --- | --- |

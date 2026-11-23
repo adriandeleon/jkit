@@ -171,7 +171,17 @@ public final class JdkHttp implements Http {
 
         /** The setting without its password, for messages. */
         static String redact(String setting) {
-            return setting.replaceFirst("://([^:@/]*):[^@/]*@", "://$1:***@");
+            // with or without a scheme, and whatever the password holds: everything up to the last @
+            int at = setting.lastIndexOf('@');
+            if (at < 0) {
+                return setting;
+            }
+            int scheme = setting.indexOf("://");
+            int start = scheme >= 0 && scheme < at ? scheme + 3 : 0;
+            String credentials = setting.substring(start, at);
+            int colon = credentials.indexOf(':');
+            String user = colon < 0 ? credentials : credentials.substring(0, colon);
+            return setting.substring(0, start) + user + (colon < 0 ? "" : ":***") + setting.substring(at);
         }
     }
 
@@ -236,6 +246,9 @@ public final class JdkHttp implements Http {
     static final Duration TEXT_DEADLINE = Duration.ofMinutes(2);
     /** A download slower than this over a whole idle window counts as stalled. */
     static final long MIN_BYTES_PER_WINDOW = 16 * 1024;
+    /** After the first two minutes, a download averaging less than this is given up on. */
+    static final long MIN_AVERAGE_BYTES_PER_SECOND = 8 * 1024;
+    static final Duration AVERAGE_GRACE = Duration.ofMinutes(2);
     private static final int MAX_REDIRECTS = 5;
 
     @Override
@@ -376,6 +389,10 @@ public final class JdkHttp implements Http {
                 why = "no data for " + idle.toSeconds() + " s";
             } else if (text && now - started > TEXT_DEADLINE.toNanos()) {
                 why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
+            } else if (!text && now - started > AVERAGE_GRACE.toNanos()
+                    && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
+                // a server can stay above the per-window minimum and still take months for 2 GB
+                why = "under " + MIN_AVERAGE_BYTES_PER_SECOND / 1024 + " KB/s on average";
             } else if (!text && now - windowStart.get() > idle.toNanos()) {
                 if (received.get() - windowBytes.get() < MIN_BYTES_PER_WINDOW) {
                     why = "under " + MIN_BYTES_PER_WINDOW / 1024 + " KB in " + idle.toSeconds() + " s";

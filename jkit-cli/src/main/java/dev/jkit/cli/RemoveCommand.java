@@ -58,7 +58,12 @@ final class RemoveCommand implements Callable<Integer> {
                 hints.add(i.version() + (notes.isEmpty() ? "" : "   (" + String.join(", ", notes) + ")"));
             }
             hints.add("remove one:  jkit remove " + spec.tool() + "@" + matches.getLast().version() + vendorSuffix);
-            hints.add("remove all:  jkit remove " + spec + vendorSuffix + " --all");
+            // --all refuses a global or active one too, unless --force
+            boolean inUse = false;
+            for (Installed i : matches) {
+                inUse |= !ListCommand.notes(ctx, i).isEmpty();
+            }
+            hints.add("remove all:  jkit remove " + spec + vendorSuffix + " --all" + (inUse && !force ? " --force" : ""));
             throw new JkitException(spec + vendorSuffix + " matches " + matches.size() + " installed builds",
                     hints.toArray(String[]::new));
         }
@@ -111,7 +116,7 @@ final class RemoveCommand implements Callable<Integer> {
     private static Changes remove(Context ctx, Installed i, ToolStates.Result here, java.io.PrintStream say)
             throws IOException {
         Changes removedLinks = new Changes(ctx);
-        Files.createDirectories(ctx.home.tmp());
+        dev.jkit.model.Perms.mkdirs(ctx.home.tmp());
         Path trashDir = Files.createTempDirectory(ctx.home.tmp(), "remove-");
         Path trash = trashDir.resolve(i.id());
         try {
@@ -121,7 +126,7 @@ final class RemoveCommand implements Callable<Integer> {
             Files.deleteIfExists(trashDir);
             if (e instanceof java.nio.file.AccessDeniedException && !ctx.platform.isWindows()) {
                 throw new JkitException("permission denied moving " + i.home(),
-                        "check the folder's owner: ls -ld " + i.home().getParent());
+                        "check the folder's owner: ls -ld " + dev.jkit.model.ShellQuote.quote("bash", i.home().getParent().toString()));
             }
             throw new JkitException("can't remove " + i.tool() + " " + i.label() + ": " + e.getMessage(),
                     ctx.platform.isWindows()

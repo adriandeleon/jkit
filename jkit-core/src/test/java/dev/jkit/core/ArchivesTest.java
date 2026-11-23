@@ -95,6 +95,47 @@ class ArchivesTest {
                 .contains(PosixFilePermission.OWNER_EXECUTE).doesNotContain(PosixFilePermission.OTHERS_WRITE);
     }
 
+    /** A raw tar header block with a valid checksum. */
+    private static byte[] header(String name, char type, long size) {
+        byte[] h = new byte[512];
+        byte[] n = name.getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(n, 0, h, 0, n.length);
+        byte[] mode = "0000644\0".getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(mode, 0, h, 100, mode.length);
+        byte[] sz = String.format("%011o\0", size).getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(sz, 0, h, 124, sz.length);
+        h[156] = (byte) type;
+        java.util.Arrays.fill(h, 148, 156, (byte) ' ');
+        long sum = 0;
+        for (byte b : h) {
+            sum += b & 0xff;
+        }
+        byte[] ck = String.format("%06o\0 ", sum).getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(ck, 0, h, 148, ck.length);
+        return h;
+    }
+
+    @Test
+    void aHugeLongNameHeaderIsRefusedBeforeItIsRead() throws IOException {
+        // a GNU long-name header claiming 1 GiB in a tiny file: commons-compress would allocate it
+        Path archive = tmp.resolve("longname.tar.gz");
+        try (OutputStream out = new GzipCompressorOutputStream(Files.newOutputStream(archive))) {
+            out.write(header("././@LongLink", 'L', 1L << 30));
+            out.write(new byte[4096]);
+        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("claims");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // symlinks
+    void aMacHomeThatIsALinkIsRefused() throws IOException {
+        Path out = Files.createDirectories(tmp.resolve("out/jdk-21/Contents"));
+        Files.createSymbolicLink(out.resolve("Home"), Path.of(".."));
+        assertThatThrownBy(() -> Installer.locateHome(tmp.resolve("out")))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symbolic link");
+    }
+
     @Test
     void anArchiveWithTooManyEntriesIsRefused() throws IOException {
         Path archive = tmp.resolve("many.zip");

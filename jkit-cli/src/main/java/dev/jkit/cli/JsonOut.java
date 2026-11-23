@@ -47,7 +47,11 @@ final class JsonOut {
 
         @Override
         public com.fasterxml.jackson.core.SerializableString getEscapeSequence(int ch) {
-            return ch >= 0x80 && ch <= 0x9f
+            // also the bidirectional overrides and invisible characters Visible escapes in text output
+            boolean hidden = ch == 0x061c || ch == 0x200e || ch == 0x200f || (ch >= 0x202a && ch <= 0x202e)
+                    || (ch >= 0x2066 && ch <= 0x2069) || (ch >= 0x200b && ch <= 0x200d) || (ch >= 0x2060 && ch <= 0x2064)
+                    || ch == 0xfeff || ch == 0x00ad || ch == 0x2028 || ch == 0x2029 || ch == 0x180e;
+            return ch >= 0x80 && ch <= 0x9f || hidden
                     ? new com.fasterxml.jackson.core.io.SerializedString(String.format("\\u%04x", ch))
                     : null;
         }

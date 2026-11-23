@@ -131,6 +131,22 @@ final class DoctorCommand implements Callable<Integer> {
         }
     }
 
+    private static final boolean WINDOWS = File.separatorChar == '\\';
+
+    /** A path as one shell word in a fix command: ~/... when that is safe, else quoted. */
+    static String arg(Path path) {
+        String shown = tilde(path);
+        if (shown.matches("[A-Za-z0-9_./~+:\\\\-]+")) {
+            return shown;
+        }
+        return dev.jkit.model.ShellQuote.quote(WINDOWS ? "pwsh" : "bash", path.toString());
+    }
+
+    /** rm -rf, or PowerShell's Remove-Item on Windows. */
+    static String removeAll(String target) {
+        return (WINDOWS ? "Remove-Item -Recurse -Force " : "rm -rf ") + target;
+    }
+
     static List<Finding> run(Context ctx, Path cwd, boolean network) {
         Report r = new Report(ctx, cwd, network);
         try {
@@ -159,7 +175,7 @@ final class DoctorCommand implements Callable<Integer> {
             r.info(tilde(root) + " doesn't exist yet; the first install creates it");
         } else if (!Files.isWritable(root)) {
             r.fail("can't write to " + tilde(root) + ", so installs and jkit use --global will fail",
-                    "check its owner and permissions: ls -ld " + tilde(root));
+                    "check its owner and permissions: " + (WINDOWS ? "Get-Acl " : "ls -ld ") + arg(root));
         }
     }
 
@@ -242,9 +258,9 @@ final class DoctorCommand implements Callable<Integer> {
                 List<Installed> installed = r.ctx.store.list(s.tool());
                 String fix = installed.isEmpty()
                         ? "install one and make it global: jkit install " + s.tool() + "@<version>, then jkit use … --global;"
-                                + " or remove the link: rm " + tilde(r.ctx.home.global(s.tool()))
-                        : useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: rm "
-                                + tilde(r.ctx.home.global(s.tool()));
+                                + " or remove the link: " + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()))
+                        : useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: "
+                                + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()));
                 r.fail("global " + s.tool() + " → " + tilde(s.global()) + ", which no longer exists", fix);
             }
             if (s.shellChoice() != null && !Files.isDirectory(s.shellChoice())) {
@@ -337,7 +353,7 @@ final class DoctorCommand implements Callable<Integer> {
                             && !Files.isRegularFile(child.resolve(Store.MARKER))) {
                         any = true;
                         r.warn("unfinished install (no " + Store.MARKER + "): " + tilde(child),
-                                "remove it: rm -rf " + tilde(child));
+                                "remove it: " + removeAll(arg(child)));
                     }
                 }
             }
@@ -346,7 +362,7 @@ final class DoctorCommand implements Callable<Integer> {
         if (Files.isDirectory(tmp) && hasEntries(tmp)) {
             any = true;
             r.warn(human(size(tmp)) + " left in " + tilde(tmp) + " by interrupted downloads",
-                    "when no jkit install is running: rm -rf " + tilde(tmp) + File.separator + "*");
+                    "when no jkit install is running: " + removeAll(arg(tmp) + File.separator + "*")); // the * outside any quotes
         }
         if (!any) {
             r.ok(installs + (installs == 1 ? " install" : " installs") + ", nothing left over");

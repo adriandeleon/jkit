@@ -80,7 +80,10 @@ final class WindowsOs implements OsServices {
      * in them as text and expands {@code %} only once (in the command, not in the values).
      */
     private static void mklink(Path link, Path target) throws IOException {
-        ProcessBuilder pb = new ProcessBuilder("cmd", "/d", "/s", "/c",
+        // the full path: a bare "cmd" is looked up in the current folder first on Windows
+        String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
+        String cmd = java.nio.file.Path.of(systemRoot, "System32", "cmd.exe").toString();
+        ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/s", "/c",
                 "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
         pb.environment().put("JKIT_LINK", link.toString());
         pb.environment().put("JKIT_TARGET", target.toString());

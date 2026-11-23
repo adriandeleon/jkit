@@ -73,9 +73,37 @@ public final class Archives {
         Files.createDirectories(target);
         Path root = target.toAbsolutePath().normalize();
         switch (archiveType) {
-            case "tar.gz", "tgz" -> extractTarGz(archive, root);
-            case "zip" -> extractZip(archive, root);
+            case "tar.gz", "tgz" -> {
+                ArchiveScan.tarGz(archive, entryLimit, MAX_UNPACKED);
+                extractTarGz(archive, root);
+            }
+            case "zip" -> {
+                ArchiveScan.zip(archive, entryLimit);
+                extractZip(archive, root);
+            }
             default -> throw new IOException("unsupported archive type: " + archiveType);
+        }
+        closeToOthers(root);
+    }
+
+    /**
+     * Takes away write access for other users from everything unpacked, folders included: the
+     * archive's modes are already masked, but folders follow the umask, which may be 000.
+     */
+    private static void closeToOthers(Path root) throws IOException {
+        if (!POSIX) {
+            return;
+        }
+        try (var all = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) all::iterator) {
+                if (Files.isSymbolicLink(p)) {
+                    continue;
+                }
+                Set<PosixFilePermission> perms = Files.getPosixFilePermissions(p, LinkOption.NOFOLLOW_LINKS);
+                if (perms.remove(PosixFilePermission.OTHERS_WRITE)) {
+                    Files.setPosixFilePermissions(p, perms);
+                }
+            }
         }
     }
 
@@ -164,7 +192,11 @@ public final class Archives {
             throw unsafe("archive symlink points outside the target folder: " + entryName + " -> " + linkName);
         }
         createDirectories(target, out.getParent());
-        Files.deleteIfExists(out);
+        try {
+            Files.deleteIfExists(out);
+        } catch (java.nio.file.DirectoryNotEmptyException e) {
+            throw unsafe("a link replaces a folder already unpacked: " + entryName);
+        }
         Files.createSymbolicLink(out, link);
     }
 

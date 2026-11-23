@@ -126,7 +126,7 @@ final class StatusCommand implements Callable<Integer> {
         }
         return switch (s.wanted()) {
             case SHELL -> "this shell chose " + Changes.tilde(s.shellChoice().toString()) + " with jkit use, but "
-                    + tool.homeVariable() + " was changed since: jkit use " + tool + " again, or jkit reset " + tool;
+                    + tool.homeVariable() + " was changed since: jkit use " + tool + "@<version> to choose again, or jkit reset " + tool;
             case PROJECT -> s.pin() == null // GraalVM following the project's GraalVM JDK
                     ? tool.homeVariable() + " follows the project's GraalVM JDK, which this shell doesn't have yet: "
                             + "jkit sync"

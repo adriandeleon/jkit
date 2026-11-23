@@ -8,13 +8,17 @@ the "Java runtime" part of THIRD-PARTY-NOTICES. Usage: sbom-runtime.py <sbom.jso
 import json
 import sys
 
-GRAALVM = "25.0.5"  # keep in step with release.yml (GraalVM CE and Liberica NIK)
+# keep in step with release.yml: GraalVM CE 25.5.5.0.3 on JDK 25.0.5 (this SBOM is made on linux-x64;
+# the macOS x64 binary is built with Liberica NIK 25.0.5.0.3, the same GraalVM Community code)
+GRAALVM = "25.5.5.0.3"
+JDK = "25.0.5"
 
 RUNTIME = [
     ("org.graalvm", "graalvm-community-native-image", GRAALVM,
      "GPL-2.0-only WITH Classpath-exception-2.0", "https://github.com/oracle/graal"),
-    ("org.openjdk", "openjdk-class-library", GRAALVM,
-     "GPL-2.0-only WITH Classpath-exception-2.0", "https://github.com/openjdk/jdk25u"),
+    ("org.openjdk", "openjdk-class-library", JDK,
+     "GPL-2.0-only WITH Classpath-exception-2.0 AND Unicode-3.0 AND Zlib AND MPL-2.0 AND Apache-2.0",
+     "https://github.com/openjdk/jdk25u"),
 ]
 
 def main(path):

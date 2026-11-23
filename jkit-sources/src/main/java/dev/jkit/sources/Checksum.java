@@ -22,6 +22,19 @@ public record Checksum(String algorithm, String hash) {
      * {@code declared} (what the source says), else sha256.
      */
     public static Checksum parse(String text, String fileName, String declared) {
+        return parse(text, fileName, declared, false);
+    }
+
+    /**
+     * Like {@link #parse(String, String, String)} for a checksum file named for its algorithm
+     * ({@code .sha512}, {@code .sha256}): a BSD line naming a weaker one ({@code MD5 (file) = ...})
+     * is refused. foojay's {@code checksum_type} is only a hint, so its checksums use the lenient form.
+     */
+    public static Checksum parseStrict(String text, String fileName, String declared) {
+        return parse(text, fileName, declared, true);
+    }
+
+    private static Checksum parse(String text, String fileName, String declared, boolean strict) {
         String bsdAlgorithm = null;
         String hash = null;
         String firstHash = null;
@@ -67,6 +80,12 @@ public record Checksum(String algorithm, String hash) {
                 throw new JkitException("the checksum file doesn't list " + fileName);
             }
             hash = firstHash;
+        }
+        if (strict && bsdAlgorithm != null && declared != null && !declared.isBlank()
+                && strength(normalize(bsdAlgorithm)) < strength(normalize(declared))) {
+            // "MD5 (file) = ..." in a .sha512 file: the label must not lower what the file promises
+            throw new JkitException("the " + normalize(declared) + " checksum file for " + fileName + " holds a "
+                    + normalize(bsdAlgorithm) + " hash instead");
         }
         return of(hash, bsdAlgorithm != null ? bsdAlgorithm : declared);
     }

@@ -155,6 +155,16 @@ class PinSyncTest {
     }
 
     @Test
+    void unpinRemovesALineJkitCouldNotUse() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"abc\"\nmaven = \"3.9\"\n");
+        UnpinCommand unpin = new UnpinCommand();
+        unpin.tool = Tool.JDK;
+        assertThat(unpin.run(ctx(), project)).isZero();
+        assertThat(toml()).isEqualTo("[tools]\nmaven = \"3.9\"\n");
+        assertThat(output()).contains("unpinned jdk (a line jkit couldn't use)");
+    }
+
+    @Test
     void syncAppliesInstalledPinsAndKeepsAShellChoice() throws Exception {
         Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\nmaven=3.9\n");
         env.put("JKIT_ENV_FILE", envFile.toString());

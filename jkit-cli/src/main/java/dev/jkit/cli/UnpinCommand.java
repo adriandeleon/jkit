@@ -46,7 +46,9 @@ final class UnpinCommand implements Callable<Integer> {
         if (edit.replaced()) {
             ProjectShell.write(file, edit.text());
             report.file(file, false);
-            say.println("unpinned " + StatusCommand.pinText(previous) + " from " + name);
+            // previous is null when jkit skipped the line (a version it can't use): it still goes
+            say.println("unpinned " + (previous == null ? tool + " (a line jkit couldn't use)" : StatusCommand.pinText(previous))
+                    + " from " + name);
         } else {
             say.println(name + " doesn't pin " + tool);
         }

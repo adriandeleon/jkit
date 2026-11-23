@@ -35,6 +35,20 @@ final class Errors {
         if (ex instanceof NoSuchFileException f) {
             return new JkitException("file not found: " + f.getFile());
         }
+        if (ex instanceof java.nio.file.DirectoryNotEmptyException || ex instanceof java.nio.file.FileAlreadyExistsException
+                || ex instanceof java.nio.file.NotDirectoryException) {
+            java.nio.file.FileSystemException f = (java.nio.file.FileSystemException) ex;
+            return new JkitException("something else is in the way at " + f.getFile()
+                    + (f.getOtherFile() == null ? "" : " (or " + f.getOtherFile() + ")"),
+                    "move it aside, then run this again");
+        }
+        if (ex instanceof java.io.IOException io && !(ex instanceof java.nio.charset.CharacterCodingException)) {
+            // disk full, read-only file system, file too large, a folder where a link should be:
+            // this machine's trouble, not a jkit bug
+            String message = io.getMessage() == null ? io.getClass().getSimpleName() : io.getMessage();
+            return new JkitException("file system error: " + message,
+                    "check free space and that " + "the jkit home (JKIT_HOME) is writable, then run this again");
+        }
         String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
         return new JkitException("unexpected error: " + message,
                 "run again with JKIT_DEBUG=1 for details, and please report it: " + ISSUES);

@@ -27,7 +27,7 @@ import picocli.CommandLine.Option;
                 "For CI, IDEs and scripts without the hook: eval \"$(jkit env)\". Never uses the network.",
                 "To switch the current shell to the project's versions, use jkit sync."})
 final class EnvCommand implements Callable<Integer> {
-    static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh");
+    static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh", "powershell"); // powershell: Windows PowerShell 5.1
 
     @Option(names = "--shell", paramLabel = "<shell>", completionCandidates = Candidates.Shells.class,
             description = "Syntax: bash (default), zsh, fish or pwsh.")

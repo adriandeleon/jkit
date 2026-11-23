@@ -47,7 +47,8 @@ public final class Installer {
         }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         home.create();
-        try (FileChannel channel = FileChannel.open(home.lockFile(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        try (FileChannel channel = FileChannel.open(home.lockFile(),
+                java.util.Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), dev.jkit.model.Perms.file());
              FileLock ignored = lock(channel)) {
             if (Files.isDirectory(dest)) {
                 if (!Files.isRegularFile(dest.resolve(Store.MARKER))) {
@@ -56,7 +57,7 @@ public final class Installer {
                 }
                 return new Result(installed, false, Store.verified(dest), List.of());
             }
-            Files.createDirectories(home.tmp());
+            dev.jkit.model.Perms.mkdirs(home.tmp());
             List<Path> removed = removeLeftovers(home.tmp());
             Path work = Files.createTempDirectory(home.tmp(), "install-");
             IOException failure = null;
@@ -74,7 +75,7 @@ public final class Installer {
                 Path toolHome = locateHome(out);
                 requireExecutable(storeTool, toolHome, artifact.label());
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
-                Files.createDirectories(dest.getParent());
+                dev.jkit.model.Perms.mkdirs(dest.getParent());
                 moveIntoPlace(toolHome, dest);
                 return new Result(installed, true, verified, removed);
             } catch (IOException | RuntimeException e) {
@@ -132,12 +133,18 @@ public final class Installer {
         Path candidate = out;
         try (Stream<Path> children = Files.list(out)) {
             List<Path> list = children.toList();
-            if (list.size() == 1 && Files.isDirectory(list.getFirst())) {
+            if (list.size() == 1 && Files.isDirectory(list.getFirst(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                 candidate = list.getFirst();
             }
         }
         Path macHome = candidate.resolve("Contents").resolve("Home");
-        return Files.isDirectory(macHome) ? macHome : candidate;
+        // real folders only: a Contents/Home that is a link (to "..") would install a link
+        boolean real = Files.isDirectory(macHome, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && Files.isDirectory(macHome.getParent(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        if (!real && Files.isSymbolicLink(macHome)) {
+            throw Archives.unsafe("its Contents/Home is a symbolic link");
+        }
+        return real ? macHome : candidate;
     }
 
     private static final boolean POSIX =

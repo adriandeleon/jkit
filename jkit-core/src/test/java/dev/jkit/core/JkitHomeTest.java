@@ -99,6 +99,8 @@ class JkitHomeTest {
         Path mine = Files.createDirectory(tmp.resolve("mine"));
         assertThat(Owners.mine(mine)).isTrue();
         assertThat(Owners.mineOrRoot(Path.of("/"))).isTrue(); // root-owned
-        assertThat(Owners.myUid()).isGreaterThanOrEqualTo(0);
+        if (Files.exists(Path.of("/proc/self"))) { // Linux reads the uid; macOS compares names
+            assertThat(Owners.myUid()).isGreaterThanOrEqualTo(0);
+        }
     }
 }

@@ -70,8 +70,8 @@ public final class FoojaySource {
      *               default vendor (jdk.vendor)"
      */
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
-        JsonNode root = Json.parse(http.get(base.resolve(
-                "distributions?include_versions=false&include_synonyms=true")));
+        JsonNode root = Json.fetch(http, base.resolve(
+                "distributions?include_versions=false&include_synonyms=true"));
         Map<String, String> bySynonym = new java.util.HashMap<>();
         TreeSet<String> names = new TreeSet<>();
         for (JsonNode d : root.path("result")) {
@@ -115,8 +115,8 @@ public final class FoojaySource {
     }
 
     public List<Major> majors() throws IOException {
-        JsonNode root = Json.parse(http.get(base.resolve(
-                "major_versions?ea=false&ga=true&maintained=false&include_build=false&include_versions=false")));
+        JsonNode root = Json.fetch(http, base.resolve(
+                "major_versions?ea=false&ga=true&maintained=false&include_build=false&include_versions=false"));
         List<Major> out = new ArrayList<>();
         for (JsonNode n : root.path("result")) {
             out.add(new Major(n.path("major_version").asInt(), Json.text(n, "term_of_support"),
@@ -151,7 +151,7 @@ public final class FoojaySource {
         // the newest build that can be downloaded directly; some vendors list builds behind a form
         for (Pkg pkg : candidates) {
             // this answer carries the download link and often the checksum itself, so https too
-            JsonNode info = Json.parse(http.get(Http.requireSecure(base.resolve("ids/" + pkg.id()))))
+            JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id())))
                     .path("result").path(0);
             String url = Json.text(info, "direct_download_uri");
             if (url.isEmpty()) {
@@ -160,10 +160,10 @@ public final class FoojaySource {
             Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
             String checksumUri = Json.text(info, "checksum_uri");
             if (checksum == null && !checksumUri.isEmpty() && !http.offline()) {
-                URI uri = Http.requireSecure(URI.create(checksumUri));
+                URI uri = Http.sent(checksumUri, "a checksum");
                 checksum = Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
-            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.requireSecure(URI.create(url)), pkg.fileName(),
+            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.sent(url, "a download"), pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
                     checksum == null ? null : checksum.hash(), fx);
         }
@@ -198,7 +198,7 @@ public final class FoojaySource {
                 + "&architecture=" + platform.arch()
                 + "&archive_type=tar.gz&archive_type=zip&package_type=jdk"
                 + "&javafx_bundled=" + fx + "&" + extra;
-        JsonNode root = Json.parse(http.get(base.resolve(query)));
+        JsonNode root = Json.fetch(http, base.resolve(query));
         String preferred = platform.isWindows() ? "zip" : "tar.gz";
         // one package per vendor + version, preferring the platform's usual archive type
         Map<String, Pkg> byKey = new LinkedHashMap<>();
@@ -212,7 +212,10 @@ public final class FoojaySource {
             if (n.path("javafx_bundled").asBoolean() != fx) {
                 continue;
             }
-            if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))) {
+            if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))
+                    || !Json.text(n, "id").matches("[A-Za-z0-9_-]{1,128}")
+                    || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+-]{0,199}")
+                    || !java.util.Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
                 continue; // not text jkit can use as a folder name
             }
             Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),

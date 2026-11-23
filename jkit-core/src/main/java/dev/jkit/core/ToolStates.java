@@ -198,7 +198,9 @@ public final class ToolStates {
     }
 
     private static Path pathOrNull(String value) {
-        return Fs.path(value);
+        // a relative JAVA_HOME means a different JDK in every folder (and doctor runs its java): ignore it
+        Path path = Fs.path(value);
+        return path == null || !path.isAbsolute() ? null : path;
     }
 
     /** Same folder, following links (the global link and its target are the same install). */

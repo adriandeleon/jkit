@@ -66,6 +66,15 @@ public final class CachingHttp implements Http {
     }
 
     @Override
+    public void evict(URI uri) {
+        try {
+            Files.deleteIfExists(dir.resolve(key(uri) + ".cache"));
+        } catch (IOException ignored) {
+            // the next refresh replaces it anyway
+        }
+    }
+
+    @Override
     public boolean offline() {
         return offline;
     }
@@ -119,7 +128,7 @@ public final class CachingHttp implements Http {
                     new dev.jkit.model.JkitException("got a web page instead of data from " + uri.getHost()
                             + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again"));
         }
-        Files.createDirectories(dir);
+        dev.jkit.model.Perms.mkdirs(dir);
         boolean created = !Files.exists(file);
         Path tmp = Files.createTempFile(dir, "index-", ".tmp");
         try {

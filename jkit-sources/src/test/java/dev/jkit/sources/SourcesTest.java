@@ -193,6 +193,8 @@ class SourcesTest {
         // a .sha512 holding an md5 must not count as even a weak checksum
         assertThatThrownBy(() -> Checksum.parse("d".repeat(32) + "  b.zip\n", "b.zip", "sha512"))
                 .isInstanceOf(JkitException.class).hasMessageContaining("md5, not sha512");
+        assertThatThrownBy(() -> Checksum.parseStrict("MD5 (b.zip) = " + "d".repeat(32) + "\n", "b.zip", "sha512"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("holds a md5 hash");
         assertThatThrownBy(() -> Checksum.of("zz" + "d".repeat(62), "sha256"))
                 .isInstanceOf(JkitException.class).hasMessageContaining("isn't a hex hash");
     }

@@ -35,16 +35,8 @@ public final class Owners {
                 try {
                     myUid = (Integer) Files.getAttribute(Path.of("/proc/self"), "unix:uid");
                 } catch (IOException | RuntimeException e) {
-                    try {
-                        Path probe = Files.createTempFile("jkit-uid", null);
-                        try {
-                            myUid = (Integer) Files.getAttribute(probe, "unix:uid");
-                        } finally {
-                            Files.deleteIfExists(probe);
-                        }
-                    } catch (IOException | RuntimeException ignored) {
-                        // stays -1: compare names instead
-                    }
+                    // no /proc (macOS): compare names, which works for every user with a passwd entry.
+                    // Creating a file to read its owner would cost a write on every cd.
                 }
             }
         }
