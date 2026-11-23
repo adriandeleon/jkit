@@ -18,6 +18,8 @@
     <!-- the release workflow sets 1.2.0~rc.1 for a pre-release: in RPM a "-" may not appear in
          the version, and "~" makes the pre-release sort before 1.2.0 -->
     <rpm.version>${project.version}</rpm.version>
+    <!-- the same for the .deb: its control file, file name and changelog all use this -->
+    <deb.version>${project.version}</deb.version>
   </properties>
 
   <dependencies>
@@ -181,6 +183,21 @@
                   <outputFile>${project.build.directory}/completion/jkit</outputFile>
                 </configuration>
               </execution>
+              <execution>
+                <id>deb-changelog</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${project.basedir}/../packaging/deb-changelog.sh</executable>
+                  <arguments>
+                    <argument>${deb.version}</argument>
+                    <argument>${package.maintainer}</argument>
+                    <argument>${project.build.directory}/deb-doc/changelog.gz</argument>
+                  </arguments>
+                </configuration>
+              </execution>
             </executions>
           </plugin>
           <plugin>
@@ -195,7 +212,7 @@
                   <goal>jdeb</goal>
                 </goals>
                 <configuration>
-                  <deb>${project.build.directory}/jkit_[[version]]_${deb.arch}.deb</deb>
+                  <deb>${project.build.directory}/jkit_[[deb.version]]_${deb.arch}.deb</deb>
                   <snapshotExpand>true</snapshotExpand>
                   <controlDir>${project.basedir}/src/deb/control</controlDir>
                   <dataSet>
@@ -237,6 +254,17 @@
                       <mapper>
                         <type>perm</type>
                         <prefix>/usr/share/doc/jkit</prefix>
+                        <user>root</user>
+                        <group>root</group>
+                      </mapper>
+                    </data>
+                    <data>
+                      <src>${project.build.directory}/deb-doc/changelog.gz</src>
+                      <type>file</type>
+                      <mapper>
+                        <type>perm</type>
+                        <prefix>/usr/share/doc/jkit</prefix>
+                        <filemode>644</filemode>
                         <user>root</user>
                         <group>root</group>
                       </mapper>

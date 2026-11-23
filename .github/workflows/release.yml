@@ -115,13 +115,14 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          # RPM: no "-" in a version, and "~" sorts a pre-release before the release (1.2.0~rc.1 < 1.2.0)
-          echo "RPM_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
+          # .rpm and .deb: "~" sorts a pre-release before the release (1.2.0~rc.1 < 1.2.0), and RPM
+          # allows no "-" in a version
+          echo "PKG_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
           ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
       - name: Test, build the native binary and the packages
-        run: ./mvnw -B -P${{ matrix.profiles }} verify "-Drpm.version=$RPM_VERSION"
+        run: ./mvnw -B -P${{ matrix.profiles }} verify "-Drpm.version=$PKG_VERSION" "-Ddeb.version=$PKG_VERSION"
 
       # The notices must list exactly the libraries compiled in; CI checks this on every PR too.
       - name: Check THIRD-PARTY-NOTICES and make the SBOM
@@ -259,7 +260,7 @@ jobs:
               --format=gnu -cf - "${files[@]}" | gzip -9n > "dist/$base.tar.gz"
             (cd stage && TZ=UTC zip -q -X "../dist/$base.zip" "${files[@]}")
             cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
-            # GitHub turns "~" (jdeb's pre-release marker, jkit_1.2.0~rc.1_amd64.deb) into "." on
+            # GitHub turns "~" (the pre-release marker, jkit_1.2.0~rc.1_amd64.deb) into "." on
             # upload, and SHA256SUMS must name the files as they are published
             for f in dist/*~*; do
               if [ -e "$f" ]; then mv "$f" "${f//\~/.}"; fi

@@ -1,5 +1,5 @@
 Package: jkit
-Version: [[version]]
+Version: [[deb.version]]
 Section: devel
 Priority: optional
 Architecture: [[deb.arch]]
