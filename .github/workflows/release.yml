@@ -97,7 +97,8 @@ jobs:
           set -euo pipefail
           file="$RUNNER_TEMP/graalvm-download"
           curl -fsSL --proto '=https' -o "$file" "$GRAALVM_URL"
-          actual=$( (sha256sum "$file" 2>/dev/null || shasum -a 256 "$file") | cut -d' ' -f1)
+          # from stdin: with a Windows path, sha256sum puts a backslash in front of the hash
+          actual=$( (sha256sum < "$file" 2>/dev/null || shasum -a 256 < "$file") | cut -d' ' -f1)
           if [ "$actual" != "$GRAALVM_SHA256" ]; then
             echo "::error::$GRAALVM_URL has SHA-256 $actual, expected $GRAALVM_SHA256"
             exit 1
