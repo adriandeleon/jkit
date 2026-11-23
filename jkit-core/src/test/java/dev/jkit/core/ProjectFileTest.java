@@ -278,7 +278,8 @@ class ProjectFileTest {
     void warningsQuoteAtMostAShortExcerpt() throws IOException {
         write("home/w/.java-version", "x".repeat(500) + "\n");
         String warning = find("home/w").warnings().getFirst();
-        assertThat(warning).hasSizeLessThan(200).contains("…");
+        // the file's content is cut to 40 characters (the path in front varies by OS)
+        assertThat(warning).contains("'" + "x".repeat(40) + "…'").doesNotContain("x".repeat(41));
     }
 
     @Test
