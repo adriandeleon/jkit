@@ -201,8 +201,17 @@ jobs:
             | grep -m1 'Developer ID Application' | awk '{print $2}')
           [ -n "$identity" ] || { echo "::error::no Developer ID Application identity in the .p12"; exit 1; }
 
-          codesign --force --timestamp --options runtime --identifier dev.jkit.jkit \
-            --sign "$identity" --keychain "$keychain" "$bin"
+          # Apple's timestamp server sometimes doesn't answer ("A timestamp was expected but was
+          # not found"): try a few times before failing the release
+          for attempt in 1 2 3 4 5; do
+            if codesign --force --timestamp --options runtime --identifier dev.jkit.jkit \
+                 --sign "$identity" --keychain "$keychain" "$bin"; then
+              break
+            fi
+            [ "$attempt" = 5 ] && { echo "::error::codesign failed 5 times"; exit 1; }
+            echo "codesign failed (attempt $attempt); retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
           codesign --verify --strict --verbose=2 "$bin"
 
           # notarytool takes a zip; the ticket it records covers the binary's code signature
