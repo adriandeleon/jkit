@@ -50,7 +50,7 @@ class StatusTest {
         PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
         Context ctx = Context.forEnv(env, out);
         StatusCommand.print(ctx, StatusCommand.read(ctx, project), out);
-        return bytes.toString(StandardCharsets.UTF_8);
+        return bytes.toString(StandardCharsets.UTF_8).replace("\r\n", "\n"); // \r\n on Windows
     }
 
     private JsonNode json() throws Exception {

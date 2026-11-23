@@ -25,7 +25,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # 1. The dependency set Maven resolves must match the table.
-(cd "$root" && ./mvnw -B -q -pl jkit-cli -am dependency:list -DincludeScope=runtime \
+# compile in the same run, so jkit's own modules resolve from the reactor rather than a repository
+# (they are never installed in CI, and a set version like 0.0.0-dev.12 exists nowhere)
+(cd "$root" && ./mvnw -B -q -pl jkit-cli -am compile dependency:list -DincludeScope=runtime \
   -DexcludeGroupIds=dev.jkit -DoutputFile="$tmp/deps.txt" -DappendOutput=true) >&2
 awk -F: '/^ +[^ ]+:[^ ]+:/ { sub(/^ +/, ""); print $1 ":" $2 ":" $4 }' "$tmp/deps.txt" \
   | sort -u > "$tmp/resolved"

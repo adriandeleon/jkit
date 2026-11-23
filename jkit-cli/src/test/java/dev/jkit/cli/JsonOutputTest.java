@@ -38,7 +38,8 @@ class JsonOutputTest {
 
         assertThat(doc.path("schemaVersion").asInt()).isEqualTo(JsonOut.SCHEMA_VERSION);
         assertThat(doc.path("home").asText()).isEqualTo(home.toAbsolutePath().toString());
-        assertThat(doc.path("global").path("jdk").asText()).isEqualTo(temurin.toString());
+        // Windows reads a link back with long folder names (runneradmin, not RUNNER~1): same folder
+        assertThat(Path.of(doc.path("global").path("jdk").asText()).toRealPath()).isEqualTo(temurin.toRealPath());
         assertThat(doc.path("global").path("gradle").isNull()).isTrue();
         JsonNode installed = doc.path("installed");
         assertThat(installed).hasSize(3);
@@ -46,7 +47,8 @@ class JsonOutputTest {
         assertThat(first.path("id").asText()).isEqualTo("21.0.9+10-temurin");
         assertThat(first.path("major").asInt()).isEqualTo(21);
         assertThat(first.path("vendor").asText()).isEqualTo("temurin");
-        assertThat(first.path("home").asText()).isEqualTo(temurin.toString());
+        // the same folder; on Windows one side may come back with its long name (runneradmin, not RUNNER~1)
+        assertThat(Path.of(first.path("home").asText()).toRealPath()).isEqualTo(temurin.toRealPath());
         assertThat(first.path("global").toString()).isEqualTo("[\"jdk\"]");
         assertThat(first.path("activeInShell").toString()).isEqualTo("[\"jdk\"]");
         JsonNode legacy = installed.get(1);
@@ -69,7 +71,10 @@ class JsonOutputTest {
         assertThat(out.indexOf("schemaVersion")).isLessThan(out.indexOf("text"));
         JsonNode read = JSON.readTree(out);
         assertThat(read.path("text").asText()).isEqualTo("a \"quoted\"\nline");
-        assertThat(read.path("list").toString()).isEqualTo("[1,true,\"/x\"]");
+        // paths are written absolute: /x on Unix, D:\x (the current drive) on Windows
+        assertThat(read.path("list").get(2).asText()).isEqualTo(Path.of("/x").toAbsolutePath().toString());
+        assertThat(read.path("list").get(0).asInt()).isEqualTo(1);
+        assertThat(read.path("list").get(1).asBoolean()).isTrue();
         assertThat(read.path("none").isNull()).isTrue();
     }
 

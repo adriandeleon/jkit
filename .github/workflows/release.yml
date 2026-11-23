@@ -126,7 +126,7 @@ jobs:
         if: matrix.platform == 'linux-x64'
         run: |
           packaging/third-party-notices.sh --check
-          ./mvnw -B -q org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
+          ./mvnw -B -q compile org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
             -DoutputFormat=json -DoutputName=sbom -DprojectType=application
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' target/sbom.json
 
