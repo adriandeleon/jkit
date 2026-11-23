@@ -36,9 +36,15 @@ class HttpTest {
         assertThat(p.password()).isEqualTo("p:w");
         assertThat(JdkHttp.ProxySpec.parse("proxy.corp").address().getPort()).isEqualTo(8080);
         assertThat(JdkHttp.ProxySpec.parse("http://[::1]:3128").address().getHostString()).isEqualTo("::1");
-        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("proxy.corp:abc")).hasMessageContaining("is not a port");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("proxy.corp:abc")).hasMessageContaining("the port isn't a number");
         assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("socks5://proxy:1080")).hasMessageContaining("only http proxies");
         assertThat(JdkHttp.ProxySpec.redact("http://me:secret@proxy:3128")).isEqualTo("http://me:***@proxy:3128");
+        assertThat(JdkHttp.ProxySpec.redact("me:Secr3t@proxy:x")).isEqualTo("me:***@proxy:x");
+        assertThat(JdkHttp.ProxySpec.redact("http://me:a/b@c@proxy:1")).isEqualTo("http://me:***@proxy:1");
+        // a / in the password is part of the password, never printed as a "port"
+        JdkHttp.ProxySpec slash = JdkHttp.ProxySpec.parse("http://alice:hunter2/topsecret@proxy.example:3128");
+        assertThat(slash.password()).isEqualTo("hunter2/topsecret");
+        assertThat(slash.address().getPort()).isEqualTo(3128);
     }
 
     @Test
@@ -46,7 +52,7 @@ class HttpTest {
         JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
         assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
                 .isInstanceOf(JkitException.class)
-                .hasMessageContaining("is not a port");
+                .hasMessageContaining("the port isn't a number");
     }
 
     @Test
@@ -59,6 +65,56 @@ class HttpTest {
         assertThat(s.bypasses("mirror.example")).isTrue();
         assertThat(s.bypasses("api.foojay.io")).isFalse();
         assertThat(s.bypasses("notcorp.example")).isFalse();
+    }
+
+    @Test
+    void aMirrorOnThisMachineNeverGoesThroughTheProxy() {
+        JdkHttp.NoProxySelector s = new JdkHttp.NoProxySelector(InetSocketAddress.createUnresolved("proxy", 3128), null);
+        assertThat(s.select(URI.create("http://localhost:8080/m/")).getFirst()).isEqualTo(java.net.Proxy.NO_PROXY);
+        assertThat(s.select(URI.create("http://127.0.0.1:8080/m/")).getFirst()).isEqualTo(java.net.Proxy.NO_PROXY);
+        assertThat(s.select(URI.create("https://repo.maven.apache.org/")).getFirst()).isNotEqualTo(java.net.Proxy.NO_PROXY);
+    }
+
+    @Test
+    void eachRedirectIsCheckedBeforeItIsFollowed() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger elsewhere = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer other = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        other.createContext("/", exchange -> {
+            elsewhere.incrementAndGet();
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/plain", exchange -> {
+            // 127.0.0.2 stands in for any host that isn't this machine: plain http to it is refused
+            exchange.getResponseHeaders().add("Location", "http://127.0.0.2:" + other.getAddress().getPort() + "/x");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/ok", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/data");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/data", exchange -> {
+            byte[] body = "fine".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        other.start();
+        try {
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            assertThatThrownBy(() -> http.get(URI.create(base + "/plain")))
+                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("refusing a redirect");
+            assertThat(elsewhere.get()).isZero();
+            assertThat(http.get(URI.create(base + "/ok"))).isEqualTo("fine");
+        } finally {
+            server.stop(0);
+            other.stop(0);
+        }
     }
 
     @Test

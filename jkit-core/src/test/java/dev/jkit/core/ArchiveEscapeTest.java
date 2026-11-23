@@ -101,7 +101,7 @@ class ArchiveEscapeTest {
             hardlink(t, "jdk/copy", "jdk/s/key");
         });
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("run/out"), "tar.gz"))
-                .isInstanceOf(IOException.class);
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("unsafe");
         assertThat(tmp.resolve("run/out/jdk/copy")).doesNotExist();
     }
 

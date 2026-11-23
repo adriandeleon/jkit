@@ -47,7 +47,7 @@ public final class SbtSource {
         Matcher m = VERSION.matcher(xml);
         while (m.find()) {
             String raw = m.group(1).trim();
-            if (!PUBLISHED.matcher(raw).matches()) {
+            if (!PUBLISHED.matcher(raw).matches() || !Version.isSafeText(raw)) {
                 continue;
             }
             Version v = Version.parse(raw);
@@ -73,8 +73,11 @@ public final class SbtSource {
 
     /** The .sha256 next to the zip; null for the early 1.3.x releases that have none. */
     private Checksum checksum(URI url, String file) throws IOException {
+        if (http.offline()) {
+            return null;
+        }
         try {
-            return Checksum.parse(http.get(URI.create(url + ".sha256")), file, "sha256");
+            return Checksum.parseStrict(http.getFresh(URI.create(url + ".sha256")), file, "sha256");
         } catch (HttpStatusException e) {
             if (e.status() == 404) {
                 return null;

@@ -48,6 +48,7 @@ class ArchivesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
     void tarGzKeepsPermissionsAndSymlinks() throws IOException {
         Path out = tmp.resolve("out");
         Archives.extract(jdkTarGz(tmp, "jdk-21"), out, "tar.gz");
@@ -61,6 +62,7 @@ class ArchivesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
     void zipKeepsUnixModes() throws IOException {
         Path archive = tmp.resolve("maven.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -74,6 +76,146 @@ class ArchivesTest {
         Archives.extract(archive, out, "zip");
         assertThat(Files.getPosixFilePermissions(out.resolve("apache-maven/bin/mvn")))
                 .contains(PosixFilePermission.OWNER_EXECUTE);
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    void filesAreNeverWritableByEveryone() throws IOException {
+        Path archive = tmp.resolve("loose.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            ZipArchiveEntry e = new ZipArchiveEntry("apache-maven/bin/mvn");
+            e.setUnixMode(0100777);
+            zip.putArchiveEntry(e);
+            zip.write("#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeArchiveEntry();
+        }
+        Path out = tmp.resolve("out");
+        Archives.extract(archive, out, "zip");
+        assertThat(Files.getPosixFilePermissions(out.resolve("apache-maven/bin/mvn")))
+                .contains(PosixFilePermission.OWNER_EXECUTE).doesNotContain(PosixFilePermission.OTHERS_WRITE);
+    }
+
+    /** A raw tar header block with a valid checksum. */
+    private static byte[] header(String name, char type, long size) {
+        byte[] h = new byte[512];
+        byte[] n = name.getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(n, 0, h, 0, n.length);
+        byte[] mode = "0000644\0".getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(mode, 0, h, 100, mode.length);
+        byte[] sz = String.format("%011o\0", size).getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(sz, 0, h, 124, sz.length);
+        h[156] = (byte) type;
+        java.util.Arrays.fill(h, 148, 156, (byte) ' ');
+        long sum = 0;
+        for (byte b : h) {
+            sum += b & 0xff;
+        }
+        byte[] ck = String.format("%06o\0 ", sum).getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(ck, 0, h, 148, ck.length);
+        return h;
+    }
+
+    @Test
+    void aHugeLongNameHeaderIsRefusedBeforeItIsRead() throws IOException {
+        // a GNU long-name header claiming 1 GiB in a tiny file: commons-compress would allocate it
+        Path archive = tmp.resolve("longname.tar.gz");
+        try (OutputStream out = new GzipCompressorOutputStream(Files.newOutputStream(archive))) {
+            out.write(header("././@LongLink", 'L', 1L << 30));
+            out.write(new byte[4096]);
+        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("claims");
+    }
+
+    private Path tarOf(String name, byte[]... blocks) throws IOException {
+        Path archive = tmp.resolve(name);
+        try (OutputStream out = new GzipCompressorOutputStream(Files.newOutputStream(archive))) {
+            for (byte[] b : blocks) {
+                out.write(b);
+                if (b.length % 512 != 0) {
+                    out.write(new byte[512 - b.length % 512]);
+                }
+            }
+            out.write(new byte[1024]);
+        }
+        return archive;
+    }
+
+    private static byte[] pax(String... records) {
+        StringBuilder sb = new StringBuilder();
+        for (String r : records) {
+            int len = r.length() + 2;
+            len += String.valueOf(len + String.valueOf(len).length()).length();
+            sb.append(len).append(' ').append(r).append('\n');
+        }
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void headerTypesJkitDoesNotUnpackAreRefused() throws IOException {
+        // Solaris X headers and sparse files: commons-compress would read them, the scan won't guess
+        Path solaris = tarOf("x.tar.gz", header("h", 'X', 10), new byte[10]);
+        assertThatThrownBy(() -> Archives.extract(solaris, tmp.resolve("o1"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("type 'X'");
+        byte[] sparse = pax("GNU.sparse.major=1");
+        Path gnu = tarOf("s.tar.gz", header("h", 'x', sparse.length), sparse, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(gnu, tmp.resolve("o2"), "tar.gz"))
+                .hasMessageContaining("sparse");
+        byte[] global = pax("size=0");
+        Path g = tarOf("g.tar.gz", header("h", 'g', global.length), global, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(g, tmp.resolve("o3"), "tar.gz"))
+                .hasMessageContaining("global PAX header sets a size");
+    }
+
+    @Test
+    void theLastPaxSizeIsTheOneCounted() throws IOException {
+        // commons-compress uses the last size record: the scan must count that one, not the first
+        byte[] two = pax("size=0", "size=5000000000");
+        Path archive = tarOf("p.tar.gz", header("h", 'x', two.length), two, header("f", '0', 0));
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("o"), "tar.gz"))
+                .hasMessageContaining("more than 3 GB");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    void aZipSymlinkTargetIsNeverReadWhole() throws IOException {
+        Path archive = tmp.resolve("link.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            ZipArchiveEntry e = new ZipArchiveEntry("top/link");
+            e.setUnixMode(0120777);
+            zip.putArchiveEntry(e);
+            zip.write(new byte[10_000]);
+            zip.closeArchiveEntry();
+        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symlink entry");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // symlinks
+    void aMacHomeThatIsALinkIsRefused() throws IOException {
+        Path out = Files.createDirectories(tmp.resolve("out/jdk-21/Contents"));
+        Files.createSymbolicLink(out.resolve("Home"), Path.of(".."));
+        assertThatThrownBy(() -> Installer.locateHome(tmp.resolve("out")))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symbolic link");
+    }
+
+    @Test
+    void anArchiveWithTooManyEntriesIsRefused() throws IOException {
+        Path archive = tmp.resolve("many.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            for (int i = 0; i < 11; i++) {
+                zip.putArchiveEntry(new ZipArchiveEntry("x/d" + i + "/"));
+                zip.closeArchiveEntry();
+            }
+        }
+        Archives.entryLimit = 10;
+        try {
+            assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
+        } finally {
+            Archives.entryLimit = Archives.MAX_ENTRIES;
+        }
     }
 
     @Test

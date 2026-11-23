@@ -6,7 +6,6 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.Tool;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -45,9 +44,11 @@ final class UnpinCommand implements Callable<Integer> {
         Changes report = new Changes(ctx);
         String name = Changes.tilde(file.toString());
         if (edit.replaced()) {
-            Files.writeString(file, edit.text(), StandardCharsets.UTF_8);
+            ProjectShell.write(file, edit.text());
             report.file(file, false);
-            say.println("unpinned " + StatusCommand.pinText(previous) + " from " + name);
+            // previous is null when jkit skipped the line (a version it can't use): it still goes
+            say.println("unpinned " + (previous == null ? tool + " (a line jkit couldn't use)" : StatusCommand.pinText(previous))
+                    + " from " + name);
         } else {
             say.println(name + " doesn't pin " + tool);
         }

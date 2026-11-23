@@ -180,6 +180,26 @@ class SourcesTest {
     }
 
     @Test
+    void versionsThatCantBeFolderNamesAreDropped() throws IOException {
+        // "3.9.99.:." would put "." on PATH (a PATH separator inside the install folder's name)
+        String metadata = "<metadata><versioning><versions><version>3.9.11</version>"
+                + "<version>3.9.99.:.</version><version>3.9.98/../x</version></versions></versioning></metadata>";
+        MavenSource maven = new MavenSource(fake(Map.of("maven-metadata.xml", metadata)), MavenSource.DEFAULT_BASE);
+        assertThat(maven.versions(true)).extracting(v -> v.raw()).containsExactly("3.9.11");
+    }
+
+    @Test
+    void aChecksumWeakerThanItsFileNameIsRefused() {
+        // a .sha512 holding an md5 must not count as even a weak checksum
+        assertThatThrownBy(() -> Checksum.parse("d".repeat(32) + "  b.zip\n", "b.zip", "sha512"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("md5, not sha512");
+        assertThatThrownBy(() -> Checksum.parseStrict("MD5 (b.zip) = " + "d".repeat(32) + "\n", "b.zip", "sha512"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("holds a md5 hash");
+        assertThatThrownBy(() -> Checksum.of("zz" + "d".repeat(62), "sha256"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("isn't a hex hash");
+    }
+
+    @Test
     void checksumFileWithoutAUsableHashIsAnError() {
         // a proxy's plain-text block page must not turn into "no checksum, install unverified"
         assertThatThrownBy(() -> Checksum.parse("Access denied by cafe proxy\n", "b.tar.gz", "sha256"))
@@ -198,7 +218,7 @@ class SourcesTest {
                 "b.sha256", "f".repeat(64))), FoojaySource.DEFAULT_BASE);
         assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
                 .isInstanceOf(JkitException.class)
-                .hasMessageContaining("refusing to download over http");
+                .hasMessageContaining("refusing a checksum over http");
     }
 
     @Test

@@ -29,6 +29,19 @@ public final class Version implements Comparable<Version> {
         this.suffix = suffix;
     }
 
+    private static final java.util.regex.Pattern SAFE_TEXT =
+            java.util.regex.Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}");
+
+    /**
+     * Whether a version from a source is plain enough to become a folder name, a PATH entry and a
+     * line of output: no path or PATH separators ({@code /}, {@code :}, {@code ;}), no spaces, no
+     * control characters. Sources drop entries that fail it; a mirror could otherwise put
+     * {@code ./bin} on PATH with a version such as {@code 3.9.99.:.}.
+     */
+    public static boolean isSafeText(String raw) {
+        return raw != null && SAFE_TEXT.matcher(raw).matches();
+    }
+
     public static Version parse(String raw) {
         String text = raw.trim();
         String lower = text.toLowerCase(Locale.ROOT);

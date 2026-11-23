@@ -66,6 +66,29 @@ public final class CachingHttp implements Http {
     }
 
     @Override
+    public void evict(URI uri) {
+        try {
+            Files.deleteIfExists(dir.resolve(key(uri) + ".cache"));
+        } catch (IOException ignored) {
+            // the next refresh replaces it anyway
+        }
+    }
+
+    @Override
+    public boolean offline() {
+        return offline;
+    }
+
+    @Override
+    public String getFresh(URI uri) throws IOException {
+        if (offline) {
+            throw new dev.jkit.model.JkitException("--offline, but " + uri.getHost() + " has to be asked for a checksum",
+                    "run the command without --offline");
+        }
+        return delegate.get(uri);
+    }
+
+    @Override
     public String get(URI uri) throws IOException {
         Path file = dir.resolve(key(uri) + ".cache");
         if (Files.isRegularFile(file)) {
@@ -76,8 +99,17 @@ public final class CachingHttp implements Http {
             }
         }
         if (offline) {
-            throw new dev.jkit.model.JkitException("--offline, but there is no cached version list from "
-                    + uri.getHost() + " yet", "run the command once without --offline");
+            boolean anyCached;
+            try (var files = Files.list(dir)) {
+                anyCached = files.anyMatch(f -> f.getFileName().toString().endsWith(".cache"));
+            } catch (IOException e) {
+                anyCached = false;
+            }
+            throw new dev.jkit.model.JkitException(anyCached
+                    ? "--offline, but this lookup on " + uri.getHost() + " isn't cached (the cache only holds "
+                            + "what earlier commands asked for)"
+                    : "--offline, but there is no cached version list from " + uri.getHost() + " yet",
+                    "run the command once without --offline");
         }
         String body;
         try {
@@ -96,7 +128,7 @@ public final class CachingHttp implements Http {
                     new dev.jkit.model.JkitException("got a web page instead of data from " + uri.getHost()
                             + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again"));
         }
-        Files.createDirectories(dir);
+        dev.jkit.model.Perms.mkdirs(dir);
         boolean created = !Files.exists(file);
         Path tmp = Files.createTempFile(dir, "index-", ".tmp");
         try {

@@ -30,7 +30,7 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
         if (Files.isRegularFile(home.config())) {
             try {
                 // by byte-order mark: Notepad and PowerShell 5 write one, and the TOML parser rejects it
-                TomlParseResult toml = Toml.parse(ProjectFile.text(home.config()));
+                TomlParseResult toml = ProjectFile.parseToml(home.config(), ProjectFile.text(home.config()));
                 if (toml.hasErrors()) {
                     throw new JkitException("invalid " + home.config() + ": " + toml.errors().getFirst());
                 }

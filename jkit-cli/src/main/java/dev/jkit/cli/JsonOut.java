@@ -24,6 +24,48 @@ final class JsonOut {
     static final String FLAG = "--json";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    static {
+        MAPPER.getFactory().setCharacterEscapes(new TerminalSafeEscapes());
+    }
+
+    /**
+     * Jackson escapes C0 controls already; this adds DEL and the C1 controls ({@code \u007f},
+     * {@code \u0080..\u009f}), so a document printed to a terminal can't carry an escape sequence.
+     * stdout under {@code --json} skips {@link SafeOutput}, whose {@code \xNN} isn't valid JSON.
+     */
+    private static final class TerminalSafeEscapes extends com.fasterxml.jackson.core.io.CharacterEscapes {
+        private final int[] table = standardAsciiEscapesForJSON();
+
+        TerminalSafeEscapes() {
+            table[0x7f] = ESCAPE_STANDARD;
+        }
+
+        @Override
+        public int[] getEscapeCodesForAscii() {
+            return table;
+        }
+
+        @Override
+        public com.fasterxml.jackson.core.SerializableString getEscapeSequence(int ch) {
+            // also the bidirectional overrides and invisible characters Visible escapes in text output
+            boolean hidden = ch == 0x061c || ch == 0x200e || ch == 0x200f || (ch >= 0x202a && ch <= 0x202e)
+                    || (ch >= 0x2066 && ch <= 0x2069) || (ch >= 0x200b && ch <= 0x200d) || (ch >= 0x2060 && ch <= 0x2064)
+                    || ch == 0xfeff || ch == 0x00ad || ch == 0x2028 || ch == 0x2029 || ch == 0x180e;
+            return ch >= 0x80 && ch <= 0x9f || hidden
+                    ? new com.fasterxml.jackson.core.io.SerializedString(String.format("\\u%04x", ch))
+                    : null;
+        }
+    }
+
+    /** Pretty JSON text with the escapes above. */
+    static String pretty(com.fasterxml.jackson.databind.JsonNode node) {
+        try {
+            return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** Mixin for commands that support {@code --json}. */
     static final class Flag {
         @Option(names = FLAG, description = "Print one JSON document on stdout instead of text (see docs/json.md).")
@@ -44,7 +86,7 @@ final class JsonOut {
     }
 
     static void print(PrintStream out, ObjectNode doc) {
-        out.println(doc.toPrettyString());
+        out.println(pretty(doc));
         out.flush();
     }
 
@@ -58,9 +100,9 @@ final class JsonOut {
             doc.set("changes", toNode(partial.changes()));
         }
         ObjectNode error = doc.putObject("error");
-        error.put("message", e.getMessage());
+        error.put("message", Errors.capped(e.getMessage()));
         ArrayNode hints = error.putArray("hints");
-        e.hints().forEach(hints::add);
+        e.hints().forEach(h -> hints.add(Errors.capped(h)));
         error.put("exitCode", exitCode);
         return doc;
     }
@@ -77,6 +119,8 @@ final class JsonOut {
         node.put("graalvm", i.vendor() != null && i.vendor().isGraalVmBased());
         node.put("preRelease", i.version().isPreRelease());
         node.put("home", i.home().toAbsolutePath().toString());
+        // checked against a sha256/384/512 checksum when it was installed (see docs/json.md)
+        node.put("verified", dev.jkit.core.Store.verified(i.home()));
         ArrayNode global = node.putArray("global");
         ArrayNode shell = node.putArray("activeInShell");
         for (Tool t : Tool.values()) {
@@ -84,11 +128,11 @@ final class JsonOut {
                 continue;
             }
             Path link = ctx.os.readLink(ctx.home.global(t));
-            if (link != null && link.equals(i.home())) {
+            if (Resolve.same(link, i.home())) {
                 global.add(t.id());
             }
             String state = ctx.env.get(ShellEnv.stateVariable(t));
-            if (state != null && Path.of(state).equals(i.home())) {
+            if (state != null && Resolve.same(dev.jkit.core.Fs.path(state), i.home())) {
                 shell.add(t.id());
             }
         }
@@ -120,7 +164,7 @@ final class JsonOut {
 
     /** Maps, collections, Jackson nodes, strings, numbers, booleans, paths (absolute) and null, pretty-printed. */
     static String write(Object value) {
-        return toNode(value).toPrettyString();
+        return pretty(toNode(value));
     }
 
     private static com.fasterxml.jackson.databind.JsonNode toNode(Object value) {

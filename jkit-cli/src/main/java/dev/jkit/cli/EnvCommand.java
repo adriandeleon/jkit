@@ -27,13 +27,17 @@ import picocli.CommandLine.Option;
                 "For CI, IDEs and scripts without the hook: eval \"$(jkit env)\". Never uses the network.",
                 "To switch the current shell to the project's versions, use jkit sync."})
 final class EnvCommand implements Callable<Integer> {
-    static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh");
+    static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh", "powershell"); // powershell: Windows PowerShell 5.1
 
     @Option(names = "--shell", paramLabel = "<shell>", completionCandidates = Candidates.Shells.class,
             description = "Syntax: bash (default), zsh, fish or pwsh.")
     String shell;
 
-    @Option(names = "--global", description = "Ignore project files; global versions only.")
+    @Option(names = "--no-project", description = "Ignore project files; global versions only.")
+    boolean noProject;
+
+    /** The old name of --no-project, kept so scripts keep working. */
+    @Option(names = "--global", hidden = true)
     boolean global;
 
     @Option(names = "--dir", paramLabel = "<path>", description = "The folder to look for a project file from (default: here).")
@@ -76,7 +80,7 @@ final class EnvCommand implements Callable<Integer> {
             throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
         }
         Path cwd = Path.of("").toAbsolutePath();
-        Result result = compute(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), global);
+        Result result = compute(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), noProject || global);
         if (json.json) {
             ctx.out.println(JsonOut.write(json(result)));
         } else if (result.homes().isEmpty()) {
@@ -92,7 +96,7 @@ final class EnvCommand implements Callable<Integer> {
      * install is an error (exit 3) so a CI step never runs with half an environment.
      */
     static Result compute(Context ctx, Path dir, boolean ignoreProject) throws Exception {
-        return compute(ctx, dir, ignoreProject, java.util.Set.of(), "jkit env --global");
+        return compute(ctx, dir, ignoreProject, java.util.Set.of(), "jkit env --no-project");
     }
 
     /**
@@ -104,7 +108,7 @@ final class EnvCommand implements Callable<Integer> {
         if (!Files.isDirectory(dir)) {
             throw new JkitException(dir + " is not a folder");
         }
-        Map<String, String> env = new HashMap<>(ctx.env);
+        Map<String, String> env = dev.jkit.model.Envs.copy(ctx.env);
         if (ignoreProject) {
             env.put(ProjectFile.OVERRIDE, "");
         }

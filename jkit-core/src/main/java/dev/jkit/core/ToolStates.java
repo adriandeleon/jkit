@@ -34,8 +34,10 @@ public final class ToolStates {
     /**
      * @param project      the project found from the working directory, or empty
      * @param projectError why the project file couldn't be read (broken TOML), or null
+     * @param projectSkipped a project file that was ignored because its folder isn't safe, and why; or null
      */
-    public record Result(Optional<ProjectSpec> project, String projectError, List<ToolState> tools) {
+    public record Result(Optional<ProjectSpec> project, String projectError, List<ToolState> tools,
+                         String projectSkipped) {
         public ToolState get(Tool tool) {
             return tools.stream().filter(t -> t.tool() == tool).findFirst().orElseThrow();
         }
@@ -64,7 +66,8 @@ public final class ToolStates {
             }
             tools.add(state);
         }
-        return new Result(project, projectError, List.copyOf(tools));
+        String skipped = project.isEmpty() && projectError == null ? ProjectFile.skipped(cwd, env).orElse(null) : null;
+        return new Result(project, projectError, List.copyOf(tools), skipped);
     }
 
     private static ToolState read(Tool tool, Map<String, String> env, JkitHome home, Store store, Config config,
@@ -172,17 +175,21 @@ public final class ToolStates {
      */
     public static String releaseVersion(Path jdkHome) {
         Path release = jdkHome.resolve("release");
-        if (!Files.isRegularFile(release)) {
-            return null;
-        }
         Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(release)) {
-            p.load(in);
-        } catch (IOException e) {
+        try {
+            // a JDK set outside jkit is anyone's: a small file, and only a plain version is shown
+            if (!Files.isRegularFile(release) || Files.size(release) > 64 * 1024) {
+                return null;
+            }
+            try (InputStream in = Files.newInputStream(release)) {
+                p.load(in);
+            }
+        } catch (IOException | IllegalArgumentException e) {
             return null;
         }
         String version = p.getProperty("JAVA_VERSION");
-        return version == null ? null : version.replace("\"", "").trim();
+        version = version == null ? null : version.replace("\"", "").trim();
+        return dev.jkit.model.Version.isSafeText(version) ? version : null;
     }
 
     private static Installed installAt(Store store, Tool tool, Path path) throws IOException {
@@ -195,7 +202,9 @@ public final class ToolStates {
     }
 
     private static Path pathOrNull(String value) {
-        return value == null || value.isBlank() ? null : Path.of(value);
+        // a relative JAVA_HOME means a different JDK in every folder (and doctor runs its java): ignore it
+        Path path = Fs.path(value);
+        return path == null || !path.isAbsolute() ? null : path;
     }
 
     /** Same folder, following links (the global link and its target are the same install). */

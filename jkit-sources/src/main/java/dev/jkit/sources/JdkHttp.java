@@ -61,7 +61,8 @@ public final class JdkHttp implements Http {
         this.userAgent = userAgent;
         this.idle = idle;
         HttpClient.Builder builder = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
+                // followed by hand, so every hop is checked before anything is sent to it
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(15));
         String setting = firstNonBlank(env, "JKIT_NETWORK_PROXY", "HTTPS_PROXY", "https_proxy");
         String error = null;
@@ -113,10 +114,7 @@ public final class JdkHttp implements Http {
                 }
                 rest = rest.substring(scheme + 3);
             }
-            int slash = rest.indexOf('/');
-            if (slash >= 0) {
-                rest = rest.substring(0, slash);
-            }
+            // credentials first, up to the last @: a password may hold / or @ itself
             String user = null;
             String password = null;
             int at = rest.lastIndexOf('@');
@@ -126,6 +124,10 @@ public final class JdkHttp implements Http {
                 int colon = credentials.indexOf(':');
                 user = decode(colon < 0 ? credentials : credentials.substring(0, colon));
                 password = colon < 0 ? "" : decode(credentials.substring(colon + 1));
+            }
+            int slash = rest.indexOf('/');
+            if (slash >= 0) {
+                rest = rest.substring(0, slash);
             }
             String host = rest;
             int port = 8080;
@@ -161,7 +163,7 @@ public final class JdkHttp implements Http {
             } catch (NumberFormatException e) {
                 // below
             }
-            throw new IllegalArgumentException("proxy " + redact(setting) + ": '" + text + "' is not a port");
+            throw new IllegalArgumentException("proxy " + redact(setting) + ": the port isn't a number from 1 to 65535");
         }
 
         private static String decode(String text) {
@@ -170,7 +172,17 @@ public final class JdkHttp implements Http {
 
         /** The setting without its password, for messages. */
         static String redact(String setting) {
-            return setting.replaceFirst("://([^:@/]*):[^@/]*@", "://$1:***@");
+            // with or without a scheme, and whatever the password holds: everything up to the last @
+            int at = setting.lastIndexOf('@');
+            if (at < 0) {
+                return setting;
+            }
+            int scheme = setting.indexOf("://");
+            int start = scheme >= 0 && scheme < at ? scheme + 3 : 0;
+            String credentials = setting.substring(start, at);
+            int colon = credentials.indexOf(':');
+            String user = colon < 0 ? credentials : credentials.substring(0, colon);
+            return setting.substring(0, start) + user + (colon < 0 ? "" : ":***") + setting.substring(at);
         }
     }
 
@@ -208,7 +220,9 @@ public final class JdkHttp implements Http {
 
         @Override
         public List<Proxy> select(URI uri) {
-            return List.of(bypasses(uri.getHost()) ? Proxy.NO_PROXY : proxy);
+            // a mirror on this machine is reached directly: plain http to it must not cross a proxy
+            boolean local = "http".equalsIgnoreCase(uri.getScheme()) && Http.isSecure(uri);
+            return List.of(local || bypasses(uri.getHost()) ? Proxy.NO_PROXY : proxy);
         }
 
         @Override
@@ -225,19 +239,34 @@ public final class JdkHttp implements Http {
                 .build();
     }
 
+    /** Version lists and checksums are small: anything bigger is a broken or hostile server. */
+    static final long MAX_TEXT = 8L << 20; // foojay's largest answer is about 0.3 MB
+    /** The largest JDK archives are under 500 MB. */
+    static final long MAX_DOWNLOAD = 2L << 30;
+    /** A text answer must be complete within this, however slowly it trickles in. */
+    static final Duration TEXT_DEADLINE = Duration.ofMinutes(2);
+    /** A download slower than this over a whole idle window counts as stalled. */
+    static final long MIN_BYTES_PER_WINDOW = 16 * 1024;
+    /** After the first two minutes, a download averaging less than this is given up on. */
+    static final long MIN_AVERAGE_BYTES_PER_SECOND = 32 * 1024;
+    /** However fast it keeps trickling, a download ends by then (a 500 MB JDK at 50 KB/s takes under 3 h). */
+    static final Duration DOWNLOAD_DEADLINE = Duration.ofHours(3);
+    static final Duration AVERAGE_GRACE = Duration.ofMinutes(2);
+    private static final int MAX_REDIRECTS = 5;
+
     @Override
     public String get(URI uri) throws IOException {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         fetch(uri, () -> {
             body.reset();
             return body;
-        }, Progress.NONE);
+        }, Progress.NONE, MAX_TEXT, true);
         return body.toString(StandardCharsets.UTF_8);
     }
 
     @Override
     public void download(URI uri, Path target, Progress progress) throws IOException {
-        fetch(uri, () -> Files.newOutputStream(target), progress);
+        fetch(uri, () -> Files.newOutputStream(target), progress, MAX_DOWNLOAD, false);
     }
 
     @FunctionalInterface
@@ -245,14 +274,14 @@ public final class JdkHttp implements Http {
         OutputStream open() throws IOException;
     }
 
-    private void fetch(URI uri, Sink sink, Progress progress) throws IOException {
+    private void fetch(URI uri, Sink sink, Progress progress, long max, boolean text) throws IOException {
         if (proxyError != null) {
             throw new JkitException(proxyError, "fix HTTPS_PROXY (or JKIT_NETWORK_PROXY), e.g. http://proxy.example.com:3128");
         }
         IOException last = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                fetchOnce(uri, sink, progress);
+                fetchOnce(uri, sink, progress, max, text);
                 return;
             } catch (HttpStatusException e) {
                 if (e.status() < 500 && e.status() != 429) {
@@ -260,6 +289,9 @@ public final class JdkHttp implements Http {
                 }
                 last = e;
             } catch (NetworkException e) {
+                if (e.gaveUp()) {
+                    throw e;
+                }
                 last = e;
             }
             if (attempt < attempts) {
@@ -274,32 +306,84 @@ public final class JdkHttp implements Http {
         throw last;
     }
 
-    private void fetchOnce(URI uri, Sink sink, Progress progress) throws IOException {
-        HttpResponse<InputStream> response;
-        try {
-            response = client.send(request(uri), HttpResponse.BodyHandlers.ofInputStream());
-        } catch (IOException e) {
-            throw new NetworkException(uri, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("interrupted", e);
-        }
-        try (InputStream in = response.body()) {
-            if (response.statusCode() / 100 != 2) {
-                throw new HttpStatusException(response.statusCode(), uri);
+    private void fetchOnce(URI start, Sink sink, Progress progress, long max, boolean text) throws IOException {
+        URI uri = start;
+        for (int hop = 0; ; hop++) {
+            HttpResponse<InputStream> response;
+            try {
+                response = client.send(request(uri), HttpResponse.BodyHandlers.ofInputStream());
+            } catch (IOException e) {
+                throw new NetworkException(uri, e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted", e);
             }
-            long total = response.headers().firstValueAsLong("content-length").orElse(-1);
-            try (OutputStream out = sink.open()) {
-                copyWithIdleTimeout(uri, in, out, total, progress);
+            try (InputStream in = response.body()) {
+                int status = response.statusCode();
+                java.util.Optional<String> location = response.headers().firstValue("location");
+                if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+                        && location.isPresent()) {
+                    URI next;
+                    try {
+                        next = uri.resolve(location.get().trim());
+                    } catch (IllegalArgumentException e) {
+                        throw new JkitException(uri.getHost() + " redirected to an invalid address: " + location.get());
+                    }
+                    // checked before anything is sent: https stays https, and plain http only to this machine
+                    boolean downgrade = "https".equalsIgnoreCase(uri.getScheme())
+                            && !"https".equalsIgnoreCase(next.getScheme());
+                    if (!Http.isSecure(next) || downgrade) {
+                        throw new JkitException("refusing a redirect from " + uri + " to " + next,
+                                "jkit only uses https (or http to this machine)");
+                    }
+                    if (hop >= MAX_REDIRECTS) {
+                        throw new JkitException("too many redirects from " + start);
+                    }
+                    uri = next;
+                    continue;
+                }
+                if (status / 100 != 2) {
+                    throw new HttpStatusException(status, uri);
+                }
+                long total = response.headers().firstValueAsLong("content-length").orElse(-1);
+                if (total > max) {
+                    throw tooBig(uri, max);
+                }
+                try (OutputStream out = sink.open()) {
+                    copyWithIdleTimeout(uri, in, out, total, progress, max, text);
+                }
+                return;
             }
         }
     }
 
-    /** Copies the body, closing it when no bytes arrive for {@link #idle}, which ends the blocked read. */
-    private void copyWithIdleTimeout(URI uri, InputStream in, OutputStream out, long total, Progress progress)
-            throws IOException {
-        AtomicLong lastData = new AtomicLong(System.nanoTime());
-        AtomicBoolean stalled = new AtomicBoolean();
+    private static JkitException tooBig(URI uri, long max) {
+        return new JkitException(uri.getHost() + " sent more than " + (max >> 20) + " MB for " + uri.getPath()
+                + "; refusing it", "a broken or hostile server or mirror: check JKIT_SOURCES_*_URL and the network");
+    }
+
+    /** Writing the download failed on this machine (disk full): not a network error, so not retried. */
+    private static final class LocalWriteException extends IOException {
+        LocalWriteException(IOException cause) {
+            super(cause.getMessage(), cause);
+        }
+    }
+
+    /**
+     * Copies the body, closing it when no bytes arrive for {@link #idle}, or (downloads) fewer than
+     * {@link #MIN_BYTES_PER_WINDOW} arrive in one such window, or (text) the whole answer takes longer
+     * than {@link #TEXT_DEADLINE}: a server dripping a byte at a time can't hang jkit.
+     */
+    private void copyWithIdleTimeout(URI uri, InputStream in, OutputStream out, long total, Progress progress,
+                                     long max, boolean text) throws IOException {
+        long started = System.nanoTime();
+        AtomicLong lastData = new AtomicLong(started);
+        AtomicLong received = new AtomicLong();
+        AtomicLong windowStart = new AtomicLong(started);
+        AtomicLong windowBytes = new AtomicLong();
+        java.util.concurrent.atomic.AtomicReference<String> stalled = new java.util.concurrent.atomic.AtomicReference<>();
+        // past a deadline or too slow on average: trying again would only multiply the time limit
+        java.util.concurrent.atomic.AtomicBoolean final_ = new java.util.concurrent.atomic.AtomicBoolean();
         ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "jkit-http-watchdog");
             t.setDaemon(true);
@@ -307,7 +391,30 @@ public final class JdkHttp implements Http {
         });
         long checkMillis = Math.max(100, Math.min(5000, idle.toMillis() / 4));
         watchdog.scheduleWithFixedDelay(() -> {
-            if (System.nanoTime() - lastData.get() > idle.toNanos() && stalled.compareAndSet(false, true)) {
+            long now = System.nanoTime();
+            String why = null;
+            if (now - lastData.get() > idle.toNanos()) {
+                why = "no data for " + idle.toSeconds() + " s";
+            } else if (text && now - started > TEXT_DEADLINE.toNanos()) {
+                why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
+                final_.set(true);
+            } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {
+                why = "not finished after " + DOWNLOAD_DEADLINE.toHours() + " hours";
+                final_.set(true);
+            } else if (!text && now - started > AVERAGE_GRACE.toNanos()
+                    && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
+                // a server can stay above the per-window minimum and still take months for 2 GB
+                why = "under " + MIN_AVERAGE_BYTES_PER_SECOND / 1024 + " KB/s on average";
+                final_.set(true);
+            } else if (!text && now - windowStart.get() > idle.toNanos()) {
+                if (received.get() - windowBytes.get() < MIN_BYTES_PER_WINDOW) {
+                    why = "under " + MIN_BYTES_PER_WINDOW / 1024 + " KB in " + idle.toSeconds() + " s";
+                } else {
+                    windowStart.set(now);
+                    windowBytes.set(received.get());
+                }
+            }
+            if (why != null && stalled.compareAndSet(null, why)) {
                 try {
                     in.close();
                 } catch (IOException ignored) {
@@ -324,16 +431,26 @@ public final class JdkHttp implements Http {
                 if (n == 0) {
                     continue;
                 }
-                out.write(buffer, 0, n);
                 done += n;
+                received.set(done);
+                if (done > max) {
+                    throw tooBig(uri, max);
+                }
+                try {
+                    out.write(buffer, 0, n);
+                } catch (IOException e) {
+                    throw new LocalWriteException(e);
+                }
                 progress.update(done, total);
             }
-            if (stalled.get()) {
+            if (stalled.get() != null) {
                 throw new IOException("closed");
             }
+        } catch (LocalWriteException e) {
+            throw new IOException("cannot write the download: " + e.getMessage(), e.getCause());
         } catch (IOException e) {
-            if (stalled.get()) {
-                throw new NetworkException(uri, new IOException("no data for " + idle.toSeconds() + " s"));
+            if (stalled.get() != null) {
+                throw new NetworkException(uri, new IOException(stalled.get()), final_.get());
             }
             throw new NetworkException(uri, e);
         } finally {

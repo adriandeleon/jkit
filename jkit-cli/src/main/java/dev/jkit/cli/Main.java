@@ -40,14 +40,64 @@ public final class Main implements Runnable {
         spec.commandLine().usage(System.out);
     }
 
+    /** Commands whose stdout is shell code to eval or a script, not text for a person. */
+    private static final java.util.Set<String> MACHINE_STDOUT = java.util.Set.of("env", "hook-env", "hook", "completion");
+
     public static void main(String[] args) {
+        // messages carry text from project files and the network: never raw escape sequences
+        System.setErr(SafeOutput.wrap(System.err));
+        // --json documents escape their own control characters (JsonOut); \xNN would break the JSON
+        java.util.List<String> own = java.util.Arrays.asList(args);
+        if (own.contains("--")) {
+            own = own.subList(0, own.indexOf("--"));
+        }
+        if (args.length == 0 || !MACHINE_STDOUT.contains(args[0]) && !own.contains(JsonOut.FLAG)) {
+            System.setOut(SafeOutput.wrap(System.out));
+        }
+        if (!cwdExists()) {
+            // the folder was deleted under the shell: say so plainly instead of a stack trace
+            if (args.length >= 1 && args[0].equals("hook-env")) {
+                System.exit(0); // nothing to switch; the next cd runs the hook again
+            }
+            JkitException gone = new JkitException("the current folder no longer exists",
+                    "cd to another folder, then run jkit again");
+            printError(gone);
+            if (own.contains(JsonOut.FLAG)) {
+                // written by hand: Jackson's setup reads system properties, which fail without a folder
+                System.out.println("{\n  \"schemaVersion\" : " + JsonOut.SCHEMA_VERSION + ",\n  \"error\" : {\n"
+                        + "    \"message\" : \"" + gone.getMessage() + "\",\n    \"hints\" : [ \"" + gone.hints().getFirst()
+                        + "\" ],\n    \"exitCode\" : " + gone.exitCode() + "\n  }\n}");
+            }
+            System.exit(gone.exitCode());
+        }
         if (args.length >= 1 && args.length <= 2 && args[0].equals("hook-env")) {
             // the cd hook runs this on every directory change: skip building the whole command line
             HookEnvCommand hookEnv = new HookEnvCommand();
             hookEnv.shell = args.length == 2 ? args[1] : null;
             System.exit(hookEnv.call());
         }
-        System.exit(run(args));
+        int code;
+        try {
+            code = run(args);
+        } catch (OutOfMemoryError e) {
+            // the HTTP and archive limits should prevent this; if not, still one line and one document
+            System.err.println("error: out of memory");
+            if (own.contains(JsonOut.FLAG)) {
+                System.out.println("{\"schemaVersion\":" + JsonOut.SCHEMA_VERSION
+                        + ",\"error\":{\"message\":\"out of memory\",\"hints\":[],\"exitCode\":1}}");
+            }
+            code = 1;
+        }
+        System.exit(code);
+    }
+
+    private static boolean cwdExists() {
+        try {
+            String dir = System.getProperty("user.dir");
+            return dir != null && !dir.isEmpty() && java.nio.file.Files.isDirectory(java.nio.file.Path.of(dir));
+        } catch (RuntimeException | Error e) { // a native image reads user.dir lazily and throws an Error
+            return false;
+        }
     }
 
     static int run(String... args) {
@@ -56,6 +106,8 @@ public final class Main implements Runnable {
         java.util.List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
         boolean json = list.contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
+        // no colors: SafeOutput would print picocli's escape codes as text, and plain help reads fine
+        cli.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
             if (System.getenv("JKIT_DEBUG") != null) {
                 ex.printStackTrace();
@@ -76,12 +128,11 @@ public final class Main implements Runnable {
                 }
                 return CommandLine.ExitCode.USAGE;
             }
-            System.err.println("error: " + ex.getMessage());
+            JkitException usage = usageError(ex, all);
+            printError(usage);
             if (json) {
-                JsonOut.print(System.out, JsonOut.error(new JkitException(ex.getMessage()), CommandLine.ExitCode.USAGE));
-                return CommandLine.ExitCode.USAGE; // a program reads the document, not the usage text
+                JsonOut.print(System.out, JsonOut.error(usage, CommandLine.ExitCode.USAGE));
             }
-            ex.getCommandLine().usage(System.err);
             return CommandLine.ExitCode.USAGE;
         });
         if (json && (list.contains("-h") || list.contains("--help") || list.contains("help")
@@ -101,10 +152,34 @@ public final class Main implements Runnable {
         return cli.execute(args);
     }
 
+    /**
+     * A parse error as one line plus hints, not the whole usage screen: "did you mean" for a
+     * mistyped command, the missing -- for exec, and the command's synopsis.
+     */
+    static JkitException usageError(CommandLine.ParameterException ex, java.util.List<String> args) {
+        CommandLine cmd = ex.getCommandLine();
+        java.util.List<String> hints = new java.util.ArrayList<>();
+        boolean exec = cmd.getCommandName().equals("exec");
+        if (!exec && ex instanceof CommandLine.UnmatchedArgumentException unmatched
+                && !unmatched.getSuggestions().isEmpty()) {
+            hints.add("did you mean: " + unmatched.getSuggestions().getFirst() + "?");
+        }
+        if (exec && !args.contains("--")) {
+            hints.add("put -- before the command to run: jkit exec [<tool>@<version> [vendor]]... -- <command> [args]");
+        }
+        String name = cmd.getCommandSpec().qualifiedName();
+        String synopsis = cmd.getHelp().synopsis(0).strip().replaceFirst("^Usage:\\s*", "");
+        if (cmd.getParent() != null) {
+            hints.add("usage: " + synopsis.replaceAll("\\s+", " "));
+        }
+        hints.add("more: " + name + " --help");
+        return new JkitException(CommandLine.ExitCode.USAGE, ex.getMessage(), hints.toArray(String[]::new));
+    }
+
     private static void printError(JkitException e) {
-        System.err.println("error: " + e.getMessage());
+        System.err.println("error: " + dev.jkit.model.Visible.of(Errors.capped(e.getMessage())));
         for (String hint : e.hints()) {
-            System.err.println("  " + hint);
+            System.err.println("  " + dev.jkit.model.Visible.of(Errors.capped(hint)));
         }
     }
 }

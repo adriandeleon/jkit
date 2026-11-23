@@ -17,6 +17,28 @@ class ToolSpecTest {
     }
 
     @Test
+    void ltsIsAJdkWord() {
+        assertThat(ToolSpec.parse("jdk@LTS").isLts()).isTrue();
+        assertThat(ToolSpec.parse("graalvm@lts").isLts()).isTrue();
+        assertThatThrownBy(() -> ToolSpec.parse("maven@lts")).hasMessageContaining("only JDKs have LTS releases");
+        assertThat(java.util.stream.IntStream.rangeClosed(8, 30).filter(ToolSpec::isLtsMajor).boxed().toList())
+                .containsExactly(8, 11, 17, 21, 25, 29);
+    }
+
+    @Test
+    void unknownToolsGetAHintForTheUsualMistakes() {
+        assertThatThrownBy(() -> ToolSpec.parse("21")).isInstanceOf(JkitException.class)
+                .satisfies(e -> assertThat(((JkitException) e).hints()).first().asString().contains("jdk@21"));
+        assertThatThrownBy(() -> ToolSpec.parse("java17"))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).contains("did you mean: java@17?"));
+        assertThatThrownBy(() -> ToolSpec.parse("temurin@21"))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).first().asString()
+                        .contains("it goes after the version: jdk@21 temurin"));
+        assertThatThrownBy(() -> ToolSpec.parse("graal@25"))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).contains("did you mean: graalvm?"));
+    }
+
+    @Test
     void rejectsUnknownTools() {
         assertThatThrownBy(() -> ToolSpec.parse("kotlin@2"))
                 .isInstanceOf(JkitException.class)

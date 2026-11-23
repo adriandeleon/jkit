@@ -14,10 +14,15 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "hook", description = {"Prints the shell hook, e.g. eval \"$(jkit hook bash)\" in ~/.bashrc,",
-        "or adds that line for you with --install (and takes it out with --uninstall).",
-        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1), it also switches",
-        "to a project's versions on cd, and says what it changed."})
+@Command(name = "hook", description = {"Prints the shell hook, or adds it to your shell's startup file.",
+        "The hook puts the global versions on PATH and lets jkit use change this shell.",
+        "With auto_switch = true under [shell] in config.toml (or JKIT_AUTO_SWITCH=1), it also",
+        "switches to a project's versions on cd, and says what it changed.",
+        "",
+        "  jkit hook --install                 add it for your login shell ($SHELL)",
+        "  jkit hook --install --auto-switch   and switch on cd",
+        "  eval \"$(jkit hook bash)\"           load it by hand (zsh alike; fish: jkit hook fish | source)",
+        "  jkit hook --uninstall               take it out again"})
 final class HookCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<shell>", completionCandidates = Candidates.Shells.class,
@@ -46,7 +51,7 @@ final class HookCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         // lenient: a typo in config.toml must not leave every new shell without the hook
-        Context ctx = Context.lenient(System.getenv(), System.out);
+        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError);
         }
@@ -59,9 +64,10 @@ final class HookCommand implements Callable<Integer> {
             return action.install ? install(ctx, name, userHome(ctx), autoSwitch) : uninstall(ctx, name, userHome(ctx));
         }
         String name = shell != null ? shell : ctx.platform.isWindows() ? "pwsh" : "bash";
-        ctx.out.print(ctx.os.hook(name, ctx.home.root()));
+        String self = self(ctx);
+        ctx.out.print(ctx.os.hook(name, ctx.home.root(), self));
         if (ctx.config.autoSwitch()) {
-            String auto = ctx.os.autoSwitchHook(name);
+            String auto = ctx.os.autoSwitchHook(name, self);
             if (auto != null) {
                 ctx.out.print(auto);
             } else {
@@ -77,8 +83,16 @@ final class HookCommand implements Callable<Integer> {
     }
 
     static Path userHome(Context ctx) {
-        String home = ctx.env.getOrDefault("HOME", System.getProperty("user.home"));
-        return Path.of(home).toAbsolutePath().normalize();
+        // an empty or relative HOME would put the rc file in the current folder
+        Path home = dev.jkit.core.Fs.path(ctx.env.get("HOME"));
+        if (home == null || !home.isAbsolute()) {
+            home = dev.jkit.core.Fs.path(System.getProperty("user.home"));
+        }
+        if (home == null || !home.isAbsolute()) {
+            throw new dev.jkit.model.JkitException("can't tell your home folder, so not which startup file to change",
+                    "set HOME to an absolute path");
+        }
+        return home.normalize();
     }
 
     /** bash, zsh or fish from $SHELL; anything else has to be named. */
@@ -105,7 +119,8 @@ final class HookCommand implements Callable<Integer> {
     static int install(Context ctx, String shell, Path userHome, boolean autoSwitch) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         boolean exists = Files.exists(file);
-        String text = exists ? Files.readString(file) : "";
+        java.nio.charset.Charset charset = charsetOf(file);
+        String text = exists ? Files.readString(file, charset) : "";
         String shown = Changes.tilde(file.toString());
         int manual = ShellRc.manualLine(text);
         Changes report = new Changes(ctx);
@@ -115,8 +130,11 @@ final class HookCommand implements Callable<Integer> {
         } else if (manual > 0) {
             ctx.out.println("line " + manual + " of " + shown + " already loads the jkit hook; nothing changed there");
         } else {
-            createParent(file, report);
-            Files.writeString(file, ShellRc.add(text, shell).text());
+            createParent(ctx, file, report);
+            if (!exists) {
+                Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
+            }
+            Files.writeString(file, ShellRc.add(text, shell).text(), charset);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
@@ -144,10 +162,14 @@ final class HookCommand implements Callable<Integer> {
         return 0;
     }
 
-    private static void createParent(Path file, Changes report) throws java.io.IOException {
+    private static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
         Path dir = file.toAbsolutePath().getParent();
         if (!Files.isDirectory(dir)) {
-            Files.createDirectories(dir);
+            if (dir.equals(ctx.home.root())) {
+                ctx.home.create();
+            } else {
+                dev.jkit.model.Perms.mkdirs(dir); // 755 whatever the umask: other users mustn't edit startup files
+            }
             report.folder(dir, true);
         }
     }
@@ -162,7 +184,10 @@ final class HookCommand implements Callable<Integer> {
         if (!edit.changed()) {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
-            createParent(config, report);
+            createParent(ctx, config, report);
+            if (!Files.exists(config)) {
+                Files.createFile(config, dev.jkit.model.Perms.file());
+            }
             Files.writeString(config, edit.text());
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
@@ -181,7 +206,7 @@ final class HookCommand implements Callable<Integer> {
         for (String name : List.of(".bash_profile", ".bash_login", ".profile")) {
             Path profile = userHome.resolve(name);
             if (Files.isRegularFile(profile)) {
-                if (!Files.readString(profile).contains(".bashrc")) {
+                if (!Files.readString(profile, charsetOf(profile)).contains(".bashrc")) {
                     report.note("login shells read ~/" + name + ", which doesn't load ~/.bashrc; add to it:  "
                             + "[ -f ~/.bashrc ] && . ~/.bashrc");
                 }
@@ -190,11 +215,28 @@ final class HookCommand implements Callable<Integer> {
         }
     }
 
+    /**
+     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent):
+     * read and written back in the same charset, so every byte jkit doesn't change stays as it was.
+     */
+    static java.nio.charset.Charset charsetOf(Path file) throws java.io.IOException {
+        if (!Files.isRegularFile(file)) {
+            return java.nio.charset.StandardCharsets.UTF_8;
+        }
+        try {
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file)));
+            return java.nio.charset.StandardCharsets.UTF_8;
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return java.nio.charset.StandardCharsets.ISO_8859_1;
+        }
+    }
+
     /** Takes out the block --install added, and nothing else. */
     static int uninstall(Context ctx, String shell, Path userHome) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         String shown = Changes.tilde(file.toString());
-        String text = Files.exists(file) ? Files.readString(file) : "";
+        java.nio.charset.Charset charset = charsetOf(file);
+        String text = Files.exists(file) ? Files.readString(file, charset) : "";
         ShellRc.Edit edit = ShellRc.remove(text);
         int manual = ShellRc.manualLine(edit.text());
         if (!edit.changed()) {
@@ -209,7 +251,7 @@ final class HookCommand implements Callable<Integer> {
             Files.delete(file); // the file was jkit's own
             report.fileDeleted(file);
         } else {
-            Files.writeString(file, edit.text());
+            Files.writeString(file, edit.text(), charset);
             report.file(file, false);
         }
         ctx.out.println("removed the jkit hook from " + shown);
@@ -219,5 +261,43 @@ final class HookCommand implements Callable<Integer> {
         report.note("open shells keep the hook until they exit");
         report.print(ctx.out);
         return 0;
+    }
+
+    /**
+     * This binary's absolute path, for the hook to call: a tool's bin folder comes first on PATH
+     * once it is active, and a {@code jkit} in it must not be what runs on every cd. A PATH entry that
+     * leads to this binary is preferred (Homebrew's bin/jkit link outlives an upgrade; the Cellar path
+     * doesn't). Null when unknown, or when running on a JVM (tests): the hook then looks jkit up on PATH.
+     */
+    static String self(Context ctx) {
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") == null) {
+            return null;
+        }
+        try {
+            java.util.Optional<String> command = ProcessHandle.current().info().command();
+            if (command.isEmpty()) {
+                return null;
+            }
+            Path real = Path.of(command.get()).toRealPath();
+            String file = real.getFileName().toString();
+            Path tools = ctx.home.root().toAbsolutePath().normalize();
+            for (String dir : ctx.env.getOrDefault("PATH", "").split(java.io.File.pathSeparator)) {
+                try {
+                    Path entry = Path.of(dir);
+                    if (!entry.isAbsolute() || entry.normalize().startsWith(tools)) {
+                        continue;
+                    }
+                    Path candidate = entry.resolve(file);
+                    if (java.nio.file.Files.exists(candidate) && java.nio.file.Files.isSameFile(candidate, real)) {
+                        return candidate.toString();
+                    }
+                } catch (java.nio.file.InvalidPathException | java.io.IOException e) {
+                    // not usable: the next entry
+                }
+            }
+            return real.toString();
+        } catch (java.io.IOException | RuntimeException e) {
+            return null;
+        }
     }
 }

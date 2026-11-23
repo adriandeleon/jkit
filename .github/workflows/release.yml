@@ -1,15 +1,25 @@
 name: Release
 
-# Push a tag like v0.1.0 to publish a release. Each platform builds the native binary and runs
-# the tests, then packs it as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and
-# an .rpm, and the macOS binaries (arm64 and x64) are signed and notarized. The release job
-# attaches them all with a SHA256SUMS file, then the homebrew job updates the formula in
-# adriandeleon/homebrew-tap and the winget job opens a pull request on microsoft/winget-pkgs.
-# A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release, which the Vitrina apt repository,
-# Homebrew and winget all skip.
+# Push a tag like v0.1.0 to publish a release. Each platform builds the native binary with GraalVM
+# Community Edition (Liberica NIK, also GPLv2 with the Classpath Exception, on macOS x64, which
+# Community Edition doesn't ship for) and runs the tests, then packs it with LICENSE and
+# THIRD-PARTY-NOTICES as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and an
+# .rpm and makes the CycloneDX SBOM, and the macOS binaries (arm64 and x64) are signed and
+# notarized (macos-sign: tag runs only, in a job that runs no build code). The release job
+# attaches them all with a SHA256SUMS file and a build provenance attestation (check one with
+# `gh attestation verify FILE --repo adriandeleon/jkit`), then the homebrew job updates the
+# formula in adriandeleon/homebrew-tap and the winget job opens a pull request on
+# microsoft/winget-pkgs. A tag with a hyphen (v0.2.0-rc.1) becomes a pre-release,
+# which the Vitrina apt repository, Homebrew and winget all skip.
 #
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
-# publishing anything.
+# publishing anything: signing, release, homebrew and winget only run for a pushed tag, so the
+# macOS archives of a manual run are unsigned.
+#
+# If homebrew or winget fails after the release is published (a missing token, an outage), fix
+# the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
+# stops at the published release and skips both. A re-run of winget first looks for an open pull
+# request for this version, so it doesn't open a second one.
 
 on:
   push:
@@ -25,32 +35,44 @@ concurrency:
 
 jobs:
   build:
+    name: build (${{ matrix.platform }})
     strategy:
-      fail-fast: true
+      fail-fast: false   # a dry run should report every platform, not stop at the first
       matrix:
         include:
           # Ubuntu 22.04 runners: glibc 2.35, so the binary runs on glibc 2.34+ systems
           # (checked below) such as RHEL 9 and Debian 12.
           - runner: ubuntu-22.04
             platform: linux-x64
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-x64_bin.tar.gz
+            graalvm_sha256: c6438dee6c3ade2220d40b7ccdcad24b512d30e233e61bb4fc70519522de34ef
             profiles: native,linux-packages
           - runner: ubuntu-22.04-arm
             platform: linux-aarch64
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-aarch64_bin.tar.gz
+            graalvm_sha256: 41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66
             profiles: native,linux-packages
-          # macOS binaries ship unsigned for now; "Sign and notarize" below is switched off.
+          # Both macOS binaries are signed and notarized by the macos-sign job below.
           - runner: macos-15
             platform: macos-aarch64
             arch: arm64
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_macos-aarch64_bin.tar.gz
+            graalvm_sha256: 54369d4a5931a5a2101c7c52444a4e7e6647a3a4e041335053cda6fd22295e0c
             profiles: native
           - runner: macos-15-intel
             platform: macos-x64
             arch: x86_64
+            # GraalVM CE has no macOS x64 build; Liberica NIK is the same code, built by BellSoft
+            graalvm_url: https://github.com/bell-sw/LibericaNIK/releases/download/jdk-25.0.5.0.3%2B6/bellsoft-liberica-vm-openjdk25.0.5.0.3%2B6-25.0.5.0.3%2B1-macos-amd64.tar.gz
+            graalvm_sha256: 3c6d64062b7795849f76f209a8e571e5a7205ac482b40ef511f150ef83bb729e
             profiles: native
           # No windows-aarch64: GraalVM has no native-image for Windows on ARM, and winget
           # installs this x64 build there instead, which runs under emulation.
           - runner: windows-2025
             platform: windows-x64
             exe: .exe
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_windows-x64_bin.zip
+            graalvm_sha256: b02c3b162129fa8cbfa7ebd0fcc1ae6eba2fc736bf3bef8e40e5ace3e9d9a0d6
             profiles: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
@@ -63,13 +85,39 @@ jobs:
         with:
           persist-credentials: false
 
+      # No Maven cache on purpose: a release builds from a clean repository, so nothing a cache
+      # entry saved by another workflow run could hold ends up in the binary.
+      # GraalVM CE 25.5.5.0.3 (JDK 25.0.5), or Liberica NIK on macOS x64: downloaded by hand and
+      # checked against the SHA-256 GitHub publishes for the release asset (bump URL and hash together)
       - name: Set up GraalVM
-        uses: graalvm/setup-graalvm@f70bc8032f90a104502824a54bcb94b6f01715bc # v1.6.8
-        with:
-          java-version: '25'
-          distribution: graalvm
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: maven
+        env:
+          GRAALVM_URL: ${{ matrix.graalvm_url }}
+          GRAALVM_SHA256: ${{ matrix.graalvm_sha256 }}
+        run: |
+          set -euo pipefail
+          file="$RUNNER_TEMP/graalvm-download"
+          curl -fsSL --proto '=https' -o "$file" "$GRAALVM_URL"
+          # from stdin: with a Windows path, sha256sum puts a backslash in front of the hash
+          actual=$( (sha256sum < "$file" 2>/dev/null || shasum -a 256 < "$file") | cut -d' ' -f1)
+          if [ "$actual" != "$GRAALVM_SHA256" ]; then
+            echo "::error::$GRAALVM_URL has SHA-256 $actual, expected $GRAALVM_SHA256"
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/graalvm"
+          case "$GRAALVM_URL" in
+            *.zip) 7z x -bso0 -o"$RUNNER_TEMP/graalvm" "$file" ;;
+            *)     tar -C "$RUNNER_TEMP/graalvm" -xzf "$file" ;;
+          esac
+          rm "$file"
+          # the JDK home is the shallowest directory holding a `release` file (…/Contents/Home on macOS)
+          home=$(find "$RUNNER_TEMP/graalvm" -maxdepth 4 -name release -type f \
+            | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
+          home=$(dirname "$home")
+          "$home/bin/native-image${{ matrix.exe && '.cmd' || '' }}" --version
+          if [ "$RUNNER_OS" = Windows ]; then home=$(cygpath -w "$home"); fi
+          echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$home" >> "$GITHUB_ENV"
+          echo "$home${{ matrix.exe && '\bin' || '/bin' }}" >> "$GITHUB_PATH"
 
       - name: Set the version from the tag
         run: |
@@ -78,12 +126,37 @@ jobs:
           else
             VERSION="0.0.0-dev.$GITHUB_RUN_NUMBER"   # a manual run publishes nothing
           fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$GITHUB_REF_NAME' is not a release tag: use v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
+          # .rpm and .deb: "~" sorts a pre-release before the release (1.2.0~rc.1 < 1.2.0), and RPM
+          # allows no "-" in a version (sed: macOS's bash 3.2 keeps the backslash in ${VERSION/-/\~})
+          echo "PKG_VERSION=$(printf '%s' "$VERSION" | sed 's/-/~/')" >> "$GITHUB_ENV"
+          # file times in the jars and the .deb: the tagged commit's, so a rebuild gives the same files
+          echo "BUILD_TIME=$(git log -1 --format=%cI)" >> "$GITHUB_ENV"
+          ./mvnw -B -C -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
       - name: Test, build the native binary and the packages
-        run: ./mvnw -B -P${{ matrix.profiles }} verify
+        # -C: fail on a dependency whose checksum doesn't match the repository's (a clean repository
+        # here downloads everything)
+        run: >-
+          ./mvnw -B -C -P${{ matrix.profiles }} verify "-Drpm.version=$PKG_VERSION" "-Ddeb.version=$PKG_VERSION"
+          "-Dproject.build.outputTimestamp=$BUILD_TIME"
+
+      # The notices must list exactly the libraries compiled in; CI checks this on every PR too.
+      - name: Check THIRD-PARTY-NOTICES and make the SBOM
+        if: matrix.platform == 'linux-x64'
+        run: |
+          packaging/third-party-notices.sh --check
+          # per module, not aggregate: jkit-cli's SBOM has jkit-cli as its subject and everything it ships
+          ./mvnw -B -C -q -pl jkit-cli -am compile org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeBom \
+            -DoutputFormat=json -DoutputName=sbom -DprojectType=application
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["metadata"]["component"]["name"] == "jkit-cli"; print(d["bomFormat"], d["specVersion"], len(d["components"]), "components")' jkit-cli/target/sbom.json
+          # the Java runtime compiled into the binary isn't a Maven dependency: add it by hand
+          python3 packaging/sbom-runtime.py jkit-cli/target/sbom.json
 
       - name: Check the glibc the binary needs
         if: runner.os == 'Linux'
@@ -95,7 +168,113 @@ jobs:
             exit 1
           fi
 
-      # Needs these repository secrets (Settings → Secrets and variables → Actions):
+      - name: Smoke test
+        env:
+          JKIT_HOME: ${{ runner.temp }}/jkit-home
+        shell: bash
+        run: |
+          set -euo pipefail
+          jkit=jkit-cli/target/jkit${{ matrix.exe }}
+          python=$(command -v python3 || command -v python)
+          "$jkit" --version | tr -d '\r' | grep -Fx "jkit $VERSION"
+          # the network commands are checked, but an outage at foojay or Maven Central only warns:
+          # it shouldn't fail a release build
+          if out=$("$jkit" search jdk --maintained); then
+            printf '%s\n' "$out" | head -3
+          else
+            echo "::warning::jkit search jdk failed (network?)"
+          fi
+          if doc=$("$jkit" search maven --json); then
+            printf '%s' "$doc" | "$python" -c 'import json,sys; json.load(sys.stdin)'
+          else
+            echo "::warning::jkit search maven failed (network?)"
+          fi
+          # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
+          for cmd in "list --json" "status --json" "env --json --no-project" "doctor --json"; do
+            doc=$("$jkit" $cmd) || { echo "::error::jkit $cmd failed"; exit 1; }
+            printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
+              || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
+          done
+          if [ "$RUNNER_OS" = Windows ]; then "$jkit" hook pwsh > /dev/null; else "$jkit" hook bash > /dev/null; fi
+          if command -v file > /dev/null; then file "$jkit"; fi
+          if [ "$RUNNER_OS" = macOS ]; then
+            lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
+            otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
+          fi
+
+      # Each archive holds, at its root, the binary (jkit, or jkit.exe on Windows), LICENSE and
+      # THIRD-PARTY-NOTICES. On Linux the archives are reproducible: fixed order, owner and
+      # timestamps (the tagged commit's). macOS binaries are packed by macos-pack, after signing.
+      - name: Collect the files
+        run: |
+          mkdir dist stage
+          base="jkit-$VERSION-${{ matrix.platform }}"
+          cp "jkit-cli/target/jkit${{ matrix.exe }}" LICENSE THIRD-PARTY-NOTICES stage/
+          files=("jkit${{ matrix.exe }}" LICENSE THIRD-PARTY-NOTICES)
+          chmod 755 "stage/jkit${{ matrix.exe }}"
+          chmod 644 stage/LICENSE stage/THIRD-PARTY-NOTICES
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd stage && 7z a -tzip -bso0 "../dist/$base.zip" "${files[@]}")
+          elif [ "$RUNNER_OS" = Linux ]; then
+            epoch=$(git log -1 --format=%ct)
+            touch -d "@$epoch" "${files[@]/#/stage/}"
+            tar -C stage --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch" \
+              --format=gnu -cf - "${files[@]}" | gzip -9n > "dist/$base.tar.gz"
+            (cd stage && TZ=UTC zip -q -X "../dist/$base.zip" "${files[@]}")
+            cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+            # GitHub turns "~" (the pre-release marker, jkit_1.2.0~rc.1_amd64.deb) into "." on
+            # upload, and SHA256SUMS must name the files as they are published
+            for f in dist/*~*; do
+              if [ -e "$f" ]; then mv "$f" "${f//\~/.}"; fi
+            done
+          fi
+          if [ "${{ matrix.platform }}" = linux-x64 ]; then
+            cp jkit-cli/target/sbom.json "dist/jkit-$VERSION-sbom.cdx.json"
+          fi
+          ls -l dist
+
+      - name: Upload
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jkit-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload the unsigned macOS binary
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-${{ matrix.platform }}
+          path: stage/*
+          if-no-files-found: error
+
+  # Signing runs in a job of its own: it only downloads the binary and runs Apple's tools, never
+  # the build's Maven plugins, which could otherwise read the certificate. Only for a pushed tag;
+  # a manual run packs the unsigned binary.
+  macos-sign:
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, platform: macos-aarch64 }
+          - { runner: macos-15-intel, platform: macos-x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download the unsigned binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-${{ matrix.platform }}
+          path: stage
+
+      # Needs these secrets, in the `release` environment limited to v* tags (Settings → Environments):
       #   MACOS_CERTIFICATE_P12       base64 of the "Developer ID Application" certificate + key (.p12)
       #   MACOS_CERTIFICATE_PASSWORD  the .p12 export password
       #   APPLE_API_KEY_P8            base64 of an App Store Connect API key (.p8, Developer role)
@@ -105,7 +284,6 @@ jobs:
       # the first time a downloaded copy runs. Without the secrets, a pre-release tag (with a hyphen)
       # ships the linker's ad-hoc signature with a warning; a release tag fails.
       - name: Sign and notarize
-        if: runner.os == 'macOS'
         env:
           CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -113,7 +291,8 @@ jobs:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          bin=jkit-cli/target/jkit
+          bin=stage/jkit
+          chmod 755 "$bin"
           if [ -z "$CERT_P12" ] || [ -z "$API_KEY_P8" ]; then
             case "$GITHUB_REF_NAME" in
               *-*) echo "::warning::signing secrets are not set; this pre-release ships unsigned for macOS"
@@ -139,8 +318,17 @@ jobs:
             | grep -m1 'Developer ID Application' | awk '{print $2}')
           [ -n "$identity" ] || { echo "::error::no Developer ID Application identity in the .p12"; exit 1; }
 
-          codesign --force --timestamp --options runtime --identifier dev.jkit.jkit \
-            --sign "$identity" --keychain "$keychain" "$bin"
+          # Apple's timestamp server sometimes doesn't answer ("A timestamp was expected but was
+          # not found"): try a few times before failing the release
+          for attempt in 1 2 3 4 5; do
+            if codesign --force --timestamp --options runtime --identifier dev.jkit.jkit \
+                 --sign "$identity" --keychain "$keychain" "$bin"; then
+              break
+            fi
+            [ "$attempt" = 5 ] && { echo "::error::codesign failed 5 times"; exit 1; }
+            echo "codesign failed (attempt $attempt); retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
           codesign --verify --strict --verbose=2 "$bin"
 
           # notarytool takes a zip; the ticket it records covers the binary's code signature
@@ -160,51 +348,82 @@ jobs:
           fi
 
       - name: Remove the signing keychain
-        if: always() && runner.os == 'macOS'
+        if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
 
-      - name: Smoke test
-        env:
-          JKIT_HOME: ${{ runner.temp }}/jkit-home
+      - name: Upload the signed binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-${{ matrix.platform }}
+          path: stage/jkit
+          if-no-files-found: error
+
+  macos-pack:
+    needs: [build, macos-sign]
+    # after signing, or right after the build when there is no signing (a manual run)
+    if: >-
+      !cancelled() && needs.build.result == 'success'
+      && (needs.macos-sign.result == 'success' || needs.macos-sign.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, platform: macos-aarch64, arch: arm64 }
+          - { runner: macos-15-intel, platform: macos-x64, arch: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    defaults:
+      run:
         shell: bash
+    steps:
+      - name: Download the binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-${{ matrix.platform }}
+          path: stage
+
+      # into a folder of its own, then copied over the unsigned one: nothing depends on how
+      # download-artifact treats a file that is already there
+      - name: Download the signed binary
+        if: needs.macos-sign.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-${{ matrix.platform }}
+          path: signed
+
+      - name: Use the signed binary
+        if: needs.macos-sign.result == 'success'
+        run: cp -f signed/jkit stage/jkit
+
+      - name: Check and pack
         run: |
           set -euo pipefail
-          jkit=jkit-cli/target/jkit${{ matrix.exe }}
-          python=$(command -v python3 || command -v python)
-          "$jkit" --version | tr -d '\r' | grep -Fx "jkit $VERSION"
-          # run each command to completion first, so a crash fails the step (a pipe into head would hide it)
-          out=$("$jkit" search jdk --maintained)
-          printf '%s\n' "$out" | head -3
-          # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
-          for cmd in "list --json" "status --json" "env --json --global" "doctor --json" "search maven --json"; do
-            doc=$("$jkit" $cmd) || { echo "::error::jkit $cmd failed"; exit 1; }
-            printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
-              || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
-          done
-          if [ "$RUNNER_OS" = Windows ]; then "$jkit" hook pwsh > /dev/null; else "$jkit" hook bash > /dev/null; fi
-          if command -v file > /dev/null; then file "$jkit"; fi
-          if [ "$RUNNER_OS" = macOS ]; then
-            lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
-            otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
-            codesign -dv jkit-cli/target/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
+          if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
+          chmod 755 stage/jkit
+          chmod 644 stage/LICENSE stage/THIRD-PARTY-NOTICES
+          stage/jkit --version | grep -Fx "jkit $VERSION"
+          lipo -archs stage/jkit | grep -Fx "${{ matrix.arch }}"
+          codesign -dv stage/jkit 2>&1 | grep -E 'Authority|Identifier|flags' || true
+          # a tag ships what macos-sign signed: check it really is, not the linker's ad-hoc signature
+          if [ "${{ needs.macos-sign.result }}" = success ]; then
+            codesign --verify --strict stage/jkit
+            if codesign -dvv stage/jkit 2>&1 | grep -q 'Authority=Developer ID Application'; then
+              echo "signed with a Developer ID"
+            else
+              case "$GITHUB_REF_NAME" in
+                *-*) echo "::warning::this pre-release's macOS binary isn't Developer-ID signed" ;;
+                *)   echo "::error::the macOS binary isn't Developer-ID signed"; exit 1 ;;
+              esac
+            fi
           fi
-
-      # Each archive holds the bare binary at its root: jkit, or jkit.exe on Windows.
-      - name: Collect the files
-        run: |
           mkdir dist
           base="jkit-$VERSION-${{ matrix.platform }}"
-          if [ "$RUNNER_OS" = Windows ]; then
-            (cd jkit-cli/target && 7z a -tzip -bso0 "../../dist/$base.zip" jkit.exe)
-          else
-            tar -C jkit-cli/target -czf "dist/$base.tar.gz" jkit
-            (cd jkit-cli/target && zip -q -X "../../dist/$base.zip" jkit)
-          fi
-          if [ "$RUNNER_OS" = Linux ]; then
-            cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
-          fi
+          files=(jkit LICENSE THIRD-PARTY-NOTICES)
+          # bsdtar: fixed owner and order; the binary itself differs per build (signature)
+          tar -C stage --uid 0 --gid 0 --uname root --gname wheel -czf "dist/$base.tar.gz" "${files[@]}"
+          (cd stage && zip -q -X "../dist/$base.zip" "${files[@]}")
           ls -l dist
 
       - name: Upload
@@ -214,45 +433,135 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  release:
-    needs: build
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+  # The Homebrew formula and winget manifests are otherwise first generated on a real tag: make
+  # them from this run's files and check their syntax on every run, the manual ones included.
+  packaging-check:
+    needs: [build, macos-pack]
+    # explicit: a skipped macos-sign (a manual run) would otherwise skip everything after it
+    if: >-
+      !cancelled() && needs.build.result == 'success' && needs.macos-pack.result == 'success'
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: jkit-*
+          merge-multiple: true
+
+      - name: Generate and check
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
+          (cd dist && sha256sum * > "$RUNNER_TEMP/SHA256SUMS")
+          case "$version" in
+            *-*) echo "a pre-release: Homebrew and winget skip it, but the files are still checked" ;;
+          esac
+          packaging/homebrew-formula.sh "$version" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/jkit.rb"
+          ruby -c "$RUNNER_TEMP/jkit.rb"
+          packaging/winget-manifests.sh "$version" "$RUNNER_TEMP/SHA256SUMS" "$RUNNER_TEMP/manifests"
+          python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]; print(len(sys.argv) - 1, "manifests parse")' \
+            "$RUNNER_TEMP"/manifests/*.yaml
+
+  release:
+    needs: [build, macos-pack, packaging-check]
+    if: >-
+      github.event_name == 'push' && github.ref_type == 'tag' && !cancelled()
+      && needs.build.result == 'success' && needs.macos-pack.result == 'success'
+      && needs.packaging-check.result == 'success'
+    outputs:
+      latest: ${{ steps.publish.outputs.latest }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
     permissions:
       contents: write
+      id-token: write       # build provenance: the OIDC token Sigstore signs with
+      attestations: write
     steps:
       - name: Download
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
+          pattern: jkit-*   # not the unsigned-/signed- macOS binaries
           merge-multiple: true
 
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Checksums
         run: |
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      # The release is created as a draft, filled, then published, so a failed upload leaves a
+      # draft that a re-run can finish. A release that is already published is never touched.
+      - name: Publish the release
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          tag="$GITHUB_REF_NAME"
           flags=()
-          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            # a re-run: replace the files, keep the release and its notes
-            gh release upload "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --clobber
+          case "$tag" in *-*) flags+=(--prerelease) ;; esac
+          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::release $tag is already published; refusing to replace its files." \
+                "Push a new tag, or delete the release by hand first if it really must be rebuilt."
+              exit 1
+            fi
+            echo "re-run: replacing the files of the draft release $tag"
+            gh release upload "$tag" * --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" * \
+            gh release create "$tag" * --draft \
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
-              --title "jkit ${GITHUB_REF_NAME#v}" "${flags[@]}"
+              --title "jkit ${tag#v}" "${flags[@]}"
           fi
+          # "Latest" only for the highest version: a later 0.2.x patch must not take it from 0.3.0
+          latest=false
+          case "$tag" in
+            *-*) ;;
+            *)
+              # fails the step if the list can't be read: never guess that this tag is the highest
+              published=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+                            --limit 200 --json tagName --jq '.[].tagName')
+              highest=$(printf '%s\n%s\n' "$published" "$tag" \
+                         | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+              [ "$highest" = "$tag" ] && latest=true ;;
+          esac
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
 
   # Needs HOMEBREW_TAP_TOKEN: a fine-grained token with Contents read/write on
   # adriandeleon/homebrew-tap. Users install with `brew install adriandeleon/tap/jkit`.
   homebrew:
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
+    # only the highest version: a later 0.2.x patch must not move the formula back from 0.3.0
+    if: >-
+      github.event_name == 'push' && github.ref_type == 'tag' && !contains(github.ref_name, '-')
+      && needs.release.outputs.latest == 'true'
+    # the tokens can live in this environment, limited to v* tags (Settings → Environments)
+    environment: release
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash   # -e and pipefail: a failed command in a pipeline fails the step
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -265,12 +574,18 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$TAP_TOKEN" ]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew formula was not updated"
-            exit 0
+            # a release that silently skips Homebrew looks done but isn't: fail, so it shows
+            echo "::error::HOMEBREW_TAP_TOKEN is not set, so the Homebrew formula was not updated." \
+              "Add the secret, then re-run this job."
+            exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/adriandeleon/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          # the token goes in a header given per command, so it is never written to .git/config
+          auth=$(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          gitauth=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth")
+          git "${gitauth[@]}" clone --depth 1 https://github.com/adriandeleon/homebrew-tap.git "$RUNNER_TEMP/tap"
           mkdir -p "$RUNNER_TEMP/tap/Formula"
           packaging/homebrew-formula.sh "$version" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/tap/Formula/jkit.rb"
           cat "$RUNNER_TEMP/tap/Formula/jkit.rb"
@@ -283,14 +598,15 @@ jobs:
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "jkit $version"
-          git push origin HEAD
+          git "${gitauth[@]}" push origin HEAD
 
   # Needs WINGET_TOKEN: a classic token with the public_repo scope, from an account that can fork
   # microsoft/winget-pkgs (wingetcreate forks it and opens the pull request from that fork).
   # Microsoft's reviewers merge it, usually within a day or two; users then `winget install jkit`.
   winget:
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: github.event_name == 'push' && github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    environment: release
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -306,15 +622,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          # a pinned wingetcreate release; bump both lines together
+          WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.28.1.0/wingetcreate.exe
+          WINGETCREATE_SHA256: 63d980ba79e97042395bd6eb5992c2db9e01e9e7a8a22958a95c288f27310413
         run: |
           if [ -z "$WINGET_TOKEN" ]; then
-            echo "::warning::WINGET_TOKEN is not set; no winget pull request was opened"
-            exit 0
+            echo "::error::WINGET_TOKEN is not set, so no winget pull request was opened." \
+              "Add the secret, then re-run this job."
+            exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
           packaging/winget-manifests.sh "$version" "$RUNNER_TEMP/SHA256SUMS" manifests
           cat manifests/*.yaml
-          curl -fsSL -o "$RUNNER_TEMP/wingetcreate.exe" https://aka.ms/wingetcreate/latest
-          "$RUNNER_TEMP/wingetcreate.exe" submit --token "$WINGET_TOKEN" \
-            --prtitle "New version: AdrianDeLeon.jkit version $version" manifests
+          exe="$RUNNER_TEMP/wingetcreate.exe"
+          curl -fsSL --proto '=https' -o "$exe" "$WINGETCREATE_URL"
+          actual=$(sha256sum < "$exe" | cut -d' ' -f1)
+          if [ "$actual" != "$WINGETCREATE_SHA256" ]; then
+            echo "::error::wingetcreate.exe has SHA-256 $actual, expected $WINGETCREATE_SHA256"
+            exit 1
+          fi
+          # a re-run after wingetcreate already opened the pull request must not open a second one
+          # winget-pkgs titles a package's first submission "New package", later ones "New version"
+          if GH_TOKEN="$WINGET_TOKEN" gh api repos/microsoft/winget-pkgs/contents/manifests/a/AdrianDeLeon/jkit \
+               > /dev/null 2>&1; then
+            title="New version: AdrianDeLeon.jkit version $version"
+          else
+            title="New package: AdrianDeLeon.jkit version $version"
+          fi
+          # an open or merged pull request for this version, under either title (a re-run after the
+          # first one merged would otherwise ask for "New version"); a closed, unmerged one doesn't
+          # count, so a rejected submission is sent again. Exact titles only: the search matches
+          # prefixes ("version 0.3" would also find "version 0.3.1")
+          existing=$(T1="New package: AdrianDeLeon.jkit version $version" \
+                     T2="New version: AdrianDeLeon.jkit version $version" GH_TOKEN="$WINGET_TOKEN" \
+                     gh pr list --repo microsoft/winget-pkgs --state all \
+                       --search "\"AdrianDeLeon.jkit version $version\" in:title" --limit 50 --json url,title,state \
+                       --jq '.[] | select((.title == env.T1 or .title == env.T2) and .state != "CLOSED")
+                             | "\(.state) \(.url)"' | head -1)
+          if [ -n "$existing" ]; then
+            echo "a pull request for $version exists already: $existing"
+            exit 0
+          fi
+          # --no-open: there is no browser on the runner. The token comes from the environment
+          # (WINGET_CREATE_GITHUB_TOKEN), not the command line, where it could end up in a log.
+          WINGET_CREATE_GITHUB_TOKEN="$WINGET_TOKEN" "$exe" submit --no-open \
+            --prtitle "$title" manifests

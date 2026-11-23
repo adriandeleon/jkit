@@ -38,7 +38,7 @@ class HookEnvTest {
         env = new HashMap<>(Map.of("JKIT_HOME", home.toString(), "HOME", tmp.resolve("user").toString(),
                 "JKIT_JDK_VENDOR", "temurin", "JKIT_SHELL", "bash",
                 "JAVA_HOME", home.resolve("global/jdk").toString(),
-                "PATH", home.resolve("global/jdk/bin") + ":/usr/bin"));
+                "PATH", home.resolve("global/jdk/bin") + java.io.File.pathSeparator + "/usr/bin"));
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
@@ -68,6 +68,16 @@ class HookEnvTest {
     }
 
     @Test
+    void theFolderLeftIsFoundEvenWithSemicolonsInItsName() {
+        String sep = java.io.File.separator;
+        String file = sep + "src" + sep + "a;b" + sep + "jkit.toml"; // no ":" in a Windows name
+        assertThat(HookEnvCommand.appliedDir(file + ":1700000000000;" + sep + "x" + sep + ".sdkmanrc:5"))
+                .isEqualTo(Path.of(file).getParent().toString());
+        assertThat(HookEnvCommand.appliedDir(file + ":1700000000000" + ProjectShell.MISSING))
+                .isEqualTo(Path.of(file).getParent().toString());
+    }
+
+    @Test
     void outsideAProjectItDoesAndSaysNothing() throws Exception {
         assertThat(cd(elsewhere)).isEmpty();
         assertThat(said()).isEmpty();
@@ -79,7 +89,7 @@ class HookEnvTest {
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", temurin21.toString())
                 .containsEntry("JKIT_PROJECT_JDK", temurin21.toString()).containsKey("JKIT_PROJECT");
-        assertThat(env.get("PATH")).startsWith(temurin21.resolve("bin") + ":");
+        assertThat(env.get("PATH")).startsWith(temurin21.resolve("bin") + java.io.File.pathSeparator);
         assertThat(said()).contains("jkit: using ").contains("jkit.toml: jdk 21.0.9+10 temurin")
                 .contains("set    JAVA_HOME=" + temurin21).contains("PATH   + " + temurin21.resolve("bin"));
     }

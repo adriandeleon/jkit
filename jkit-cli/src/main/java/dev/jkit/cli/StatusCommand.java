@@ -64,7 +64,9 @@ final class StatusCommand implements Callable<Integer> {
             out.println("nothing active or installed yet · try: jkit search jdk");
         }
         if (result.projectError() != null) {
-            out.println("project file error: " + result.projectError());
+            out.println("project file error: " + Changes.tilde(result.projectError()));
+        } else if (result.projectSkipped() != null) {
+            out.println("project: none (" + Changes.tilde(result.projectSkipped()) + ")");
         } else if (result.project().isPresent()) {
             ProjectSpec p = result.project().get();
             out.println("project: " + Changes.tilde(p.dir().toString()) + " (" + p.source() + ")");
@@ -117,14 +119,14 @@ final class StatusCommand implements Callable<Integer> {
         }
         if (s.matches()) {
             return s.source() == Source.SHELL && s.pin() != null && s.pinInstall() != null
-                    && !s.pinInstall().home().equals(s.shellChoice())
+                    && !Resolve.same(s.pinInstall().home(), s.shellChoice())
                     ? projectFile(result) + " wants " + pinText(s.pin()) + "; this shell chose another with jkit use"
                             + ", to follow it: jkit reset " + tool
                     : null;
         }
         return switch (s.wanted()) {
             case SHELL -> "this shell chose " + Changes.tilde(s.shellChoice().toString()) + " with jkit use, but "
-                    + tool.homeVariable() + " was changed since: jkit use " + tool + " again, or jkit reset " + tool;
+                    + tool.homeVariable() + " was changed since: jkit use " + tool + "@<version> to choose again, or jkit reset " + tool;
             case PROJECT -> s.pin() == null // GraalVM following the project's GraalVM JDK
                     ? tool.homeVariable() + " follows the project's GraalVM JDK, which this shell doesn't have yet: "
                             + "jkit sync"
@@ -137,7 +139,7 @@ final class StatusCommand implements Callable<Integer> {
                         + "; remove it from your shell profile to use jkit's";
                 case STALE -> "set by jkit earlier but no longer chosen: open a new shell, or jkit reset " + tool;
                 default -> ctx.env.get("JKIT_SHELL") == null
-                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: jkit hook bash --install (or zsh, fish), then open a new shell"
+                        ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: " + Changes.HOOK_SETUP + ", then open a new shell"
                         : "the global " + tool + " isn't applied in this shell yet: open a new shell";
             };
             case NONE -> s.source() == Source.STALE
@@ -149,7 +151,11 @@ final class StatusCommand implements Callable<Integer> {
 
     private static String installedHint(Context ctx, Tool tool) throws Exception {
         List<Installed> installed = ctx.store.list(tool);
-        Installed newest = installed.getFirst();
+        // the default vendor's newest when there is one, like jkit use without a vendor would pick
+        dev.jkit.model.Vendor preferred = tool.hasVendors() ? ctx.config.defaultVendor(tool) : null;
+        Installed newest = installed.stream().filter(i -> preferred != null && preferred.equals(i.vendor())
+                && (tool != Tool.JDK || !(i.vendor() != null && i.vendor().isGraalVmBased())))
+                .findFirst().orElse(installed.getFirst());
         return installed.size() + " installed, none chosen: " + useCommand(tool, newest, true);
     }
 
@@ -185,6 +191,7 @@ final class StatusCommand implements Callable<Integer> {
         doc.put("project", result.project().map(p -> (Object) JsonOut.fields(
                 "dir", p.dir(), "files", p.files(), "warnings", p.warnings())).orElse(null));
         doc.put("projectError", result.projectError());
+        doc.put("projectSkipped", result.projectSkipped());
         List<Object> tools = new ArrayList<>();
         for (ToolState s : result.tools()) {
             tools.add(JsonOut.fields(

@@ -9,12 +9,20 @@ public final class Suggest {
 
     /**
      * The candidate closest to {@code input}, or null when none is close enough. Close means an
-     * edit distance of at most 1 for short names and about a third of the length for longer ones,
-     * so {@code correto} finds {@code corretto} but {@code foo} finds nothing.
+     * edit distance of at most 1 for names up to 3 letters and 2 (or a third of the length) for
+     * longer ones, so {@code correto} finds {@code corretto}, {@code zuul} finds {@code zulu}, and
+     * {@code foo} finds nothing. A candidate that starts with the input ({@code graal}) counts too.
      */
     public static String closest(String input, Collection<String> candidates) {
         String in = input.toLowerCase(Locale.ROOT);
-        int limit = Math.max(1, in.length() / 3);
+        if (in.length() >= 3) {
+            for (String c : candidates) {
+                if (c.toLowerCase(Locale.ROOT).startsWith(in)) {
+                    return c;
+                }
+            }
+        }
+        int limit = in.length() <= 3 ? 1 : Math.max(2, in.length() / 3);
         String best = null;
         int bestDistance = Integer.MAX_VALUE;
         for (String c : candidates) {

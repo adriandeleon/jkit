@@ -1,14 +1,14 @@
 Package: jkit
-Version: [[version]]
+Version: [[deb.version]]
 Section: devel
 Priority: optional
 Architecture: [[deb.arch]]
 Maintainer: [[package.maintainer]]
 Depends: libc6 (>= 2.34), zlib1g
-Homepage: https://github.com/adriandeleon/jkit
-Description: installs and switches JDKs, Maven and Gradle
+Homepage: https://jkit-project.dev
+Description: installs and switches JDKs, Maven, Gradle and sbt
  jkit is a single native command-line tool that installs and switches
  JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and
- others), Maven and Gradle. It needs no JDK to run.
+ others), Maven, Gradle and sbt. It needs no JDK to run.
  .
  Enable switching in the current shell with: eval "$(jkit hook bash)"

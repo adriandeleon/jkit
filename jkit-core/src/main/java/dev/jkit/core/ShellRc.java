@@ -35,7 +35,9 @@ public final class ShellRc {
     }
 
     private static Path dirOr(String value, Path fallback) {
-        return value == null || value.isBlank() ? fallback : Path.of(value);
+        // relative values (rare, and not what the shell means either) fall back like unset ones
+        Path path = Fs.path(value);
+        return path == null || !path.isAbsolute() ? fallback : path;
     }
 
     /** The lines between and including the markers. Guarded, so a shell still starts after jkit is gone. */
@@ -90,6 +92,17 @@ public final class ShellRc {
      * The 1-based number of a line outside jkit's block that loads the hook ({@code jkit hook}, not
      * commented out), or 0: someone added it by hand, so jkit leaves it alone.
      */
+    /**
+     * Lines that load the hook: {@code eval "$(jkit hook bash)"}, {@code jkit hook fish | source},
+     * {@code jkit hook pwsh | Invoke-Expression}, {@code source <(jkit hook zsh)}. Not an alias or a
+     * function that merely mentions it ({@code alias jh='jkit hook bash'}).
+     */
+    private static final java.util.regex.Pattern LOADS_HOOK = java.util.regex.Pattern.compile(
+            // eval "$(jkit hook bash)", eval "`jkit hook bash`", eval "$(JKIT_AUTO_SWITCH=1 jkit hook bash)"
+            "(eval\\s+[\"']?(\\$\\(|`)\\s*(command\\s+|env\\s+|\\w+=\\S*\\s+)*\\S*jkit\\s+hook"
+                    + "|\\S*jkit\\s+hook\\b[^|#]*\\|\\s*(source|\\.|iex|Invoke-Expression|Out-String)"
+                    + "|(source|\\.)\\s+<\\(\\s*\\S*jkit\\s+hook)");
+
     public static int manualLine(String text) {
         List<String> lines = text.lines().toList();
         boolean inBlock = false;
@@ -99,7 +112,7 @@ public final class ShellRc {
                 inBlock = true;
             } else if (line.equals(END)) {
                 inBlock = false;
-            } else if (!inBlock && !line.startsWith("#") && line.contains("jkit hook")) {
+            } else if (!inBlock && !line.startsWith("#") && LOADS_HOOK.matcher(line).find()) {
                 return i + 1;
             }
         }

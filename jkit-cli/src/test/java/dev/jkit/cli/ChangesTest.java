@@ -26,7 +26,7 @@ class ChangesTest {
     private static String print(Changes changes) {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         changes.print(new PrintStream(bytes, true));
-        return bytes.toString();
+        return bytes.toString().replace("\r\n", "\n"); // println's line ends are \r\n on Windows
     }
 
     @Test

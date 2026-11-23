@@ -30,14 +30,21 @@ import picocli.CommandLine.Parameters;
                 "  jkit exec jdk@17 zulu maven@3.9 -- mvn -v",
                 "",
                 "Exits with the command's exit code (126: can't start it, 127: not found).",
-                "Never uses the network and installs nothing: a missing version exits 3."})
+                "Never uses the network and installs nothing: a missing version exits 3.",
+                "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits); to stop it",
+                "from another process, send jkit SIGTERM: it passes it on, waits, and exits with the",
+                "command's code (a second SIGTERM kills the command)."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",
             completionCandidates = Candidates.Tools.class)
     List<String> args = new ArrayList<>();
 
-    @Option(names = "--global", description = "Ignore project files; start from the global versions only.")
+    @Option(names = "--no-project", description = "Ignore project files; start from the global versions only.")
+    boolean noProject;
+
+    /** The old name of --no-project, kept so scripts keep working. */
+    @Option(names = "--global", hidden = true)
     boolean global;
 
     @Option(names = "--dir", paramLabel = "<path>", description = "Run in this folder, and look for a project file from it.")
@@ -68,7 +75,8 @@ final class ExecCommand implements Callable<Integer> {
         List<String> command = args.subList(args.size() - tail, args.size());
         Context ctx = Context.readOnly();
         Path cwd = Path.of("").toAbsolutePath();
-        Plan plan = plan(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), global, choices(before), command);
+        Plan plan = plan(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), noProject || global, choices(before),
+                command);
         return run(plan, ctx.env);
     }
 
@@ -77,7 +85,11 @@ final class ExecCommand implements Callable<Integer> {
         List<Choice> out = new ArrayList<>();
         for (String word : words) {
             ToolSpec parsed = asSpec(word);
-            if (parsed != null) {
+            // "graalvm" is a tool and Oracle GraalVM's vendor name: right after a JDK without a
+            // vendor it is the vendor, as in jkit use jdk@21 graalvm (graalvm@21 names the tool)
+            boolean vendorAfterJdk = word.equals("graalvm") && !out.isEmpty() && out.getLast().vendor() == null
+                    && out.getLast().spec().tool() == Tool.JDK;
+            if (parsed != null && !vendorAfterJdk) {
                 out.add(new Choice(parsed, null));
             } else if (!out.isEmpty() && out.getLast().vendor() == null && out.getLast().spec().tool().hasVendors()) {
                 out.set(out.size() - 1, new Choice(out.getLast().spec(), word));
@@ -107,13 +119,14 @@ final class ExecCommand implements Callable<Integer> {
         java.util.Set<Tool> named = java.util.EnumSet.noneOf(Tool.class);
         choices.forEach(c -> named.add(c.spec().tool()));
         EnvCommand.Result base = EnvCommand.compute(ctx, dir, ignoreProject, named,
-                "jkit exec --global " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
+                "jkit exec --no-project " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
         Map<Tool, Path> homes = new EnumMap<>(Tool.class);
         homes.putAll(base.homes());
         boolean jdkIsGraalVm = EnvCommand.isGraalVm(ctx, homes.get(Tool.JDK));
         for (Choice c : choices) {
-            Vendor vendor = Resolve.vendor(ctx, c.spec(), c.vendor());
-            Installed chosen = Resolve.installed(ctx, c.spec(), vendor, c.vendor(), false).getFirst();
+            ToolSpec cs = Resolve.lts(ctx, c.spec(), c.vendor(), false);
+            Vendor vendor = Resolve.vendor(ctx, cs, c.vendor());
+            Installed chosen = Resolve.installed(ctx, cs, vendor, c.vendor(), false, "exec").getFirst();
             homes.put(c.spec().tool(), chosen.home());
             if (c.spec().tool() == Tool.JDK) {
                 jdkIsGraalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
@@ -126,7 +139,8 @@ final class ExecCommand implements Callable<Integer> {
             variables.put(ShellEnv.projectVariable(t), null); // nor what jkit sync applied to it
             String current = ctx.env.get(t.homeVariable());
             if (!variables.containsKey(t.homeVariable()) && current != null
-                    && Path.of(current).toAbsolutePath().normalize().startsWith(tools)) {
+                    && dev.jkit.core.Fs.path(current) != null
+                    && dev.jkit.core.Fs.path(current).toAbsolutePath().normalize().startsWith(tools)) {
                 variables.put(t.homeVariable(), null); // a jkit install whose bin is no longer on PATH
             }
         }
@@ -137,7 +151,7 @@ final class ExecCommand implements Callable<Integer> {
 
     /** The child environment: the parent's, with the plan's changes applied. */
     static Map<String, String> childEnv(Map<String, String> parent, Plan plan) {
-        Map<String, String> env = new HashMap<>(parent);
+        Map<String, String> env = dev.jkit.model.Envs.copy(parent);
         plan.variables().forEach((k, v) -> {
             if (v == null) {
                 env.remove(k);
@@ -157,13 +171,21 @@ final class ExecCommand implements Callable<Integer> {
             return name;
         }
         boolean windows = File.separatorChar == '\\';
-        List<String> suffixes = windows ? List.of("", ".exe", ".cmd", ".bat") : List.of("");
-        for (String entry : path.split(File.pathSeparator)) {
-            if (entry.isEmpty()) {
+        // Windows: mvn.cmd before mvn, the Unix script next to it that CreateProcess can't start
+        List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
+        for (String raw : path.split(File.pathSeparator)) {
+            // some installers add quoted entries ("C:\Program Files\x"), which aren't valid paths
+            Path entry = dev.jkit.core.Fs.path(raw);
+            if (entry == null) {
                 continue;
             }
             for (String suffix : suffixes) {
-                Path candidate = dir.resolve(entry).resolve(name + suffix);
+                Path candidate;
+                try {
+                    candidate = dir.resolve(entry).resolve(name + suffix);
+                } catch (java.nio.file.InvalidPathException e) {
+                    continue;
+                }
                 if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
                     return candidate.toString();
                 }
@@ -187,9 +209,19 @@ final class ExecCommand implements Callable<Integer> {
             throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
         }
         // Ctrl-C reaches the whole foreground process group, so the child gets its own SIGINT: a REPL
-        // handles it and keeps going, and its exit code is ours. Only SIGTERM/SIGHUP stop it from here.
+        // handles it and keeps going, and its exit code is ours. SIGTERM and SIGHUP are passed on as
+        // SIGTERM (a second one kills it), and jkit still waits, so its exit code is the child's and
+        // a child that ignores TERM is never left running on its own.
         List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
-        Thread stop = new Thread(process::destroy);
+        java.util.concurrent.atomic.AtomicInteger stops = new java.util.concurrent.atomic.AtomicInteger();
+        ignored.addAll(Signals.handle(() -> {
+            if (stops.getAndIncrement() == 0) {
+                process.destroy();
+            } else {
+                process.destroyForcibly();
+            }
+        }, "TERM", "HUP"));
+        Thread stop = new Thread(process::destroy); // where those signals can't be handled
         Runtime.getRuntime().addShutdownHook(stop);
         try {
             return process.waitFor();

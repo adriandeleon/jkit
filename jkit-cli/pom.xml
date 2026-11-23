@@ -15,6 +15,13 @@
 
   <properties>
     <main.class>dev.jkit.cli.Main</main.class>
+    <!-- the release workflow sets 1.2.0~rc.1 for a pre-release: in RPM a "-" may not appear in
+         the version, and "~" makes the pre-release sort before 1.2.0 -->
+    <rpm.version>${project.version}</rpm.version>
+    <!-- the same for the .deb: its control file, file name and changelog all use this -->
+    <deb.version>${project.version}</deb.version>
+    <!-- file times inside the jars and the .deb; the release workflow sets the tagged commit's time -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
   </properties>
 
   <dependencies>
@@ -86,7 +93,11 @@
     <!--
       mvn -Pnative package  (needs GRAALVM_HOME pointing at GraalVM 25)
 
-      Use package or verify with this profile, not install. On Oracle GraalVM the plugin makes a
+      Releases are built with GraalVM Community Edition, which supports -Os (optimize for size)
+      too. The SBOM shipped with a release is a separate file (CycloneDX, made in release.yml);
+      Community Edition embeds none in the binary.
+
+      With Oracle GraalVM, use package or verify with this profile, not install: the plugin makes a
       base SBOM with cyclonedx-maven-plugin, which attaches target/base_sbom.json to the project as
       an extra artifact; the plugin then embeds the SBOM in the binary and deletes that file. The
       artifact stays attached, so install fails copying a file that's gone. The binary is fine.
@@ -114,6 +125,10 @@
               <mainClass>${main.class}</mainClass>
               <buildArgs>
                 <buildArg>-Os</buildArg>
+                <!-- the default targets x86-64-v3 (AVX2) on amd64: keep the binary running on older CPUs -->
+                <buildArg>-march=compatibility</buildArg>
+                <!-- HttpClient's proxy authentication (407) goes through java.net.URL with http -->
+                <buildArg>--enable-url-protocols=http,https</buildArg>
               </buildArgs>
             </configuration>
           </plugin>
@@ -172,6 +187,21 @@
                   <outputFile>${project.build.directory}/completion/jkit</outputFile>
                 </configuration>
               </execution>
+              <execution>
+                <id>deb-changelog</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${project.basedir}/../packaging/deb-changelog.sh</executable>
+                  <arguments>
+                    <argument>${deb.version}</argument>
+                    <argument>${package.maintainer}</argument>
+                    <argument>${project.build.directory}/deb-doc/changelog.gz</argument>
+                  </arguments>
+                </configuration>
+              </execution>
             </executions>
           </plugin>
           <plugin>
@@ -186,8 +216,9 @@
                   <goal>jdeb</goal>
                 </goals>
                 <configuration>
-                  <deb>${project.build.directory}/jkit_[[version]]_${deb.arch}.deb</deb>
+                  <deb>${project.build.directory}/jkit_[[deb.version]]_${deb.arch}.deb</deb>
                   <snapshotExpand>true</snapshotExpand>
+                  <outputTimestamp>${project.build.outputTimestamp}</outputTimestamp>
                   <controlDir>${project.basedir}/src/deb/control</controlDir>
                   <dataSet>
                     <data>
@@ -223,6 +254,27 @@
                       </mapper>
                     </data>
                     <data>
+                      <src>${project.basedir}/../THIRD-PARTY-NOTICES</src>
+                      <type>file</type>
+                      <mapper>
+                        <type>perm</type>
+                        <prefix>/usr/share/doc/jkit</prefix>
+                        <user>root</user>
+                        <group>root</group>
+                      </mapper>
+                    </data>
+                    <data>
+                      <src>${project.build.directory}/deb-doc/changelog.gz</src>
+                      <type>file</type>
+                      <mapper>
+                        <type>perm</type>
+                        <prefix>/usr/share/doc/jkit</prefix>
+                        <filemode>644</filemode>
+                        <user>root</user>
+                        <group>root</group>
+                      </mapper>
+                    </data>
+                    <data>
                       <src>${project.basedir}/src/deb/doc/copyright</src>
                       <type>file</type>
                       <mapper>
@@ -250,13 +302,17 @@
                 </goals>
                 <configuration>
                   <packageName>jkit</packageName>
+                  <version>${rpm.version}</version>
                   <architecture>${rpm.arch}</architecture>
-                  <summary>Installs and switches JDKs, Maven and Gradle</summary>
-                  <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven and Gradle. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
-                  <license>MIT</license>
+                  <summary>Installs and switches JDKs, Maven, Gradle and sbt</summary>
+                  <description>jkit is a single native command-line tool that installs and switches JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and others), Maven, Gradle and sbt. It needs no JDK to run. Enable switching in the current shell with: eval "$(jkit hook bash)"</description>
+                  <!-- jkit's own code, then what is compiled in (THIRD-PARTY-NOTICES) -->
+                  <license>MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND ICU AND MPL-2.0 AND Unicode-3.0 AND W3C AND Zlib AND GPL-2.0-only WITH Classpath-exception-2.0 AND LicenseRef-CUP AND LicenseRef-Cryptix</license>
                   <group>Development/Tools</group>
                   <vendor>Adrian De Leon</vendor>
                   <packager>${package.maintainer}</packager>
+                  <!-- no runner host name in the header: the same commit gives the same rpm -->
+                  <evalHostname>false</evalHostname>
                   <attach>false</attach>
                   <requires>
                     <require>
@@ -265,8 +321,33 @@
                     <require>
                       <name>libz.so.1()(64bit)</name>
                     </require>
+                    <!-- what rpmbuild declares for a version with ~ (0.3.0~rc.1): rpm 4.10 and later -->
+                    <require>
+                      <name>rpmlib(TildeInVersions)</name>
+                      <version>4.10.0-1</version>
+                      <flags>
+                        <flag>RPMLIB</flag>
+                        <flag>LESS</flag>
+                        <flag>EQUAL</flag>
+                      </flags>
+                    </require>
                   </requires>
                   <entries>
+                    <!-- the package owns its own folders, so removing it removes them -->
+                    <entry>
+                      <name>/usr/share/doc/jkit</name>
+                      <directory>true</directory>
+                      <mode>0755</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
+                    <entry>
+                      <name>/usr/share/licenses/jkit</name>
+                      <directory>true</directory>
+                      <mode>0755</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
                     <entry>
                       <name>/usr/bin/jkit</name>
                       <file>${project.build.directory}/jkit</file>
@@ -292,6 +373,15 @@
                     <entry>
                       <name>/usr/share/licenses/jkit/LICENSE</name>
                       <file>${project.basedir}/../LICENSE</file>
+                      <license>true</license>
+                      <mode>0644</mode>
+                      <user>root</user>
+                      <group>root</group>
+                    </entry>
+                    <entry>
+                      <!-- the libraries compiled into the binary: their licenses and NOTICE files -->
+                      <name>/usr/share/licenses/jkit/THIRD-PARTY-NOTICES</name>
+                      <file>${project.basedir}/../THIRD-PARTY-NOTICES</file>
                       <license>true</license>
                       <mode>0644</mode>
                       <user>root</user>

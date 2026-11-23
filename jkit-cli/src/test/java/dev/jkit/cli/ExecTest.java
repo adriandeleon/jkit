@@ -62,6 +62,9 @@ class ExecTest {
 
     @Test
     void aWordThatIsNoToolOrVendorIsAUsageError() {
+        // "graalvm" right after a JDK is Oracle GraalVM, the vendor, as in jkit use jdk@21 graalvm
+        assertThat(ExecCommand.choices(List.of("jdk@21", "graalvm")))
+                .containsExactly(new ExecCommand.Choice(dev.jkit.model.ToolSpec.parse("jdk@21"), "graalvm"));
         assertThatThrownBy(() -> ExecCommand.choices(List.of("mvn", "test")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("vendor for maven");
         assertThatThrownBy(() -> ExecCommand.choices(List.of("./build.sh")))
@@ -100,7 +103,7 @@ class ExecTest {
         assertThatThrownBy(() -> plan("maven"))
                 .isInstanceOf(JkitException.class)
                 .satisfies(e -> assertThat(((JkitException) e).hints()).contains(
-                        "or ignore the project file: jkit exec --global <tools> -- <command>"));
+                        "or ignore the project file: jkit exec --no-project <tools> -- <command>"));
     }
 
     @Test
@@ -121,6 +124,19 @@ class ExecTest {
         assertThat(child).doesNotContainKeys(ShellEnv.stateVariable(Tool.MAVEN), "MAVEN_HOME", "JKIT_ENV_FILE")
                 .containsEntry("GRADLE_HOME", "/opt/gradle") // not jkit's: left alone
                 .containsEntry("HOME", tmp.resolve("user").toString());
+    }
+
+    @Test
+    void windowsPathIsFoundWhateverItsCase() throws Exception {
+        // Windows names it "Path"; System.getenv() is case-sensitive, so jkit reads it through Envs
+        env.remove("PATH");
+        env.put("Path", "/usr/bin");
+        env = dev.jkit.model.Envs.of(env, true);
+        ExecCommand.Plan plan = plan("jdk@21");
+        assertThat(plan.variables().get("PATH")).endsWith(File.pathSeparator + "/usr/bin");
+        Map<String, String> child = ExecCommand.childEnv(env, plan);
+        assertThat(child.keySet().stream().filter(k -> k.equalsIgnoreCase("path")).count()).isEqualTo(1);
+        assertThat(child.get("Path")).isEqualTo(plan.variables().get("PATH"));
     }
 
     @Test

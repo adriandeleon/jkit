@@ -53,9 +53,18 @@ public final class ProjectFile {
                 return Optional.empty();
             }
             Path file = start.resolve(override).toAbsolutePath().normalize();
+            if (!Path.of(override).isAbsolute() && !Files.exists(file)) {
+                return Optional.empty(); // a relative name (ci/jkit.toml) applies only where it exists
+            }
             if (!Files.isRegularFile(file)) {
                 throw new JkitException(OVERRIDE + " points to " + file + ", which is not a file",
                         "unset it to search for jkit.toml, or set it empty to turn project files off");
+            }
+            String why = Path.of(override).isAbsolute() ? null : untrusted(file);
+            if (why != null) {
+                // a relative name is found in every folder you visit: the same rules as a search
+                throw new JkitException(OVERRIDE + " names " + file + ", but " + why,
+                        "give an absolute path to use that file anyway");
             }
             return Optional.of(read(file));
         }
@@ -71,19 +80,155 @@ public final class ProjectFile {
     public static List<Path> locate(Path start, Map<String, String> env) {
         String override = env.get(OVERRIDE);
         if (override != null) {
-            return override.isBlank() ? List.of() : List.of(start.resolve(override).toAbsolutePath().normalize());
+            if (override.isBlank()) {
+                return List.of();
+            }
+            Path file = start.resolve(override).toAbsolutePath().normalize();
+            return Path.of(override).isAbsolute() || Files.exists(file) ? List.of(file) : List.of();
         }
+        return search(start, env).files();
+    }
+
+    /**
+     * Why a project file above {@code start} is being ignored, for status, sync and doctor to say so:
+     * its folder belongs to someone else or every user can write to it (common on WSL's /mnt/c, SMB
+     * shares and Docker bind mounts). Empty when nothing was skipped.
+     */
+    public static Optional<String> skipped(Path start, Map<String, String> env) {
+        if (env.get(OVERRIDE) != null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(search(start, env).skipped());
+    }
+
+    private record Search(List<Path> files, String skipped) { }
+
+    private static Search search(Path start, Map<String, String> env) {
         Path dir = start.toAbsolutePath().normalize();
         Path home = home(env);
         boolean belowHome = home != null && dir.startsWith(home);
+        String unreadable = null;
         for (; dir != null; dir = dir.getParent()) {
+            if (dir.getFileName() != null && dir.getFileName().toString().indexOf('\uFFFD') >= 0) {
+                // a name that isn't UTF-8 comes back changed, so jkit can't look inside that folder
+                unreadable = unreadable != null ? unreadable : "project files in " + dir + " can't be read: "
+                        + "its name isn't valid UTF-8";
+                continue;
+            }
             List<Path> found = filesIn(dir);
+            String why = found.isEmpty() ? trustProblem(dir) : null;
+            Path bad = null;
+            for (Path file : found) { // .sdkmanrc, .tool-versions and .java-version are read together
+                why = untrusted(file);
+                if (why != null) {
+                    bad = file;
+                    break;
+                }
+            }
+            if (why != null) {
+                // like git's safe.directory: someone else's folder can't steer this shell
+                return new Search(List.of(), bad == null ? null : "ignoring " + bad + ": " + why);
+            }
             if (!found.isEmpty() || (belowHome && dir.equals(home))) {
-                return found;
+                return new Search(found, found.isEmpty() ? unreadable : null);
             }
         }
-        return List.of();
+        return new Search(List.of(), unreadable);
     }
+
+    /** Why {@code file} must not apply, or null: its folder or the file itself isn't safe. */
+    static String untrusted(Path file) {
+        String why = trustProblem(file.getParent());
+        if (why != null) {
+            return why;
+        }
+        if (Files.isSymbolicLink(file)) {
+            // a link may only point at a file in the same folder or below: not at /proc/self/environ,
+            // ~/.ssh/id_rsa or anything else the warnings would then quote
+            try {
+                Path real = file.toRealPath();
+                if (!real.startsWith(file.getParent().toRealPath()) || !Files.isRegularFile(real)) {
+                    return "it is a link to a file outside its folder";
+                }
+            } catch (IOException | RuntimeException e) {
+                return "it is a link jkit can't follow";
+            }
+        }
+        if (!POSIX) {
+            return null;
+        }
+        try {
+            if (!Owners.mineOrRoot(file)) {
+                return "it belongs to " + Owners.owner(file);
+            }
+            if (Owners.othersWritable(file)) {
+                return "every user can write to it (chmod o-w to use it)";
+            }
+            return null;
+        } catch (IOException | RuntimeException e) {
+            return "cannot check its owner: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Whether project files in {@code dir} may apply: it belongs to this user or root, and others
+     * can't write to it. A {@code /tmp/jkit.toml} from another user must not change versions, or print
+     * text, in every shell that visits {@code /tmp/...}. Always true where there are no POSIX owners.
+     */
+    static boolean trusted(Path dir) {
+        return trustProblem(dir) == null;
+    }
+
+    private static String trustProblem(Path dir) {
+        if (!POSIX) {
+            return null;
+        }
+        try {
+            if (!Owners.mineOrRoot(dir)) {
+                return "the folder belongs to " + Owners.owner(dir);
+            }
+            if (Owners.othersWritable(dir)) {
+                return "every user can write to the folder";
+            }
+            return null;
+        } catch (IOException | RuntimeException e) {
+            return "cannot check the folder's owner";
+        }
+    }
+
+    private static final boolean POSIX =
+            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    private static final java.util.regex.Pattern SAFE_VERSION = java.util.regex.Pattern.compile("[0-9A-Za-z.+_-]{1,64}");
+    private static final java.util.regex.Pattern SAFE_VENDOR = java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,64}");
+
+    /**
+     * Drops pins whose version or vendor isn't plain text: project files come with cloned repos and
+     * their values are printed on every {@code cd}, so escape sequences must never get that far.
+     */
+    static ProjectSpec checked(ProjectSpec spec) {
+        Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
+        List<String> warnings = new ArrayList<>(spec.warnings());
+        spec.tools().forEach((tool, pin) -> {
+            boolean versionOk = pin.version() == null || SAFE_VERSION.matcher(pin.version()).matches();
+            boolean vendorOk = pin.vendor() == null || SAFE_VENDOR.matcher(pin.vendor().name()).matches();
+            if (versionOk && vendorOk) {
+                tools.put(tool, pin);
+            } else {
+                warnings.add(spec.files().getFirst() + ": " + tool + " pins a "
+                        + (versionOk ? "vendor" : "version") + " with characters jkit doesn't accept, skipped");
+            }
+        });
+        if (warnings.size() > MAX_WARNINGS) {
+            // a file of thousands of unknown tables must not print thousands of lines on every cd
+            int more = warnings.size() - MAX_WARNINGS;
+            warnings.subList(MAX_WARNINGS, warnings.size()).clear();
+            warnings.add(spec.files().getFirst() + ": " + more + " more warnings not shown");
+        }
+        return new ProjectSpec(spec.files(), tools, warnings);
+    }
+
+    static final int MAX_WARNINGS = 20;
 
     private static List<Path> filesIn(Path dir) {
         for (String name : List.of(JKIT_TOML, HIDDEN_TOML)) {
@@ -119,8 +264,8 @@ public final class ProjectFile {
     }
 
     private static Path home(Map<String, String> env) {
-        String home = env.getOrDefault("HOME", System.getProperty("user.home"));
-        return home == null || home.isBlank() ? null : Path.of(home).toAbsolutePath().normalize();
+        Path home = Fs.path(env.getOrDefault("HOME", System.getProperty("user.home")));
+        return home == null || !home.isAbsolute() ? null : home.normalize();
     }
 
     /**
@@ -131,14 +276,14 @@ public final class ProjectFile {
         Path toml = dir.resolve(JKIT_TOML);
         Path hidden = dir.resolve(HIDDEN_TOML);
         if (Files.isRegularFile(toml)) {
-            ProjectSpec spec = readToml(toml);
+            ProjectSpec spec = checked(readToml(toml));
             if (Files.isRegularFile(hidden)) {
                 spec = withWarning(spec, hidden + ": ignored, " + JKIT_TOML + " in the same folder wins");
             }
             return Optional.of(spec);
         }
         if (Files.isRegularFile(hidden)) {
-            return Optional.of(readToml(hidden));
+            return Optional.of(checked(readToml(hidden)));
         }
         List<ProjectSpec> found = new ArrayList<>();
         for (String name : List.of(SDKMANRC, TOOL_VERSIONS, JAVA_VERSION)) {
@@ -153,12 +298,12 @@ public final class ProjectFile {
     /** Reads one file, choosing the format by its name ({@code jkit.toml} for anything else). */
     public static ProjectSpec read(Path file) {
         String name = file.getFileName().toString();
-        return switch (name) {
+        return checked(switch (name) {
             case SDKMANRC -> readSdkmanrc(file);
             case TOOL_VERSIONS -> readToolVersions(file);
             case JAVA_VERSION -> readJavaVersion(file);
             default -> readToml(file);
-        };
+        });
     }
 
     /** Earlier specs win where several pin the same tool. */
@@ -192,7 +337,7 @@ public final class ProjectFile {
 
     /** {@code text} read as the {@code jkit.toml} at {@code file}, which needn't exist (for checking an edit). */
     static ProjectSpec readToml(Path file, String text) {
-        TomlParseResult toml = Toml.parse(text);
+        TomlParseResult toml = parseToml(file, text);
         if (toml.hasErrors()) {
             TomlParseError error = toml.errors().getFirst();
             throw new JkitException(at(file, error.position()) + ": invalid TOML: " + error.getMessage());
@@ -202,7 +347,7 @@ public final class ProjectFile {
         Map<Tool, String> keyFor = new EnumMap<>(Tool.class);
         for (String key : toml.keySet()) {
             if (!key.equals("tools")) {
-                warnings.add(at(file, toml.inputPositionOf(List.of(key))) + ": unknown key '" + key + "', skipped");
+                warnings.add(at(file, toml.inputPositionOf(List.of(key))) + ": unknown key '" + shown(key) + "', skipped");
             }
         }
         if (toml.contains("tools") && !toml.isTable("tools")) {
@@ -215,11 +360,11 @@ public final class ProjectFile {
                 try {
                     tool = Tool.parse(key);
                 } catch (JkitException e) {
-                    warnings.add(where + ": unknown tool '" + key + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
+                    warnings.add(where + ": unknown tool '" + shown(key) + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
                     continue;
                 }
                 if (keyFor.containsKey(tool)) {
-                    throw new JkitException(where + ": '" + key + "' and '" + keyFor.get(tool) + "' both set " + tool,
+                    throw new JkitException(where + ": '" + shown(key) + "' and '" + shown(keyFor.get(tool)) + "' both set " + tool,
                             "keep one of them");
                 }
                 keyFor.put(tool, key);
@@ -238,7 +383,7 @@ public final class ProjectFile {
             return pinned(tool, key, text, null, false, where, warnings);
         }
         if (!(value instanceof TomlTable table)) {
-            warnings.add(where + ": " + key + " should be a version string or a table, skipped");
+            warnings.add(where + ": " + shown(key) + " should be a version string or a table, skipped");
             return null;
         }
         String version = null;
@@ -249,26 +394,26 @@ public final class ProjectFile {
             switch (field) {
                 case "version" -> {
                     if (!(v instanceof String s)) {
-                        warnings.add(where + ": " + key + ".version should be a string, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".version should be a string, skipped " + shown(key));
                         return null;
                     }
                     version = s;
                 }
                 case "vendor" -> {
                     if (!(v instanceof String s)) {
-                        warnings.add(where + ": " + key + ".vendor should be a string, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".vendor should be a string, skipped " + shown(key));
                         return null;
                     }
                     vendor = s;
                 }
                 case "fx" -> {
                     if (!(v instanceof Boolean b)) {
-                        warnings.add(where + ": " + key + ".fx should be true or false, skipped " + key);
+                        warnings.add(where + ": " + shown(key) + ".fx should be true or false, skipped " + shown(key));
                         return null;
                     }
                     fx = b;
                 }
-                default -> warnings.add(where + ": unknown field '" + field + "' in " + key + ", ignored");
+                default -> warnings.add(where + ": unknown field '" + shown(field) + "' in " + shown(key) + ", ignored");
             }
         }
         return pinned(tool, key, version, vendor, fx, where, warnings);
@@ -281,17 +426,17 @@ public final class ProjectFile {
             version = null;
         }
         if (version != null && !Version.looksLikeVersion(version)) {
-            warnings.add(where + ": " + key + " = '" + versionText + "' is not a version, skipped");
+            warnings.add(where + ": " + shown(key) + " = '" + shown(versionText) + "' is not a version, skipped");
             return null;
         }
         Vendor vendor = null;
         if (vendorText != null && !vendorText.isBlank()) {
             if (!tool.hasVendors()) {
-                warnings.add(where + ": " + tool + " has no vendors; vendor '" + vendorText + "' ignored");
+                warnings.add(where + ": " + tool + " has no vendors; vendor '" + shown(vendorText) + "' ignored");
             } else {
                 vendor = Vendor.of(vendorText);
                 if (tool == Tool.GRAALVM && !vendor.isGraalVmBased()) {
-                    warnings.add(where + ": " + vendor + " is not GraalVM-based, skipped " + key
+                    warnings.add(where + ": " + shown(vendor.toString()) + " is not GraalVM-based, skipped " + shown(key)
                             + " (graalvm vendors: " + Vendor.graalVmVendorList() + ")");
                     return null;
                 }
@@ -332,11 +477,11 @@ public final class ProjectFile {
             try {
                 tools.put(tool, SdkmanIds.parse(tool, id));
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + e.getMessage() + ", skipped");
+                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
-            warnings.add(file + ": jkit doesn't manage " + String.join(", ", unmanaged) + ", skipped");
+            warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
         return new ProjectSpec(List.of(file), tools, warnings);
     }
@@ -367,11 +512,11 @@ public final class ProjectFile {
             try {
                 tools.put(tool, ToolVersionsIds.parse(tool, words[1]));
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + e.getMessage() + ", skipped");
+                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
-            warnings.add(file + ": jkit doesn't manage " + String.join(", ", unmanaged) + ", skipped");
+            warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
         return new ProjectSpec(List.of(file), tools, warnings);
     }
@@ -387,7 +532,7 @@ public final class ProjectFile {
             }
             String version = legacyJavaVersion(text);
             if (!Version.looksLikeVersion(version)) {
-                return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + text
+                return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + shown(text)
                         + "' is not a Java version (jkit reads only numbers such as 21 or 17.0.2), skipped"));
             }
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
@@ -416,7 +561,14 @@ public final class ProjectFile {
      * writes UTF-16), else UTF-8, else Latin-1. Never a decoding error.
      */
     public static String text(Path file) throws IOException {
-        byte[] bytes = Files.readAllBytes(file);
+        byte[] bytes;
+        try (var in = Files.newInputStream(file)) {
+            bytes = in.readNBytes(MAX_SIZE + 1);
+        }
+        if (bytes.length > MAX_SIZE) {
+            // project files are a few lines; a huge one would make every cd slow, or run out of memory
+            throw new JkitException(file + " is over " + MAX_SIZE / 1024 + " KiB, too big for a project or config file");
+        }
         if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
             return new String(bytes, 3, bytes.length - 3, java.nio.charset.StandardCharsets.UTF_8);
         }
@@ -431,6 +583,30 @@ public final class ProjectFile {
                     .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
         } catch (java.nio.charset.CharacterCodingException e) {
             return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+        }
+    }
+
+    /**
+     * Text from a project file as a warning shows it: at most 40 characters, escaped. A file can be
+     * a link to anything readable, and its content must not end up whole in a CI log.
+     */
+    static String shown(String text) {
+        if (text == null) {
+            return "";
+        }
+        String t = text.length() > 40 ? text.substring(0, 40) + "…" : text;
+        return dev.jkit.model.Visible.of(t);
+    }
+
+    /** The largest project or config file jkit reads. */
+    static final int MAX_SIZE = 256 * 1024;
+
+    /** TOML parsed; deep nesting ({@code a = [[[[...}) is an error, not a crash. */
+    public static TomlParseResult parseToml(Path file, String text) {
+        try {
+            return Toml.parse(text);
+        } catch (StackOverflowError e) {
+            throw new JkitException(file + ": invalid TOML: nested too deeply");
         }
     }
 

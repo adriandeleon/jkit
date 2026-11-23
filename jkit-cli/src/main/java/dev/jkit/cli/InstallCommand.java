@@ -1,23 +1,34 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.Installer;
+import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.sources.Artifact;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "install", description = "Resolves and installs a version. Never prompts.")
+@Command(name = "install", description = {"Resolves and installs a version. Never prompts.",
+        "The first install of a tool also becomes its default (see --no-default).",
+        "",
+        "  jkit install jdk@21              newest 21 from the default vendor (temurin)",
+        "  jkit install jdk@lts zulu        newest long-term-support release from Zulu",
+        "  jkit install maven               newest Maven",
+        "  jkit install gradle@8.14"})
 final class InstallCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<tool>@<version>", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
+    @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class,
+            completionCandidates = Candidates.Tools.class,
+            description = "jdk, graalvm, maven, gradle or sbt; @21, @21.0.5, @lts or @latest (the default).")
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class,
+            description = "JDK vendor, e.g. temurin, zulu, corretto (see: jkit search jdk).")
     String vendorText;
 
     @Option(names = "--fx", description = "JavaFX build.")
@@ -26,20 +37,61 @@ final class InstallCommand implements Callable<Integer> {
     @Option(names = "--pre", description = "Allow pre-releases.")
     boolean pre;
 
+    @Option(names = "--no-default",
+            description = "Don't make it the default, even when it's the first of its tool.")
+    boolean noDefault;
+
+    @Option(names = "--allow-unverified",
+            description = "Install even when the source publishes no checksum for the download.")
+    boolean allowUnverified;
+
     @Mixin
     Options options;
 
     @Mixin
     JsonOut.Flag json = new JsonOut.Flag();
 
-    static final String UNVERIFIED = "the download was not verified: the source publishes no checksum, "
-            + "or only a weak one (md5 or sha1)";
+    /**
+     * Downloads and installs {@code artifact}, saying beforehand what can't be checked: no checksum
+     * at all is refused unless {@code allowUnverified} ({@code retry} is the command that allows it),
+     * md5 or sha1 only is a warning. A project's jkit sync must not install unchecked code unasked.
+     */
+    static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
+            throws Exception {
+        if (ctx.http().offline()) {
+            throw new dev.jkit.model.JkitException("--offline, so " + artifact.label() + " can't be downloaded",
+                    "run the command without --offline");
+        }
+        if (artifact.checksum() == null) {
+            if (!allowUnverified) {
+                throw new dev.jkit.model.JkitException(artifact.label() + " from " + artifact.url().getHost()
+                        + " has no published checksum, so jkit can't check the download; nothing installed",
+                        "install it anyway: " + retry, "or pick another version or vendor");
+            }
+            ctx.err.println("warning: " + artifact.label() + " has no published checksum; installing it unchecked"
+                    + " (--allow-unverified)");
+        } else if (!isStrong(artifact.checksumAlgorithm())) {
+            ctx.err.println("warning: only a " + artifact.checksumAlgorithm() + " checksum is published for "
+                    + artifact.label() + ": it catches a broken download, not a tampered one");
+        }
+        ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
+        return ctx.installer().install(artifact, new ProgressBar(ctx.err));
+    }
+
+    private static boolean isStrong(String algorithm) {
+        String a = algorithm == null ? "" : algorithm.toLowerCase(java.util.Locale.ROOT).replace("-", "");
+        return a.equals("sha256") || a.equals("sha384") || a.equals("sha512");
+    }
 
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
+        spec = Resolve.lts(ctx, spec, true);
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
-        Artifact artifact = artifact(ctx, spec, vendor, fx, pre);
+        // an exact pre-release (maven@4.0.0-rc-7) asks for pre-releases by itself, as pin and sync do
+        boolean wantPre = pre || spec.version() != null && dev.jkit.model.Version.looksLikeVersion(spec.version())
+                && dev.jkit.model.Version.parse(spec.version()).isPreRelease();
+        Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
         java.io.PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
@@ -50,21 +102,38 @@ final class InstallCommand implements Callable<Integer> {
             }
             return 0;
         }
-        ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-        Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-        if (!result.verified()) {
-            ctx.err.println("warning: " + UNVERIFIED);
+        // only the very first build of a tool: after jkit reset --global, no default was a choice
+        // GraalVM builds count only for graalvm; for jdk, a GraalVM installed with jkit install graalvm
+        // doesn't make a plain JDK "not the first"
+        boolean installingGraal = artifact.vendor() != null && artifact.vendor().isGraalVmBased();
+        boolean first = ctx.store.list(spec.tool()).stream().noneMatch(i -> {
+            boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
+            return spec.tool() == Tool.GRAALVM ? graal : installingGraal || !graal;
+        });
+        Installer.Result result = download(ctx, artifact, allowUnverified, "jkit install " + spec
+                + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "") + (pre ? " --pre" : "")
+                + " --allow-unverified");
+        Changes changes = installed(ctx, result);
+        // the first one of a tool becomes the default, as most people would do next anyway
+        Path globalLink = ctx.home.global(spec.tool());
+        boolean madeDefault = result.fresh() && first && !noDefault && ctx.os.readLink(globalLink) == null && !Files.exists(globalLink);
+        if (madeDefault) {
+            ctx.os.pointLink(globalLink, result.installed().home());
+            changes.link(globalLink, result.installed().home()).globalEffect(spec.tool());
+            changes.note("it's the default " + spec.tool() + " now (the first one installed); to clear it: jkit reset "
+                    + spec.tool() + " --global");
         }
-        Changes changes = installed(ctx, result).note("no environment variables changed");
-        say.println("installed " + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
+        // another jkit may have installed it while this one waited for the store lock
+        say.println((result.fresh() ? "installed " : "already installed (by another jkit just now): ")
+                + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
         changes.print(say);
         if (json.json) {
-            printJson(ctx, "installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
+            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.verified(), artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
-        if (!Files.exists(ctx.home.global(spec.tool()))) {
-            ctx.out.println("make it the default: jkit use " + spec.tool() + "@" + artifact.version()
-                    + (vendor == null ? "" : " " + vendor) + " --global");
+        if (!madeDefault) {
+            ctx.out.println("make it the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText)
+                    + (fx ? " --fx" : "") + " --global");
         }
         return 0;
     }

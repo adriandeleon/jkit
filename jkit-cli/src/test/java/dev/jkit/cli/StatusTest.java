@@ -50,7 +50,7 @@ class StatusTest {
         PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
         Context ctx = Context.forEnv(env, out);
         StatusCommand.print(ctx, StatusCommand.read(ctx, project), out);
-        return bytes.toString(StandardCharsets.UTF_8);
+        return bytes.toString(StandardCharsets.UTF_8).replace("\r\n", "\n"); // \r\n on Windows
     }
 
     private JsonNode json() throws Exception {
@@ -101,7 +101,7 @@ class StatusTest {
     @Test
     void missingHookIsTheHintWhenTheGlobalIsNotApplied() throws Exception {
         assertThat(text()).startsWith("jdk      -                       not set\n"
-                + "         the global jdk isn't applied: the jkit hook isn't loaded: jkit hook bash --install");
+                + "         the global jdk isn't applied: the jkit hook isn't loaded: " + Changes.HOOK_SETUP);
     }
 
     @Test

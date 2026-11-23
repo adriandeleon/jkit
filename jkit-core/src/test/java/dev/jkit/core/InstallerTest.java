@@ -121,4 +121,40 @@ class InstallerTest {
         assertThat(result.installed().home().resolve("bin/java")).exists();
         assertThat(result.installed().home().resolve("Contents")).doesNotExist();
     }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aLinkThatClimbsOutOfContentsHomeIsRefused() throws Exception {
+        // inside the archive's top folder, so Archives allows it, but outside the part jkit installs
+        Path home = Files.createDirectories(tmp.resolve("jdk/Contents/Home"));
+        Files.createDirectories(home.resolve("bin"));
+        Files.createSymbolicLink(home.resolve("bin/ok"), Path.of("../lib"));
+        Installer.requireLinksInside(home);
+        Files.createSymbolicLink(home.resolve(Store.MARKER), Path.of("../decoy.properties"));
+        assertThatThrownBy(() -> Installer.requireLinksInside(home))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("points outside the folder jkit installs");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void theInstallRecordIsNeverWrittenOrReadThroughALink() throws Exception {
+        Path dir = Files.createDirectories(tmp.resolve("tools/jdk/21-temurin"));
+        Path decoy = Files.writeString(tmp.resolve("decoy.properties"), "version=99\nverified=true\n");
+        Files.createSymbolicLink(dir.resolve(Store.MARKER), decoy);
+        assertThat(Store.verified(dir)).isFalse();
+        assertThatThrownBy(() -> Store.load(dir.resolve(Store.MARKER))).isInstanceOf(IOException.class);
+        Installed installed = new Installed(Tool.JDK, Version.parse("21.0.5"), Vendor.of("temurin"), dir, false);
+        Store.writeMarker(dir, installed, "https://example.invalid/jdk.tar.gz", false);
+        assertThat(Files.isSymbolicLink(dir.resolve(Store.MARKER))).isFalse();
+        assertThat(decoy).hasContent("version=99\nverified=true\n");
+        assertThat(Store.verified(dir)).isFalse();
+    }
+
+    @Test
+    void anOversizedInstallRecordIsIgnored() throws Exception {
+        Path dir = Files.createDirectories(tmp.resolve("tools/jdk/21-temurin"));
+        Files.writeString(dir.resolve(Store.MARKER), "verified=true\n" + "#".repeat((int) Store.MAX_MARKER));
+        assertThat(Store.verified(dir)).isFalse();
+    }
 }

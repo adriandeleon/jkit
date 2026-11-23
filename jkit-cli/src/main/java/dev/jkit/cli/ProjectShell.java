@@ -25,6 +25,42 @@ final class ProjectShell {
      * yet). With {@code here}, always {@code cwd}'s. Refuses other formats, which jkit only reads.
      */
     static Path target(Context ctx, Path cwd, boolean here, String retry) {
+        if (cwd.toString().indexOf('\uFFFD') >= 0) {
+            throw new JkitException("this folder's path isn't valid UTF-8, so jkit can't write a project file in it",
+                    "rename the folder, or edit jkit.toml by hand");
+        }
+        Path file = targetName(ctx, cwd, here, retry);
+        if (Files.isSymbolicLink(file)) {
+            // a cloned repo's jkit.toml could point at ~/.bash_profile or jkit's config.toml
+            throw new JkitException(Changes.tilde(file.toString()) + " is a symbolic link, and jkit only writes "
+                    + "the file itself", "replace the link with a plain file, or edit the file it points to by hand");
+        }
+        return file;
+    }
+
+    /**
+     * Writes the shell code the hook sources next. For PowerShell with a UTF-8 byte-order mark:
+     * Windows PowerShell 5.1 reads a script without one in the ANSI code page, which garbles
+     * C:\\Users\\José in JAVA_HOME and PATH.
+     */
+    static void writeEnvFile(Context ctx, String envFile, Map<String, String> changes) throws IOException {
+        String shell = ctx.env.getOrDefault("JKIT_SHELL", "bash");
+        String text = ShellEnv.format(changes, shell);
+        boolean pwsh = shell.equals("pwsh") || shell.equals("powershell");
+        Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Writes a project file without following a link put there since {@link #target} checked. */
+    static void write(Path file, String text) throws IOException {
+        if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
+        }
+        Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                java.nio.file.StandardOpenOption.WRITE);
+    }
+
+    private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {
         if (here) {
             Path hidden = cwd.resolve(ProjectFile.HIDDEN_TOML);
             return !Files.isRegularFile(cwd.resolve(ProjectFile.JKIT_TOML)) && Files.isRegularFile(hidden)
@@ -37,6 +73,20 @@ final class ProjectShell {
                 throw new JkitException(ProjectFile.OVERRIDE + " is set but empty, which turns project files off",
                         "unset it, or write to this folder's jkit.toml: " + retry + " --here");
             }
+            if (override != null) {
+                // the override names the file jkit reads, so that is the one to create, not ./jkit.toml
+                Path file = cwd.resolve(override).toAbsolutePath().normalize();
+                if (!file.getFileName().toString().endsWith(".toml")) {
+                    throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                            + ", which doesn't exist, and jkit only creates jkit.toml files",
+                            "point " + ProjectFile.OVERRIDE + " at a .toml file, or unset it and run: " + retry);
+                }
+                if (!Files.isDirectory(file.getParent())) {
+                    throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                            + ", but its folder doesn't exist", "create the folder, then run: " + retry);
+                }
+                return file;
+            }
             return cwd.resolve(ProjectFile.JKIT_TOML);
         }
         Path file = found.get().files().getFirst();
@@ -44,6 +94,13 @@ final class ProjectShell {
         if (found.get().files().size() > 1 || name.equals(ProjectFile.SDKMANRC) || name.equals(ProjectFile.TOOL_VERSIONS)
                 || name.equals(ProjectFile.JAVA_VERSION)) {
             String files = found.get().source();
+            String override = ctx.env.get(ProjectFile.OVERRIDE);
+            if (override != null && !override.isBlank()) {
+                // the override wins over any jkit.toml, so --here wouldn't change what applies
+                throw new JkitException(ProjectFile.OVERRIDE + " names " + Changes.tilde(file.toString())
+                        + ", which jkit reads but doesn't write",
+                        "point " + ProjectFile.OVERRIDE + " at a jkit.toml, or unset it and run: " + retry + " --here");
+            }
             throw new JkitException("the project file here is " + Changes.tilde(found.get().dir().toString())
                     + "/" + files + ", which jkit reads but doesn't write",
                     "create a jkit.toml in this folder instead: " + retry + " --here"
@@ -69,7 +126,7 @@ final class ProjectShell {
             }
             return;
         }
-        Files.writeString(Path.of(envFile), ShellEnv.format(plan.changes(), ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        writeEnvFile(ctx, envFile, plan.changes());
         report.env(plan.changes());
         if (plan.applies() && !ctx.config.autoSwitch()) {
             report.note("to switch to a project's versions on cd: add auto_switch = true under [shell] in "

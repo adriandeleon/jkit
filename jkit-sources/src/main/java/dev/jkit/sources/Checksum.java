@@ -22,6 +22,19 @@ public record Checksum(String algorithm, String hash) {
      * {@code declared} (what the source says), else sha256.
      */
     public static Checksum parse(String text, String fileName, String declared) {
+        return parse(text, fileName, declared, false);
+    }
+
+    /**
+     * Like {@link #parse(String, String, String)} for a checksum file named for its algorithm
+     * ({@code .sha512}, {@code .sha256}): a BSD line naming a weaker one ({@code MD5 (file) = ...})
+     * is refused. foojay's {@code checksum_type} is only a hint, so its checksums use the lenient form.
+     */
+    public static Checksum parseStrict(String text, String fileName, String declared) {
+        return parse(text, fileName, declared, true);
+    }
+
+    private static Checksum parse(String text, String fileName, String declared, boolean strict) {
         String bsdAlgorithm = null;
         String hash = null;
         String firstHash = null;
@@ -68,6 +81,12 @@ public record Checksum(String algorithm, String hash) {
             }
             hash = firstHash;
         }
+        if (strict && bsdAlgorithm != null && declared != null && !declared.isBlank()
+                && strength(normalize(bsdAlgorithm)) < strength(normalize(declared))) {
+            // "MD5 (file) = ..." in a .sha512 file: the label must not lower what the file promises
+            throw new JkitException("the " + normalize(declared) + " checksum file for " + fileName + " holds a "
+                    + normalize(bsdAlgorithm) + " hash instead");
+        }
         return of(hash, bsdAlgorithm != null ? bsdAlgorithm : declared);
     }
 
@@ -77,6 +96,11 @@ public record Checksum(String algorithm, String hash) {
             return null;
         }
         String h = hash.strip().toLowerCase(Locale.ROOT);
+        if (!h.matches("[0-9a-f]+")) {
+            throw new JkitException("the published checksum isn't a hex hash: " + dev.jkit.model.Visible.of(
+                    h.length() > 40 ? h.substring(0, 40) + "…" : h),
+                    "a proxy or captive portal may have answered instead; try again on another network");
+        }
         String byLength = switch (h.length()) {
             case 32 -> "md5";
             case 40 -> "sha1";
@@ -85,9 +109,26 @@ public record Checksum(String algorithm, String hash) {
             case 128 -> "sha512";
             default -> null;
         };
-        String algorithm = byLength != null ? byLength
-                : declared == null || declared.isBlank() ? "sha256" : normalize(declared);
+        String named = declared == null || declared.isBlank() ? null : normalize(declared);
+        if (named != null && byLength != null && strength(byLength) < strength(named)) {
+            // a .sha512 file holding an md5 must not pass as a (weak) checksum; a stronger hash than
+            // declared is fine (foojay's checksum_type is sometimes wrong in that direction)
+            throw new JkitException("the published " + named + " checksum is " + h.length()
+                    + " hex digits long, which is " + byLength + ", not " + named);
+        }
+        String algorithm = byLength != null ? byLength : named != null ? named : "sha256";
         return new Checksum(algorithm, h);
+    }
+
+    private static int strength(String algorithm) {
+        return switch (algorithm) {
+            case "md5" -> 1;
+            case "sha1" -> 2;
+            case "sha256" -> 3;
+            case "sha384" -> 4;
+            case "sha512" -> 5;
+            default -> 0;
+        };
     }
 
     private static String normalize(String algorithm) {

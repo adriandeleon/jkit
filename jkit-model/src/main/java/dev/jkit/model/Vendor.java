@@ -28,9 +28,15 @@ public record Vendor(String name, String foojayName) {
             Set.of("graalvm_community", "graalvm", "liberica_native", "mandrel");
 
     public static Vendor of(String text) {
-        String lower = text.toLowerCase(Locale.ROOT).trim();
+        // liberica_nik and liberica-nik alike: aliases are keyed by the dash spelling
+        String lower = text.toLowerCase(Locale.ROOT).trim().replace('_', '-');
         String foojay = ALIASES.getOrDefault(lower, lower.replace('-', '_'));
         return fromFoojay(foojay);
+    }
+
+    /** A distribution name plain enough for a folder name and output (see {@link Version#isSafeText}). */
+    public static boolean isSafeName(String foojayName) {
+        return foojayName != null && foojayName.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
     }
 
     public static Vendor fromFoojay(String foojayName) {

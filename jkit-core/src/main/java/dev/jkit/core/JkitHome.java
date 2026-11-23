@@ -10,9 +10,27 @@ public record JkitHome(Path root) {
     public static JkitHome fromEnv(Map<String, String> env) {
         String override = env.get("JKIT_HOME");
         if (override != null && !override.isBlank()) {
-            return new JkitHome(Path.of(override));
+            Path path = Fs.path(override);
+            if (path == null || !path.isAbsolute()) {
+                // relative to each folder you cd into: a cloned repo could supply its own "tools"
+                throw new dev.jkit.model.JkitException("JKIT_HOME must be an absolute path, not " + override,
+                        "e.g. JKIT_HOME=$HOME/.jkit (a quoted ~ is not expanded)");
+            }
+            return new JkitHome(path);
         }
-        return new JkitHome(Path.of(System.getProperty("user.home"), ".jkit"));
+        // $HOME first, like the shell: it differs from the passwd entry under sudo -E, in some
+        // containers and in tests that point HOME somewhere else
+        String home = env.get("HOME");
+        if (Fs.path(home) == null || !Fs.path(home).isAbsolute() || !Owners.posix()) {
+            home = System.getProperty("user.home");
+        }
+        // no passwd entry (docker run -u 1001) and no HOME: user.home is "?", relative to every folder
+        Path base = Fs.path(home);
+        if (base == null || !base.isAbsolute()) {
+            throw new dev.jkit.model.JkitException("can't tell your home folder (HOME isn't set, and this user has "
+                    + "no home in the system's user list)", "set HOME, or JKIT_HOME, to an absolute path");
+        }
+        return new JkitHome(base.resolve(".jkit"));
     }
 
     public JkitHome {
@@ -32,4 +50,89 @@ public record JkitHome(Path root) {
     public Path lockFile() { return root.resolve(".lock"); }
 
     public Path config() { return root.resolve("config.toml"); }
+
+    private static final boolean POSIX =
+            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    /**
+     * Creates the home if needed, readable only by this user: its {@code bin} folders go first on
+     * PATH, so nobody else may put anything in it.
+     */
+    public void create() throws java.io.IOException {
+        if (java.nio.file.Files.isDirectory(root)) {
+            // whoever made it, maybe another user since this command started: checked again
+            requireSafe();
+            return;
+        }
+        if (root.getParent() != null) {
+            dev.jkit.model.Perms.mkdirs(root.getParent());
+        }
+        try {
+            if (POSIX) {
+                java.nio.file.Files.createDirectory(root, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
+            } else {
+                java.nio.file.Files.createDirectory(root);
+            }
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            if (!java.nio.file.Files.isDirectory(root)) {
+                throw e; // a file of that name; another jkit making the folder at the same moment is fine
+            }
+        }
+        requireSafe(); // whoever made it, and whatever is above it: checked before anything goes in
+    }
+
+    /**
+     * Refuses a home someone else could plant programs in: the home, or its {@code tools} and
+     * {@code global} folders, owned by another user (root is fine) or writable by everyone, or a
+     * folder above it where anyone could rename it away and put their own in its place (writable by
+     * everyone without /tmp's sticky bit). Group-writable is fine: with a private group per user,
+     * that's the default umask on some distributions.
+     */
+    public void requireSafe() {
+        if (!POSIX) {
+            return;
+        }
+        try {
+            boolean exists = java.nio.file.Files.isDirectory(root);
+            if (exists) {
+                for (Path dir : java.util.List.of(root, root.resolve("tools"), root.resolve("global"))) {
+                    if (!java.nio.file.Files.isDirectory(dir)) {
+                        continue;
+                    }
+                    if (!Owners.mineOrRoot(dir)) {
+                        throw new dev.jkit.model.JkitException(dir + " belongs to " + Owners.owner(dir) + ", not to you",
+                                dir.equals(root) ? "use a JKIT_HOME of your own, e.g. ~/.jkit"
+                                        : "fix it: chown -R \"$(id -u)\" " + dev.jkit.model.ShellQuote.quote("bash", root.toString()));
+                    }
+                    if (Owners.othersWritable(dir)) {
+                        throw new dev.jkit.model.JkitException(dir + " is writable by every user, so anyone could put "
+                                + "programs on your PATH", "fix it: chmod o-w " + dev.jkit.model.ShellQuote.quote("bash", dir.toString()));
+                    }
+                }
+            }
+            // the folders above, as they really are (a symlink on the way counts as where it leads);
+            // for a home not made yet, from the nearest folder that exists, so the first run is checked too
+            Path start = root;
+            while (start != null && !java.nio.file.Files.exists(start)) {
+                start = start.getParent();
+            }
+            if (start == null) {
+                return;
+            }
+            Path real = start.toRealPath();
+            for (Path up = exists ? real.getParent() : real; up != null; up = up.getParent()) {
+                if (Owners.othersCanReplaceEntries(up)) {
+                    throw new dev.jkit.model.JkitException(root + " is in " + up + ", which every user can write "
+                            + "to, so anyone could replace it", "use a JKIT_HOME elsewhere, e.g. ~/.jkit");
+                }
+                if (!Owners.mineOrRoot(up)) {
+                    throw new dev.jkit.model.JkitException(root + " is in " + up + ", which belongs to "
+                            + Owners.owner(up) + ", who could replace it", "use a JKIT_HOME of your own, e.g. ~/.jkit");
+                }
+            }
+        } catch (java.io.IOException e) {
+            throw new dev.jkit.model.JkitException("cannot check " + root + ": " + e.getMessage());
+        }
+    }
 }

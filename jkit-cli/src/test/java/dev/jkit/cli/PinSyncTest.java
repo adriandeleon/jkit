@@ -72,6 +72,23 @@ class PinSyncTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void pinNeverWritesThroughALinkedProjectFile() throws Exception {
+        // a cloned repo's jkit.toml pointing at the user's own files, existing or not yet
+        Path victim = tmp.resolve("user/victim.toml");
+        Files.writeString(victim, "# mine\n");
+        Files.createSymbolicLink(project.resolve("jkit.toml"), victim);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> pin("jdk@21", null, false, true))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symbolic link");
+        assertThat(Files.readString(victim)).isEqualTo("# mine\n");
+        Files.delete(project.resolve("jkit.toml"));
+        Files.createSymbolicLink(project.resolve("jkit.toml"), tmp.resolve("user/.bash_profile"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> pin("jdk@21", null, false, true))
+                .hasMessageContaining("symbolic link");
+        assertThat(tmp.resolve("user/.bash_profile")).doesNotExist();
+    }
+
+    @Test
     void pinCreatesJkitTomlWithTheVersionAsTyped() throws Exception {
         assertThat(pin("jdk@21", null, false, false)).isZero();
         assertThat(toml()).endsWith("[tools]\njdk = \"21\"\n");
@@ -83,6 +100,27 @@ class PinSyncTest {
     void exactWritesTheResolvedBuildAndVendor() throws Exception {
         pin("jdk@21", null, true, false);
         assertThat(toml()).contains("jdk = { version = \"21.0.9+10\", vendor = \"temurin\" }");
+    }
+
+    @Test
+    void latestPinsTheNewestNotWhatThisShellUses() throws Exception {
+        env.put("JAVA_HOME", zulu17.toString());
+        PinCommand pin = new PinCommand();
+        pin.spec = ToolSpec.parse("jdk@latest");
+        pin.latest = true;
+        assertThat(pin.run(ctx(), project)).isZero();
+        assertThat(toml()).contains("jdk = \"latest\"");
+    }
+
+    @Test
+    void aRelativeOverrideThatDoesNotExistYetIsTheFileCreated() throws Exception {
+        Files.createDirectories(project.resolve("ci"));
+        env.put("JKIT_PROJECT_FILE", "ci/jkit.toml");
+        assertThat(pin("jdk@21", null, false, false)).isZero();
+        assertThat(project.resolve("jkit.toml")).doesNotExist();
+        assertThat(Files.readString(project.resolve("ci/jkit.toml"))).contains("jdk = \"21\"");
+        env.put("JKIT_PROJECT_FILE", "nowhere/jkit.toml");
+        assertThatThrownBy(() -> pin("jdk@21", null, false, false)).hasMessageContaining("its folder doesn't exist");
     }
 
     @Test
@@ -135,6 +173,16 @@ class PinSyncTest {
         assertThat(toml()).isEqualTo("[tools]\nmaven = \"3.9\"\n");
         assertThat(Files.readString(envFile)).contains("unset JKIT_PROJECT_JDK").contains("unset JAVA_HOME")
                 .contains("export MAVEN_HOME='" + maven + "'");
+    }
+
+    @Test
+    void unpinRemovesALineJkitCouldNotUse() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"abc\"\nmaven = \"3.9\"\n");
+        UnpinCommand unpin = new UnpinCommand();
+        unpin.tool = Tool.JDK;
+        assertThat(unpin.run(ctx(), project)).isZero();
+        assertThat(toml()).isEqualTo("[tools]\nmaven = \"3.9\"\n");
+        assertThat(output()).contains("unpinned jdk (a line jkit couldn't use)");
     }
 
     @Test

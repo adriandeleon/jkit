@@ -17,13 +17,18 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "use", description = "Activates an installed version for this shell, or globally with --global.")
+@Command(name = "use", description = {"Activates an installed version for this shell, or globally with --global.",
+        "This shell needs the jkit hook (jkit hook --install); --global works without it.",
+        "",
+        "  jkit use jdk@21 --global         the default for new shells",
+        "  jkit use jdk@17 zulu             only this shell",
+        "  jkit reset jdk                   back to the project's or the global version"})
 final class UseCommand implements Callable<Integer> {
 
     @Parameters(index = "0", paramLabel = "<tool>[@version]", converter = ToolSpecConverter.class, completionCandidates = Candidates.Tools.class)
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--global", description = "Default for new shells and apps.")
@@ -38,6 +43,7 @@ final class UseCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.create(false, true);
+        spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         Installed chosen = Resolve.installed(ctx, spec, vendor, vendorText, fx).getFirst();
         Tool tool = spec.tool();
@@ -58,13 +64,13 @@ final class UseCommand implements Callable<Integer> {
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active, so this shell can't be changed",
-                    "load it in new shells: jkit hook bash --install (or zsh, fish)",
+                    "load it in new shells: " + Changes.HOOK_SETUP,
                     "or set the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText) + " --global",
                     "or run one command with it: jkit exec " + spec + (vendorText == null ? "" : " " + vendorText) + " -- <command>");
         }
         boolean graalVm = chosen.vendor() != null && chosen.vendor().isGraalVmBased();
         Map<String, String> changes = ShellEnv.use(ctx.env, ctx.home, tool, chosen.home(), graalVm);
-        Files.writeString(Path.of(envFile), ShellEnv.format(changes, ctx.env.getOrDefault("JKIT_SHELL", "bash")));
+        ProjectShell.writeEnvFile(ctx, envFile, changes);
         Changes report = new Changes(ctx).env(changes)
                 .note("only this shell; for new shells too: jkit use " + tool + "@" + chosen.version().raw()
                         + (chosen.vendor() == null ? "" : " " + chosen.vendor().name()) + (chosen.fx() ? " --fx" : "") + " --global");

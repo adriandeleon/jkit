@@ -14,6 +14,15 @@ class ShellEnvTest {
     private final Path jdk17 = Path.of("/h/.jkit/tools/jdk/17.0.21+9-zulu");
     private final Path jdk21 = Path.of("/h/.jkit/tools/jdk/21.0.13+9-temurin");
 
+    /** A path in this OS's spelling, as PATH holds it there (\\h\\.jkit\\... on Windows). */
+    private static String p(String unixPath) {
+        return Path.of(unixPath).toString();
+    }
+
+    private static String bin(Path home) {
+        return home.resolve("bin").toString();
+    }
+
     private static String path(String... entries) {
         return String.join(File.pathSeparator, entries);
     }
@@ -21,14 +30,14 @@ class ShellEnvTest {
     @Test
     void switchingReplacesOnlyJkitEntries() {
         Map<String, String> env = new HashMap<>();
-        env.put("PATH", path("/h/.jkit/global/jdk/bin", "/usr/bin"));
+        env.put("PATH", path(p("/h/.jkit/global/jdk/bin"), "/usr/bin"));
         Map<String, String> first = ShellEnv.use(env, home, Tool.JDK, jdk17, false);
-        assertThat(first.get("PATH")).isEqualTo(path(jdk17 + "/bin", "/h/.jkit/global/jdk/bin", "/usr/bin"));
+        assertThat(first.get("PATH")).isEqualTo(path(bin(jdk17), p("/h/.jkit/global/jdk/bin"), "/usr/bin"));
         assertThat(first.get("JAVA_HOME")).isEqualTo(jdk17.toString());
 
         env.putAll(first);
         Map<String, String> second = ShellEnv.use(env, home, Tool.JDK, jdk21, false);
-        assertThat(second.get("PATH")).isEqualTo(path(jdk21 + "/bin", "/h/.jkit/global/jdk/bin", "/usr/bin"));
+        assertThat(second.get("PATH")).isEqualTo(path(bin(jdk21), p("/h/.jkit/global/jdk/bin"), "/usr/bin"));
     }
 
     @Test
@@ -70,11 +79,11 @@ class ShellEnvTest {
     @Test
     void freshPutsChosenBinsFirstAndDropsOldJkitEntries() {
         Path maven = Path.of("/h/.jkit/global/maven");
-        Map<String, String> env = Map.of("PATH", path("/h/.jkit/global/maven/bin", jdk17 + "/bin", "/usr/bin"));
+        Map<String, String> env = Map.of("PATH", path(p("/h/.jkit/global/maven/bin"), bin(jdk17), "/usr/bin"));
         Map<String, String> vars = ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk21, Tool.MAVEN, maven), false);
         assertThat(vars.keySet()).containsExactly("JAVA_HOME", "MAVEN_HOME", "PATH");
         assertThat(vars.get("JAVA_HOME")).isEqualTo(jdk21.toString());
-        assertThat(vars.get("PATH")).isEqualTo(path(jdk21 + "/bin", "/h/.jkit/global/maven/bin", "/usr/bin"));
+        assertThat(vars.get("PATH")).isEqualTo(path(bin(jdk21), p("/h/.jkit/global/maven/bin"), "/usr/bin"));
         assertThat(vars).doesNotContainKey(ShellEnv.stateVariable(Tool.JDK));
     }
 
@@ -89,16 +98,16 @@ class ShellEnvTest {
 
     @Test
     void projectLayerSetsHomesUnlessTheShellChoseItsOwn() {
-        Map<String, String> env = new HashMap<>(Map.of("PATH", path("/h/.jkit/global/jdk/bin", "/usr/bin")));
-        env.put(ShellEnv.stateVariable(Tool.MAVEN), "/h/.jkit/tools/maven/3.9.11");
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path(p("/h/.jkit/global/jdk/bin"), "/usr/bin")));
+        env.put(ShellEnv.stateVariable(Tool.MAVEN), p("/h/.jkit/tools/maven/3.9.11"));
         Path maven4 = Path.of("/h/.jkit/tools/maven/4.0.0");
         Map<String, String> out = ShellEnv.project(env, home, Map.of(Tool.JDK, jdk21, Tool.MAVEN, maven4), false);
         assertThat(out).containsEntry("JKIT_PROJECT_JDK", jdk21.toString())
                 .containsEntry("JAVA_HOME", jdk21.toString())
                 .containsEntry("JKIT_PROJECT_MAVEN", maven4.toString())
                 .doesNotContainKey("MAVEN_HOME"); // jkit use wins
-        assertThat(out.get("PATH")).isEqualTo(path(jdk21 + "/bin", "/h/.jkit/tools/maven/3.9.11/bin",
-                "/h/.jkit/global/jdk/bin", "/usr/bin"));
+        assertThat(out.get("PATH")).isEqualTo(path(bin(jdk21), p("/h/.jkit/tools/maven/3.9.11/bin"),
+                p("/h/.jkit/global/jdk/bin"), "/usr/bin"));
     }
 
     @Test
@@ -118,10 +127,10 @@ class ShellEnvTest {
         Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin"));
         env.putAll(ShellEnv.project(env, home, Map.of(Tool.JDK, jdk21), false));
         env.putAll(ShellEnv.use(env, home, Tool.JDK, jdk17, false));
-        assertThat(env.get("PATH")).isEqualTo(path(jdk17 + "/bin", "/usr/bin"));
+        assertThat(env.get("PATH")).isEqualTo(path(bin(jdk17), "/usr/bin"));
 
         Map<String, String> out = ShellEnv.reset(env, home, Tool.JDK);
-        assertThat(out).containsEntry("JAVA_HOME", jdk21.toString()).containsEntry("PATH", path(jdk21 + "/bin", "/usr/bin"));
+        assertThat(out).containsEntry("JAVA_HOME", jdk21.toString()).containsEntry("PATH", path(bin(jdk21), "/usr/bin"));
     }
 
     @Test
@@ -130,6 +139,6 @@ class ShellEnvTest {
         env.putAll(ShellEnv.project(env, home, Map.of(Tool.JDK, jdk21), false));
         Path maven = Path.of("/h/.jkit/tools/maven/3.9.11");
         assertThat(ShellEnv.use(env, home, Tool.MAVEN, maven, false).get("PATH"))
-                .isEqualTo(path(jdk21 + "/bin", maven + "/bin", "/usr/bin"));
+                .isEqualTo(path(bin(jdk21), bin(maven), "/usr/bin"));
     }
 }

@@ -16,14 +16,23 @@ public interface OsServices {
     void removeLink(Path link) throws IOException;
 
     /** The script a shell's rc file evaluates: global PATH entries plus the jkit wrapper function. */
-    String hook(String shell, Path jkitRoot);
+    default String hook(String shell, Path jkitRoot) {
+        return hook(shell, jkitRoot, null);
+    }
+
+    /** Like {@link #hook(String, Path)}, calling jkit by {@code self}, its absolute path (null: by name). */
+    String hook(String shell, Path jkitRoot, String self);
 
     /**
      * What the hook adds to switch to a project's versions on {@code cd} (shell.auto_switch), or
      * null when that shell doesn't support it yet.
      */
     default String autoSwitchHook(String shell) {
-        return Hooks.autoSwitch(shell);
+        return autoSwitchHook(shell, null);
+    }
+
+    default String autoSwitchHook(String shell, String self) {
+        return Hooks.autoSwitch(shell, self);
     }
 
     static OsServices current() {

@@ -57,6 +57,7 @@ final class Context {
         this.platform = Platform.current();
         Config loaded;
         String error = null;
+        home.requireSafe(); // never lenient: a home others can write to puts their programs on PATH
         try {
             loaded = Config.load(home, env);
         } catch (dev.jkit.model.JkitException e) {
@@ -77,9 +78,14 @@ final class Context {
     /** The caching HTTP client, created on first use. */
     Http http() {
         if (http == null) {
+            try {
+                home.create(); // before the cache makes it with the default permissions
+            } catch (java.io.IOException e) {
+                throw new dev.jkit.model.JkitException("cannot create " + home.root() + ": " + e.getMessage());
+            }
             http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
                     Duration.ofHours(24), Clock.systemUTC(), refresh,
-                    offline || "true".equals(env.get("JKIT_NETWORK_OFFLINE")),
+                    offline || offlineByEnv(env),
                     new CachingHttp.Listener() {
                         @Override
                         public void stored(URI uri, java.nio.file.Path file, boolean created) {
@@ -95,12 +101,18 @@ final class Context {
         return http;
     }
 
+    /** JKIT_NETWORK_OFFLINE=true, 1 or yes, like the other on/off variables. */
+    static boolean offlineByEnv(Map<String, String> env) {
+        String v = env.getOrDefault("JKIT_NETWORK_OFFLINE", "").trim().toLowerCase(java.util.Locale.ROOT);
+        return v.equals("true") || v.equals("1") || v.equals("yes") || v.equals("on");
+    }
+
     static String userAgent() {
         return "jkit/" + VersionProvider.version();
     }
 
     static Context create(boolean refresh, boolean offline) {
-        return new Context(System.getenv(), refresh, offline, System.out);
+        return new Context(dev.jkit.model.Envs.system(), refresh, offline, System.out);
     }
 
     /**
@@ -116,7 +128,7 @@ final class Context {
      * failure, so they can still say what is going on. Never online.
      */
     static Context readOnly() {
-        Context ctx = lenient(System.getenv(), System.out);
+        Context ctx = lenient(dev.jkit.model.Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError + "; using the built-in defaults");
         }
@@ -155,9 +167,23 @@ final class Context {
         return new Installer(home, http());
     }
 
+    /** A source's base URL: https, or http to this machine; a version list over plain http could be altered. */
     URI url(String variable, URI fallback) {
         String value = env.get(variable);
-        return value == null || value.isBlank() ? fallback : URI.create(value);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        URI uri;
+        try {
+            uri = URI.create(value.endsWith("/") ? value : value + "/");
+        } catch (IllegalArgumentException e) {
+            throw new dev.jkit.model.JkitException(variable + " is not a URL: " + value);
+        }
+        if (!Http.isSecure(uri)) {
+            throw new dev.jkit.model.JkitException(variable + " must be an https URL (or http to localhost), not " + value,
+                    "unset it to use the default source");
+        }
+        return uri;
     }
 
     /** Terminal width from COLUMNS, else 80. */

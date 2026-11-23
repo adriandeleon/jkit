@@ -14,6 +14,43 @@ public final class Fs {
      * Deletes a folder tree without following symlinks or Windows junctions (which Java reports as
      * folders, with isOther set): the link goes, what it points at stays. Missing folders are ignored.
      */
+    /**
+     * A path from an environment variable, or null when it is unset, blank or not a valid path.
+     * One pair of surrounding double quotes is dropped: on Windows {@code JAVA_HOME="C:\\Program Files\\..."}
+     * keeps the quotes, and {@code "} isn't allowed in a Windows path.
+     */
+    public static Path path(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String v = value.strip();
+        if (v.length() >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
+            v = v.substring(1, v.length() - 1);
+        }
+        try {
+            return Path.of(v);
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
+    }
+
+    /** Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist. */
+    public static void copyTree(Path from, Path to) throws IOException {
+        try (var all = java.nio.file.Files.walk(from)) {
+            for (Path p : (Iterable<Path>) all::iterator) {
+                Path target = to.resolve(from.relativize(p).toString());
+                if (java.nio.file.Files.isSymbolicLink(p)) {
+                    java.nio.file.Files.createSymbolicLink(target, java.nio.file.Files.readSymbolicLink(p));
+                } else if (java.nio.file.Files.isDirectory(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    java.nio.file.Files.createDirectories(target);
+                } else {
+                    java.nio.file.Files.copy(p, target, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES,
+                            java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                }
+            }
+        }
+    }
+
     public static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return;

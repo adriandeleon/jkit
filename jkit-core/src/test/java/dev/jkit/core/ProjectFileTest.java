@@ -228,6 +228,108 @@ class ProjectFileTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aFolderOthersCanWriteStopsTheSearch() throws IOException {
+        // like /tmp: another user's jkit.toml there must not apply to folders below it
+        write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
+        dir("shared/mine/repo");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThat(ProjectFile.find(tmp.resolve("shared/mine/repo"), env)).isEqualTo(Optional.empty());
+        assertThat(ProjectFile.trusted(tmp.resolve("shared/mine"))).isTrue();
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void anIgnoredProjectFileIsReportedWithTheReason() throws IOException {
+        write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
+        dir("shared/repo");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThat(ProjectFile.skipped(tmp.resolve("shared/repo"), env).orElseThrow())
+                .contains("shared/jkit.toml").contains("every user can write to the folder");
+        write("home/ok/jkit.toml", "[tools]\njdk = \"21\"\n");
+        assertThat(ProjectFile.skipped(tmp.resolve("home/ok"), env)).isEmpty();
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aProjectFileEveryoneCanWriteIsIgnored() throws IOException {
+        write("home/p/jkit.toml", "[tools]\njdk = \"21\"\n");
+        Files.setPosixFilePermissions(tmp.resolve("home/p/jkit.toml"),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains("every user can write to it");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aProjectFileLinkingOutOfItsFolderIsIgnored() throws IOException {
+        // .java-version -> /proc/self/environ would print every variable in a warning
+        Path secret = write("home/secret.txt", "TOKEN=ghp_x\n");
+        dir("home/p");
+        Files.createSymbolicLink(tmp.resolve("home/p/.java-version"), secret);
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains("link to a file outside");
+        write("home/q/real.txt", "21\n");
+        Files.createSymbolicLink(tmp.resolve("home/q/.java-version"), tmp.resolve("home/q/real.txt"));
+        assertThat(find("home/q").get(Tool.JDK).version()).isEqualTo("21");
+    }
+
+    @Test
+    void warningsQuoteAtMostAShortExcerpt() throws IOException {
+        write("home/w/.java-version", "x".repeat(500) + "\n");
+        String warning = find("home/w").warnings().getFirst();
+        // the file's content is cut to 40 characters (the path in front varies by OS)
+        assertThat(warning).contains("'" + "x".repeat(40) + "…'").doesNotContain("x".repeat(41));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void everyFileReadTogetherIsChecked() throws IOException {
+        // .sdkmanrc, .tool-versions and .java-version are read together: a bad second one counts too
+        write("home/p/.sdkmanrc", "java=21.0.2-tem\n");
+        write("home/p/.tool-versions", "maven 3.9.9\n");
+        Files.setPosixFilePermissions(tmp.resolve("home/p/.tool-versions"),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
+        assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains(".tool-versions");
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aRelativeOverrideFollowsTheSameRules() throws IOException {
+        write("shared/x.toml", "[tools]\njdk = \"21\"\n");
+        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertThatThrownBy(() -> ProjectFile.find(tmp.resolve("shared"), Map.of(ProjectFile.OVERRIDE, "x.toml")))
+                .isInstanceOf(JkitException.class).hasMessageContaining("every user can write");
+        // an absolute path is the user's own choice
+        assertThat(ProjectFile.find(tmp.resolve("shared"),
+                Map.of(ProjectFile.OVERRIDE, tmp.resolve("shared/x.toml").toString()))).isPresent();
+    }
+
+    @Test
+    void aHugeProjectFileIsAnErrorNotAHang() throws IOException {
+        write("home/big/jkit.toml", "# " + "x".repeat(300 * 1024) + "\n[tools]\njdk = \"21\"\n");
+        assertThatThrownBy(() -> find("home/big")).isInstanceOf(JkitException.class).hasMessageContaining("too big");
+    }
+
+    @Test
+    void deepNestingIsAnErrorNotACrash() throws IOException {
+        write("home/deep/jkit.toml", "a = " + "[".repeat(200_000) + "\n");
+        assertThatThrownBy(() -> find("home/deep")).isInstanceOf(JkitException.class).hasMessageContaining("invalid TOML");
+    }
+
+    @Test
+    void pinsWithControlCharactersAreSkipped() throws IOException {
+        write("home/p/jkit.toml", "[tools]\njdk = { version = \"21\", vendor = \"zulu\\u001b]0;x\\u0007\" }\n"
+                + "maven = \"3.9\\u001b[2J\"\ngradle = \"8.14\"\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.tools()).containsOnlyKeys(Tool.GRADLE);
+        assertThat(spec.warnings()).anyMatch(w -> w.contains("jdk pins a vendor with characters jkit doesn't accept"))
+                .anyMatch(w -> w.contains("maven pins a version"));
+        assertThat(String.join("", spec.warnings())).doesNotContain("\u001b");
+    }
+
+    @Test
     void overrideVariablePicksAFileOrTurnsProjectsOff() throws IOException {
         write("home/p/jkit.toml", "[tools]\njdk = \"21\"\n");
         Path other = write("elsewhere/.sdkmanrc", "java=17.0.13-zulu\n");
@@ -238,7 +340,11 @@ class ProjectFileTest {
         Map<String, String> off = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "");
         assertThat(ProjectFile.find(dir("home/p"), off)).isEqualTo(Optional.empty());
 
-        Map<String, String> missing = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "nope.toml");
+        // a relative name applies only where it exists; an absolute one must exist
+        Map<String, String> relative = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE, "nope.toml");
+        assertThat(ProjectFile.find(dir("home/p"), relative)).isEmpty();
+        Map<String, String> missing = Map.of("HOME", home.toString(), ProjectFile.OVERRIDE,
+                tmp.resolve("nope.toml").toString());
         assertThatThrownBy(() -> ProjectFile.find(dir("home/p"), missing)).hasMessageContaining("is not a file");
     }
 }

@@ -11,7 +11,19 @@ import java.nio.file.Path;
 final class Hooks {
     private Hooks() { }
 
+    /**
+     * How the hook calls jkit: its absolute path when known, so a {@code bin/jkit} in a JDK or build
+     * tool that a project puts first on PATH is never what runs on {@code cd}; else a PATH lookup.
+     */
+    static String self(String shell, String self) {
+        return self == null ? "jkit" : ShellQuote.quote(shell, self);
+    }
+
     static String posix(String shell, Path root) {
+        return posix(shell, root, null);
+    }
+
+    static String posix(String shell, Path root, String self) {
         String g = root.resolve("global").toString();
         return """
                 # jkit shell hook (%1$s)
@@ -30,13 +42,13 @@ final class Hooks {
                 jkit() {
                   local __jkit_env __jkit_rc
                   __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
-                  JKIT_ENV_FILE="$__jkit_env" command jkit "$@"
+                  JKIT_ENV_FILE="$__jkit_env" command %3$s "$@"
                   __jkit_rc=$?
                   [ -s "$__jkit_env" ] && . "$__jkit_env"
                   rm -f "$__jkit_env"
                   return $__jkit_rc
                 }
-                """.formatted(shell, ShellQuote.quote(shell, g));
+                """.formatted(shell, ShellQuote.quote(shell, g), self(shell, self));
     }
 
     /**
@@ -45,14 +57,19 @@ final class Hooks {
      * when the hook loads. Null for shells without it (PowerShell, for now).
      */
     static String autoSwitch(String shell) {
-        return switch (shell) {
+        return autoSwitch(shell, null);
+    }
+
+    static String autoSwitch(String shell, String self) {
+        String jkit = self(shell, self);
+        String hook = switch (shell) {
             case "bash" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
                     __jkit_hook_env() {
                       local __jkit_rc=$?
                       if [ "$PWD" != "${__jkit_pwd-}" ]; then
                         __jkit_pwd=$PWD
-                        eval "$(command jkit hook-env bash)"
+                        eval "$(command @JKIT@ hook-env bash)"
                       fi
                       return $__jkit_rc
                     }
@@ -64,7 +81,7 @@ final class Hooks {
                     """;
             case "zsh" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
-                    __jkit_hook_env() { eval "$(command jkit hook-env zsh)"; }
+                    __jkit_hook_env() { eval "$(command @JKIT@ hook-env zsh)"; }
                     autoload -Uz add-zsh-hook
                     add-zsh-hook chpwd __jkit_hook_env
                     __jkit_hook_env
@@ -72,15 +89,20 @@ final class Hooks {
             case "fish" -> """
                     # switch to a project's versions on cd (shell.auto_switch)
                     function __jkit_hook_env --on-variable PWD
-                      command jkit hook-env fish | source
+                      command @JKIT@ hook-env fish | source
                     end
                     __jkit_hook_env
                     """;
             default -> null;
         };
+        return hook == null ? null : hook.replace("@JKIT@", jkit);
     }
 
     static String fish(Path root) {
+        return fish(root, null);
+    }
+
+    static String fish(Path root, String self) {
         String g = ShellQuote.quote("fish", root.resolve("global").toString());
         return """
                 # jkit shell hook (fish)
@@ -97,44 +119,56 @@ final class Hooks {
                 set -e __jkit_g
                 function jkit
                   set -l envfile (mktemp)
-                  env JKIT_ENV_FILE=$envfile jkit $argv
+                  env JKIT_ENV_FILE=$envfile %2$s $argv
                   set -l rc $status
                   test -s $envfile; and source $envfile
                   rm -f $envfile
                   return $rc
                 end
-                """.formatted(g);
+                """.formatted(g, self("fish", self));
     }
 
     static String powershell(Path root) {
+        return powershell(root, null);
+    }
+
+    static String powershell(Path root, String self) {
+        String jkit = self == null ? "(Get-Command jkit -CommandType Application | Select-Object -First 1)"
+                : ShellQuote.quote("pwsh", self);
         String g = ShellQuote.quote("pwsh", root.resolve("global").toString());
         return """
                 # jkit shell hook (PowerShell)
                 $env:JKIT_SHELL = 'pwsh'
-                $__jkitG = %1$s
-                $__jkitSep = [IO.Path]::PathSeparator
-                foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
-                  $bin = Join-Path (Join-Path $__jkitG $t) 'bin'
-                  if (($env:PATH -split [regex]::Escape($__jkitSep)) -notcontains $bin) { $env:PATH = $bin + $__jkitSep + $env:PATH }
-                }
-                foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
-                  $dir = Join-Path $__jkitG $pair[1]
-                  if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
-                    Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+                & {
+                  # a script block of its own: the profile's $t, $bin, $dir... stay as they were
+                  $g = %1$s
+                  $sep = [IO.Path]::PathSeparator
+                  foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
+                    $bin = Join-Path (Join-Path $g $t) 'bin'
+                    if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }
+                  }
+                  foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
+                    $dir = Join-Path $g $pair[1]
+                    if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
+                      Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+                    }
                   }
                 }
-                Remove-Variable __jkitG, __jkitSep, t, bin, pair, dir -ErrorAction SilentlyContinue
                 function jkit {
                   # dot-sourcing needs a .ps1 extension
                   $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
                   $env:JKIT_ENV_FILE = $envFile
-                  & (Get-Command jkit -CommandType Application | Select-Object -First 1) @args
-                  $rc = $LASTEXITCODE
-                  Remove-Item Env:JKIT_ENV_FILE
+                  try {
+                    & %2$s @args
+                    $rc = $LASTEXITCODE
+                  } finally {
+                    # also after Ctrl-C: later jkit runs outside this function must not write to it
+                    Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
+                  }
                   if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) { . $envFile }
                   Remove-Item $envFile -ErrorAction SilentlyContinue
                   $global:LASTEXITCODE = $rc
                 }
-                """.formatted(g);
+                """.formatted(g, jkit);
     }
 }

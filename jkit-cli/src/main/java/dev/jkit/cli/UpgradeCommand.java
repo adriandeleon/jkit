@@ -25,7 +25,11 @@ import picocli.CommandLine.Parameters;
  * installed; a global link that pointed at the line's newest build moves to the new one.
  */
 @Command(name = "upgrade",
-        description = "Installs the newest build within each installed major version and moves --global to it.")
+        description = {"Installs the newest build within each installed major version, and moves the global",
+                "default along when it pointed at the old build. Old builds stay (jkit remove them).",
+                "",
+                "  jkit upgrade --dry-run           what would change (21.0.5 → 21.0.9, maven 3.9.11 → 3.10.2)",
+                "  jkit upgrade jdk"})
 final class UpgradeCommand implements Callable<Integer> {
 
     /** One release line: a store tool, a major version and (for JDKs) a vendor and JavaFX or not. */
@@ -45,11 +49,15 @@ final class UpgradeCommand implements Callable<Integer> {
             completionCandidates = Candidates.Tools.class, description = "Only this tool (and major). Default: everything.")
     ToolSpec spec;
 
-    @Parameters(index = "1", arity = "0..1", paramLabel = "[vendor]", completionCandidates = Candidates.Vendors.class)
+    @Parameters(index = "1", arity = "0..1", paramLabel = "<vendor>", completionCandidates = Candidates.Vendors.class)
     String vendorText;
 
     @Option(names = "--fx", description = "Treat JDKs as JavaFX builds. Only needed for installs made before jkit recorded JavaFX.")
     boolean fx;
+
+    @Option(names = "--allow-unverified",
+            description = "Install upgrades even when the source publishes no checksum for the download.")
+    boolean allowUnverified;
 
     @Option(names = "--pre", description = "Allow pre-releases.")
     boolean pre;
@@ -66,6 +74,7 @@ final class UpgradeCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
+        spec = Resolve.lts(ctx, spec, vendorText, fx);
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
         java.io.PrintStream say = json ? ctx.err : ctx.out;
@@ -74,6 +83,7 @@ final class UpgradeCommand implements Callable<Integer> {
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");
             return 0;
         }
+        lists = new Changes(ctx);
         List<Object> rows = new ArrayList<>();
         int failures = 0;
         int available = 0;
@@ -87,7 +97,7 @@ final class UpgradeCommand implements Callable<Integer> {
             }
         }
         // version lists fetched to check the lines (the upgrades report their own changes)
-        Changes lists = new Changes(ctx).disk();
+        lists.disk();
         if (!lists.isEmpty()) {
             say.println("checked for newer builds");
             lists.print(say);
@@ -110,6 +120,9 @@ final class UpgradeCommand implements Callable<Integer> {
      * and on failure an {@code error}. A failure on one line never stops the others, so what
      * earlier lines changed is always reported.
      */
+    /** The cached files written to check the lines: the top-level {@code changes}. */
+    private Changes lists;
+
     private Map<String, Object> upgrade(Context ctx, java.io.PrintStream say, Line line, Installed newest) {
         Map<String, Object> row = JsonOut.fields(
                 "tool", line.userTool().id(),
@@ -121,6 +134,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 "status", null);
         try {
             Artifact artifact = resolve(ctx, line);
+            lists.disk(); // the lists fetched so far go to the top level, not to this line's install
             row.put("to", artifact.version().raw());
             if (artifact.version().compareTo(newest.version()) <= 0
                     || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
@@ -134,16 +148,22 @@ final class UpgradeCommand implements Callable<Integer> {
                 say.println(line + ": " + newest.version() + " → " + artifact.version());
                 return row;
             }
-            ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-            Installer.Result result = ctx.installer().install(artifact, new ProgressBar(ctx.err));
-            if (!result.verified()) {
-                ctx.err.println("warning: " + InstallCommand.UNVERIFIED);
-            }
+            Installer.Result result = InstallCommand.download(ctx, artifact, allowUnverified,
+                    "jkit upgrade " + line.userTool() + " --allow-unverified");
             row.put("status", "upgraded");
             row.put("verified", result.verified());
             row.put("path", result.installed().home());
             Changes changes = InstallCommand.installed(ctx, result);
-            moveLinks(ctx, changes, line, newest, result.installed().home());
+            try {
+                moveLinks(ctx, changes, line, newest, result.installed().home());
+            } catch (Exception e) {
+                // the new build is installed either way: say so, and what is still to do
+                JkitException je = Errors.describe(e);
+                changes.note("warning: couldn't move the global link to the new build: "
+                        + dev.jkit.model.Visible.of(je.getMessage()) + "; to do it yourself: jkit use " + line.userTool()
+                        + "@" + artifact.version() + (line.vendor() == null ? "" : " " + line.vendor().name())
+                        + (line.fx() ? " --fx" : "") + " --global");
+            }
             changes.note("the old build stays: jkit remove " + line.userTool() + "@" + newest.version()
                     + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             row.put("changes", changes.json());
@@ -153,7 +173,7 @@ final class UpgradeCommand implements Callable<Integer> {
             JkitException je = Errors.describe(e);
             row.put("status", "failed");
             row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
-            ctx.err.println("warning: " + line + ": " + je.getMessage());
+            ctx.err.println("warning: " + line + ": " + dev.jkit.model.Visible.of(je.getMessage()));
             je.hints().forEach(h -> ctx.err.println("  " + h));
         }
         return row;
@@ -203,12 +223,12 @@ final class UpgradeCommand implements Callable<Integer> {
             }
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
-            if (target != null && target.equals(previous.home())) {
+            if (target != null && Resolve.same(target, previous.home())) {
                 ctx.os.pointLink(link, newHome);
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Path.of(shell).equals(previous.home())) {
+            if (shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), previous.home())) {
                 changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }

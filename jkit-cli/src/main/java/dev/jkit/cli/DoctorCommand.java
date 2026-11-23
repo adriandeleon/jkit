@@ -60,7 +60,7 @@ final class DoctorCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.lenient(System.getenv(), System.out);
+        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
         List<Finding> findings = run(ctx, Path.of("").toAbsolutePath(), network);
         if (json.json) {
             ctx.out.println(JsonOut.write(json(findings)));
@@ -131,6 +131,22 @@ final class DoctorCommand implements Callable<Integer> {
         }
     }
 
+    private static final boolean WINDOWS = File.separatorChar == '\\';
+
+    /** A path as one shell word in a fix command: ~/... when that is safe, else quoted. */
+    static String arg(Path path) {
+        String shown = tilde(path);
+        if (shown.matches("[A-Za-z0-9_./~+:\\\\-]+")) {
+            return shown;
+        }
+        return dev.jkit.model.ShellQuote.quote(WINDOWS ? "pwsh" : "bash", path.toString());
+    }
+
+    /** rm -rf, or PowerShell's Remove-Item on Windows. */
+    static String removeAll(String target) {
+        return (WINDOWS ? "Remove-Item -Recurse -Force " : "rm -rf ") + target;
+    }
+
     static List<Finding> run(Context ctx, Path cwd, boolean network) {
         Report r = new Report(ctx, cwd, network);
         try {
@@ -159,7 +175,7 @@ final class DoctorCommand implements Callable<Integer> {
             r.info(tilde(root) + " doesn't exist yet; the first install creates it");
         } else if (!Files.isWritable(root)) {
             r.fail("can't write to " + tilde(root) + ", so installs and jkit use --global will fail",
-                    "check its owner and permissions: ls -ld " + tilde(root));
+                    "check its owner and permissions: " + (WINDOWS ? "Get-Acl " : "ls -ld ") + arg(root));
         }
     }
 
@@ -180,7 +196,7 @@ final class DoctorCommand implements Callable<Integer> {
         String fix = switch (name) {
             case "zsh" -> "jkit hook zsh --install, then open a new shell";
             case "fish" -> "jkit hook fish --install, then open a new shell";
-            default -> "jkit hook bash --install, then open a new shell";
+            default -> Changes.HOOK_SETUP + ", then open a new shell";
         };
         r.warn("shell hook not loaded: jkit use can't change this shell, and the global versions aren't on PATH", fix);
     }
@@ -242,9 +258,9 @@ final class DoctorCommand implements Callable<Integer> {
                 List<Installed> installed = r.ctx.store.list(s.tool());
                 String fix = installed.isEmpty()
                         ? "install one and make it global: jkit install " + s.tool() + "@<version>, then jkit use … --global;"
-                                + " or remove the link: rm " + tilde(r.ctx.home.global(s.tool()))
-                        : useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: rm "
-                                + tilde(r.ctx.home.global(s.tool()));
+                                + " or remove the link: " + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()))
+                        : useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: "
+                                + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()));
                 r.fail("global " + s.tool() + " → " + tilde(s.global()) + ", which no longer exists", fix);
             }
             if (s.shellChoice() != null && !Files.isDirectory(s.shellChoice())) {
@@ -334,10 +350,10 @@ final class DoctorCommand implements Callable<Integer> {
             try (Stream<Path> children = Files.list(dir)) {
                 for (Path child : children.sorted().toList()) {
                     if (Files.isDirectory(child) && !Files.isSymbolicLink(child)
-                            && !Files.isRegularFile(child.resolve(Store.MARKER))) {
+                            && !Files.isRegularFile(child.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                         any = true;
                         r.warn("unfinished install (no " + Store.MARKER + "): " + tilde(child),
-                                "remove it: rm -rf " + tilde(child));
+                                "remove it: " + removeAll(arg(child)));
                     }
                 }
             }
@@ -346,7 +362,7 @@ final class DoctorCommand implements Callable<Integer> {
         if (Files.isDirectory(tmp) && hasEntries(tmp)) {
             any = true;
             r.warn(human(size(tmp)) + " left in " + tilde(tmp) + " by interrupted downloads",
-                    "when no jkit install is running: rm -rf " + tilde(tmp) + File.separator + "*");
+                    "when no jkit install is running: " + removeAll(arg(tmp) + File.separator + "*")); // the * outside any quotes
         }
         if (!any) {
             r.ok(installs + (installs == 1 ? " install" : " installs") + ", nothing left over");
@@ -360,6 +376,13 @@ final class DoctorCommand implements Callable<Integer> {
         }
         if (states.projectError() != null) {
             r.fail(states.projectError(), "fix the file, or set JKIT_PROJECT_FILE= (empty) to ignore project files");
+            return;
+        }
+        if (states.project().isEmpty() && states.projectSkipped() != null) {
+            r.warn(tilde(states.projectSkipped()), states.projectSkipped().contains("UTF-8")
+                    ? "rename the folder, or set JKIT_PROJECT_FILE to the file's absolute path"
+                    : "jkit ignores project files in folders other users can change (as git does); fix the "
+                            + "folder's owner or permissions, or set JKIT_PROJECT_FILE to the file's absolute path");
             return;
         }
         if (states.project().isEmpty()) {
@@ -403,8 +426,8 @@ final class DoctorCommand implements Callable<Integer> {
             r.info("version index: " + files + " cached " + (files == 1 ? "list" : "lists") + ", newest "
                     + age(Duration.between(newest, Instant.now())) + " old (refetched after 24 h)");
         }
-        if ("true".equals(r.ctx.env.get("JKIT_NETWORK_OFFLINE"))) {
-            r.info("offline mode is on (JKIT_NETWORK_OFFLINE=true): only cached version lists are used");
+        if (Context.offlineByEnv(r.ctx.env)) {
+            r.info("offline mode is on (JKIT_NETWORK_OFFLINE): only cached version lists are used");
         }
     }
 
@@ -571,9 +594,9 @@ final class DoctorCommand implements Callable<Integer> {
 
     static void print(List<Finding> findings, PrintStream out) {
         for (Finding f : findings) {
-            out.println(String.format("%-6s%s", f.level().id(), f.message()));
+            out.println(String.format("%-6s%s", f.level().id(), dev.jkit.model.Visible.of(f.message())));
             if (f.fix() != null) {
-                out.println("      fix: " + f.fix());
+                out.println("      fix: " + dev.jkit.model.Visible.of(f.fix()));
             }
         }
         Map<Level, Integer> counts = counts(findings);

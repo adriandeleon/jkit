@@ -41,6 +41,18 @@ class HookInstallTest {
     }
 
     @Test
+    void aStartupFileThatIsNotUtf8KeepsItsBytes() throws Exception {
+        Path rc = user.resolve(".bashrc");
+        byte[] latin1 = "# caf\u00e9\nexport A=1\n".getBytes(StandardCharsets.ISO_8859_1);
+        Files.write(rc, latin1);
+        HookCommand.install(ctx(), "bash", user);
+        byte[] after = Files.readAllBytes(rc);
+        assertThat(java.util.Arrays.copyOf(after, latin1.length)).isEqualTo(latin1);
+        HookCommand.uninstall(ctx(), "bash", user);
+        assertThat(Files.readAllBytes(rc)).isEqualTo(latin1);
+    }
+
+    @Test
     void installAppendsToBashrcAndSaysWhatChanged() throws Exception {
         Path rc = user.resolve(".bashrc");
         Files.writeString(rc, "export EDITOR=vim\n");

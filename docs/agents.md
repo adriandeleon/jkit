@@ -7,9 +7,9 @@ Aider, …) and CI. The rules an agent needs:
   needs the shell hook, and the next command would lose it anyway). Run things through
   **`jkit exec`** instead.
 - **Nothing asks a question.** No command prompts or reads stdin; the download progress bar is off
-  when stderr isn't a terminal.
-- **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use` and
-  `remove` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
+  when jkit isn't attached to a terminal.
+- **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `pin`,
+  `unpin`, `sync` and `remove` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
   list of commands to try. Shapes: [json.md](json.md).
 - **Exit codes** are stable: `0` ok, `1` failure, `2` bad arguments, `3` the version isn't
   installed. `jkit exec` passes the command's own exit code through.
@@ -23,7 +23,7 @@ jkit exec -- mvn test                        # the project's versions (jkit.toml
 jkit exec jdk@17 -- java -version            # newest installed JDK 17 from the default vendor
 jkit exec jdk@21 zulu maven@3.9 -- mvn -v    # several tools; a vendor follows its tool
 jkit exec --dir ../other-app -- ./gradlew build
-jkit exec --global -- java -version          # ignore project files
+jkit exec --no-project -- java -version      # ignore project files
 ```
 
 It sets `JAVA_HOME` (and `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME`, `GRAALVM_HOME` as chosen), puts
@@ -34,6 +34,12 @@ installed exits `3` with the `jkit install …` command to run. jkit's own error
 
 `--` is required; everything after it belongs to the command, so `jkit exec -- mvn --help`
 shows Maven's help.
+
+While the command runs, jkit ignores SIGINT: a terminal's Ctrl-C reaches the command directly, so a
+REPL keeps running and its exit code comes through. To stop it from another process (a timeout, an
+agent's cancel), send jkit SIGTERM (or SIGHUP): it passes SIGTERM on, waits for the command and
+exits with its exit code; a second SIGTERM kills the command. A SIGINT sent to jkit's pid alone does
+nothing.
 
 ## A typical agent loop
 
@@ -62,6 +68,9 @@ versions; prefix commands with `jkit exec` instead:
 - What is active and what the project wants: `jkit status --json`. Installed builds: `jkit list --json`.
 - Exit code 3 means the version isn't installed; install it with `jkit install jdk@17` (downloads)
   only if the user is fine with that.
-- Don't change the global default (`jkit use … --global`) or remove installs unless asked.
+- Don't change the global default (`jkit use … --global`) or remove installs unless asked. Note
+  that the first install of a tool becomes its default; add `--no-default` to avoid that.
+- jkit refuses downloads with no published checksum. Don't add `--allow-unverified` unless the user
+  says so.
 - On failure, read the `error:` line and the hints under it on stderr (`--json`: `error.hints`).
 ```

@@ -1,138 +1,175 @@
-# jkit (prototype)
+# jkit
 
-Installs and switches JDKs from several vendors, Maven, Gradle and sbt. Single native binary,
-built with Java 25, picocli and GraalVM native-image. See the design spec for the full plan.
+Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
+globally. One native binary, no JDK needed to run it.
 
 Website: <https://jkit-project.dev>
 
+## Quickstart
+
+```bash
+brew install adriandeleon/tap/jkit     # or see Install below
+jkit hook --install                    # adds a short marked block to ~/.bashrc, ~/.zshrc or fish's config
+# open a new shell, then:
+jkit install jdk@21                    # the first JDK you install becomes the default
+java -version
+```
+
+Then, as needed:
+
+```bash
+jkit search jdk                        # vendors and releases (jkit search jdk@21 zulu: every build)
+jkit install jdk@lts corretto          # newest long-term-support release from a vendor
+jkit use jdk@21 --global               # the default for new shells
+jkit use jdk@17 zulu                   # only this shell
+jkit install maven                     # also gradle@8.14, sbt
+jkit pin jdk@21                        # record it in this project's jkit.toml
+jkit exec jdk@17 -- mvn test           # one command, no shell change (scripts, CI, agents)
+jkit status                            # what's active here, and why
+jkit doctor                            # what's wrong with the setup, and how to fix it
+jkit upgrade                           # newest build within each installed release (21.0.5 → 21.0.9)
+```
+
 ## Install
 
-```bash
-brew install adriandeleon/tap/jkit      # macOS (Apple Silicon, Intel) and Linux
-```
-
-```powershell
-winget install AdrianDeLeon.jkit        # Windows
-```
-
-Or download from the [releases](https://github.com/adriandeleon/jkit/releases) page, each with a
-`SHA256SUMS` file:
-
-| Platform | Files |
+| Platform | |
 | --- | --- |
-| Linux x64, arm64 | `jkit-<version>-linux-{x64,aarch64}.tar.gz` and `.zip`, `.deb`, `.rpm` |
-| macOS Apple Silicon, Intel | `jkit-<version>-macos-{aarch64,x64}.tar.gz` and `.zip` |
-| Windows x64 | `jkit-<version>-windows-x64.zip` |
+| macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
+| Debian, Ubuntu (x64, arm64) | the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
+| Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
+| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
+| Anything else | a `.tar.gz` or `.zip` from the releases |
 
-Each archive holds just the binary (`jkit`, or `jkit.exe`); put it anywhere on your `PATH`.
-Windows on ARM runs the x64 build under emulation, as GraalVM has no native-image for it yet.
-Pre-releases (versions with a hyphen) are on the releases page only.
+Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
+anywhere on your `PATH`. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
+(Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04, RHEL 8 or Alpine);
+macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
+hyphen) are on the releases page only.
 
-## Build
+To check a download: `sha256sum -c SHA256SUMS --ignore-missing`, and for where it was built,
+`gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM,
+made from the Linux x64 build: the other builds compile in the same libraries, and the macOS x64
+binary is built with Liberica NIK instead of GraalVM CE.
 
-Maven, through the Maven Wrapper (Maven 3.9.16, checksum pinned in `.mvn/wrapper/maven-wrapper.properties`).
+### Windows (preview)
 
-```bash
-./mvnw verify                                          # compile + unit tests on JDK 25
-GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative package -DskipTests
-# binary: jkit-cli/target/jkit
+jkit runs on Windows, but this part is less tested than macOS and Linux:
+
+- Add the hook to your PowerShell profile by hand (`jkit hook --install` doesn't do PowerShell
+  yet): `notepad $PROFILE`, then add `jkit hook pwsh | Out-String | Invoke-Expression`.
+- `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. Programs started
+  outside a hooked PowerShell (cmd.exe, IDEs) see it only if you set `JAVA_HOME` to that folder
+  once, and add `%JAVA_HOME%\bin` to your user `PATH`.
+- Switching on `cd` isn't available in PowerShell yet.
+- Windows on ARM runs the x64 build under emulation.
+- `jkit.exe` needs the Microsoft Visual C++ Redistributable (2015 or newer, x64). winget installs
+  it along with jkit; with the `.zip`, install it first if jkit doesn't start
+  (`winget install Microsoft.VCRedist.2015+.x64`). Most machines already have it.
+
+## How it works
+
+- Installs go to `~/.jkit/tools/<tool>/<version>`; nothing outside `~/.jkit` is touched except the
+  short marked block `jkit hook --install` adds to your shell's startup file (`--uninstall` removes it).
+- The global default is a link, `~/.jkit/global/<tool>`, which the hook puts on `PATH` and uses for
+  `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME` and `GRAALVM_HOME`. Point an IDE at
+  `~/.jkit/global/jdk` and it follows `jkit use … --global`.
+- `jkit use` without `--global` changes only the current shell, through the hook.
+- Every change jkit makes is printed: folders, links, cache files, and each variable it sets.
+- Downloads come over https only and are checked against the checksum their source publishes:
+  SHA-256 or stronger counts as verified; old Maven releases that only have SHA-1 install with a
+  warning, marked unverified; a download with no checksum is refused unless you pass
+  `--allow-unverified`. No vendor signatures are checked yet. See [SECURITY.md](SECURITY.md).
+
+| Path | What |
+| --- | --- |
+| `~/.jkit/tools/` | installed JDKs, Maven, Gradle and sbt |
+| `~/.jkit/global/` | links to the global defaults |
+| `~/.jkit/index/` | version lists, cached 24 h (`--refresh` refetches, `--offline` uses only the cache) |
+| `~/.jkit/config.toml` | settings (below) |
+
+`JKIT_HOME` moves all of it. It must be an absolute path to a folder you (or root) own that other users can't write to.
+
+### Settings
+
+`~/.jkit/config.toml`:
+
+```toml
+[jdk]
+vendor = "temurin"        # default JDK vendor
+[graalvm]
+vendor = "graalvm-ce"     # default GraalVM vendor
+[shell]
+auto_switch = true        # switch to a project's versions on cd (jkit hook --install --auto-switch)
 ```
 
-Building needs JDK 25; the native binary itself needs no JDK.
+Environment variables: `JKIT_HOME`, `JKIT_JDK_VENDOR`, `JKIT_GRAALVM_VENDOR`, `JKIT_AUTO_SWITCH`
+(`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE` (`1`/`true`: like `--offline`),
+`HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT}_URL`
+for https mirrors.
 
-### Linux packages (.deb and .rpm)
+## Projects
 
-```bash
-GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTests
-# jkit-cli/target/jkit_<version>_amd64.deb
-# jkit-cli/target/jkit-<version>-<release>.x86_64.rpm
-```
+A `jkit.toml` (or an existing `.sdkmanrc`, `.tool-versions` or `.java-version`) records a project's
+versions. `jkit pin jdk@21` writes it, `jkit sync` installs what it asks for and switches this shell,
+and with auto-switch on, bash, zsh and fish switch on `cd`. See
+[docs/project-files.md](docs/project-files.md).
 
-Both are built in pure Java (jdeb, rpm-builder), so no `dpkg-deb` or `rpmbuild` is needed.
-They install `/usr/bin/jkit`, its bash completion and docs, and need glibc 2.34 or newer and zlib
-(Debian 12+, Ubuntu 22.04+, Fedora, RHEL/Rocky/Alma 9+). The architecture comes from the build
-machine: build on arm64 for arm64 packages.
+## More
 
-```bash
-sudo apt install ./jkit_*_amd64.deb      # Debian, Ubuntu
-sudo dnf install ./jkit-*.x86_64.rpm     # Fedora, RHEL, Rocky, Alma
-```
+- [docs/troubleshooting.md](docs/troubleshooting.md): `status`, `doctor` and `env`.
+- [docs/agents.md](docs/agents.md): using jkit from scripts, CI and AI agents (`jkit exec`).
+- [docs/json.md](docs/json.md): `--json` output for editors and tools.
+- `jkit <command> --help` for every option. Tab completion comes with the hook (bash, and zsh
+  through bashcompinit).
 
-### macOS
+Sources: [foojay](https://foojay.io) for JDKs, services.gradle.org, Maven Central, and sbt's GitHub
+releases.
 
-Releases include `jkit-<version>-macos-aarch64.tar.gz` (Apple Silicon) and
-`jkit-<version>-macos-x64.tar.gz` (Intel), and the same as `.zip`: a single binary, signed with a Developer ID and
-notarized by Apple, so Gatekeeper lets it run even when downloaded with a browser. They need
-macOS 15 (Sequoia) or newer.
+## Uninstall
 
 ```bash
-tar -xzf jkit-*-macos-*.tar.gz
-sudo mv jkit /usr/local/bin/
+jkit hook --uninstall          # takes the line out of your shell's startup file
+rm -rf ~/.jkit                 # every install, link and setting
+brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit, winget uninstall AdrianDeLeon.jkit
 ```
-
-Pre-releases may ship without a signature; for those, run `xattr -d com.apple.quarantine jkit`
-on a browser-downloaded copy.
-
-## Try it
-
-```bash
-export JKIT_HOME=/tmp/jkit-home          # keep tests away from ~/.jkit
-eval "$(jkit hook bash)"                 # shell wrapper for `jkit use`, plus tab completion
-                                         # (switches on cd with auto_switch = true under [shell] in config.toml)
-jkit hook bash --install                 # or zsh, fish: adds that line to ~/.bashrc for new shells
-jkit hook --install --auto-switch         # also switch to a project's versions on cd
-jkit search jdk
-jkit install jdk@21                      # default vendor (temurin)
-jkit install jdk@17 zulu
-jkit use jdk@21 --global
-jkit use jdk@17 zulu                     # this shell only
-jkit exec jdk@17 zulu -- java -version   # one command, no hook needed
-jkit install graalvm@25 && jkit use graalvm@25   # sets GRAALVM_HOME only
-jkit list
-jkit upgrade --dry-run                   # newest build within each installed major (21.0.5 → 21.0.9)
-jkit upgrade                             # installs them and moves --global along
-jkit reset jdk
-jkit remove jdk@17 zulu
-```
-
-## In the prototype
-
-search, install, upgrade, use (shell and `--global`), reset, list, status, env, exec, pin, unpin, sync, doctor, remove, copyright, hook (bash/zsh/fish; pwsh untested; `--install` adds it to the shell's startup file),
-and bash tab completion (`jkit completion bash`) for commands, options, tools and vendors.
-`status` shows which version of each tool is active here and where it comes from (this shell, a
-project file, the global default, or something set outside jkit), with a hint when that isn't what
-jkit would pick. `env` prints the environment for a new process here, for CI and IDEs
-without the hook (`eval "$(jkit env)"`). `doctor` checks the setup (shell hook, PATH order, `JAVA_HOME`
-set outside jkit, broken links, leftovers, whether the active JDK runs; `--network` for the
-sources) and prints a fix for each problem. Project files (`jkit.toml`, `.sdkmanrc`, `.tool-versions`, `.java-version`) record a project's versions:
-`jkit pin jdk@21` writes `jkit.toml`, and `jkit sync` installs what it asks for and switches this
-shell to it. With `auto_switch = true` under `[shell]` in `~/.jkit/config.toml` (or
-`JKIT_AUTO_SWITCH=1`; `jkit hook --install --auto-switch` sets both up), bash, zsh and fish switch to a project's versions on `cd` and back when you
-leave, and print every variable they change; see [docs/project-files.md](docs/project-files.md).
-`list` marks the installs the project here picks, `use` says when it overrides one, and `remove`
-warns before taking one away.
-`exec` runs one command with the versions jkit picks (`jkit exec jdk@17 -- mvn test`), with no
-shell hook: for scripts, CI and AI agents, whose commands each start a new shell; see
-[docs/agents.md](docs/agents.md).
-`--json` on list, status, env, doctor, search, install, upgrade, use, pin, unpin, sync and remove prints one JSON document for editors and
-scripts: see [docs/json.md](docs/json.md).
-Sources: foojay, services.gradle.org, Maven Central, sbt GitHub releases. Index cached 24 h (`--refresh`, `--offline`).
 
 ## Not yet
 
-switching on `cd` in PowerShell, signed packages and an apt/dnf repository, init, prune, config command, self update,
-Windows on ARM natively.
+Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
+completion, `prune`, a `config` command, self-update, vendor signature checks, and Windows on ARM
+natively.
 
-## Modules
+## Build
+
+Needs JDK 25; Maven comes through the wrapper (its checksum is pinned in
+`.mvn/wrapper/maven-wrapper.properties`).
+
+```bash
+./mvnw verify                                          # compile + unit tests
+GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative package -DskipTests
+# binary: jkit-cli/target/jkit
+GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTests
+# jkit-cli/target/jkit_<version>_amd64.deb and jkit-<version>-<release>.x86_64.rpm
+```
+
+The `.deb` and `.rpm` are built in pure Java (jdeb, rpm-builder), for the build machine's
+architecture. To try a build without touching your own setup, give it a home of its own:
+`export JKIT_HOME="$(mktemp -d)"`.
+
+When dependencies change, update `packaging/third-party/components.tsv` and regenerate the notices
+with `packaging/third-party-notices.sh` (CI runs it with `--check`).
 
 | Module | Contents |
 | --- | --- |
 | `jkit-model` | ToolSpec, Version, Vendor, Platform; no I/O |
 | `jkit-sources` | Http (+ cache), foojay, Gradle, Maven Central and sbt clients |
-| `jkit-core` | Store, Installer, Archives, Config, ShellEnv |
+| `jkit-core` | Store, Installer, Archives, Config, ShellEnv, project files |
 | `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
 | `jkit-cli` | picocli commands and the native binary |
 
+Design notes for contributors are in [docs/design/](docs/design/).
+
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). Bundled components are listed in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

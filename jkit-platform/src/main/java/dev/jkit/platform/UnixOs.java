@@ -10,7 +10,7 @@ final class UnixOs implements OsServices {
 
     @Override
     public void pointLink(Path link, Path target) throws IOException {
-        Files.createDirectories(link.getParent());
+        dev.jkit.model.Perms.mkdirs(link.getParent());
         // a name of its own, so two jkit runs switching at once don't trip over each other's temp link
         Path tmp = link.resolveSibling("." + link.getFileName() + ".new-" + ProcessHandle.current().pid()
                 + "-" + Long.toHexString(System.nanoTime()));
@@ -41,11 +41,11 @@ final class UnixOs implements OsServices {
     }
 
     @Override
-    public String hook(String shell, Path root) {
+    public String hook(String shell, Path root, String self) {
         return switch (shell) {
-            case "bash", "zsh" -> Hooks.posix(shell, root);
-            case "fish" -> Hooks.fish(root);
-            case "pwsh", "powershell" -> Hooks.powershell(root);
+            case "bash", "zsh" -> Hooks.posix(shell, root, self);
+            case "fish" -> Hooks.fish(root, self);
+            case "pwsh", "powershell" -> Hooks.powershell(root, self);
             default -> throw new dev.jkit.model.JkitException("unsupported shell: " + shell,
                     "shells: bash, zsh, fish, pwsh");
         };

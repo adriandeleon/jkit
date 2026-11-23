@@ -29,21 +29,92 @@ public final class Archives {
 
     private Archives() { }
 
+    /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 10,000 files. */
+    static final long MAX_UNPACKED = 3L << 30;
+    static final int MAX_ENTRIES = 200_000;
+    /** {@link #MAX_ENTRIES}, lowered by tests. */
+    static int entryLimit = MAX_ENTRIES;
+
+    /** What an archive may still unpack. */
+    private static final class Budget {
+        long bytes = MAX_UNPACKED;
+        int entries = entryLimit;
+
+        void entry() {
+            if (--entries < 0) {
+                throw unsafe("more than " + entryLimit + " entries");
+            }
+        }
+
+        /** Copies {@code in} to a new file {@code out}, counting against the size limit. */
+        void copy(InputStream in, Path out) throws IOException {
+            try (var os = Files.newOutputStream(out, java.nio.file.StandardOpenOption.CREATE_NEW)) {
+                byte[] buffer = new byte[1 << 16];
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    bytes -= n;
+                    if (bytes < 0) {
+                        throw unsafe("it unpacks to more than " + (MAX_UNPACKED >> 30) + " GB");
+                    }
+                    os.write(buffer, 0, n);
+                }
+            }
+        }
+    }
+
+    /** A download that is well-formed but would escape its folder or fill the disk: not a jkit bug. */
+    static dev.jkit.model.JkitException unsafe(String detail) {
+        return new dev.jkit.model.JkitException("the downloaded archive is unsafe to unpack (" + detail
+                + "); nothing was installed", "the source or a mirror served a broken or hostile archive; "
+                + "try another version or vendor, and report it to the source");
+    }
+
     public static void extract(Path archive, Path target, String archiveType) throws IOException {
         Files.createDirectories(target);
         Path root = target.toAbsolutePath().normalize();
         switch (archiveType) {
-            case "tar.gz", "tgz" -> extractTarGz(archive, root);
-            case "zip" -> extractZip(archive, root);
+            case "tar.gz", "tgz" -> {
+                ArchiveScan.tarGz(archive, entryLimit, MAX_UNPACKED);
+                extractTarGz(archive, root);
+            }
+            case "zip" -> {
+                ArchiveScan.zip(archive, entryLimit);
+                extractZip(archive, root);
+            }
             default -> throw new IOException("unsupported archive type: " + archiveType);
+        }
+        closeToOthers(root);
+    }
+
+    /**
+     * Takes away write access for other users from everything unpacked, folders included: the
+     * archive's modes are already masked, but folders follow the umask, which may be 000.
+     */
+    private static void closeToOthers(Path root) throws IOException {
+        if (!POSIX) {
+            return;
+        }
+        try (var all = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) all::iterator) {
+                if (Files.isSymbolicLink(p)) {
+                    continue;
+                }
+                Set<PosixFilePermission> perms = Files.getPosixFilePermissions(p, LinkOption.NOFOLLOW_LINKS);
+                if (perms.remove(PosixFilePermission.OTHERS_WRITE)) {
+                    Files.setPosixFilePermissions(p, perms);
+                }
+            }
         }
     }
 
     private static void extractTarGz(Path archive, Path target) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(archive));
-             TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw))) {
+             // every gzip member, as ArchiveScan reads it (bgzip and pigz write several)
+             TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw, true))) {
+            Budget budget = new Budget();
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
+                budget.entry();
                 Path out = safe(target, entry.getName());
                 if (entry.isDirectory()) {
                     createDirectories(target, out);
@@ -53,14 +124,18 @@ public final class Archives {
                     Path source = safe(target, entry.getLinkName());
                     noLinksBetween(target, source, entry.getName());
                     if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
-                        throw new IOException("archive hard link points at no earlier file: " + entry.getName());
+                        throw unsafe("archive hard link points at no earlier file: " + entry.getName());
                     }
                     createDirectories(target, out.getParent());
+                    budget.bytes -= Files.size(source);
+                    if (budget.bytes < 0) {
+                        throw unsafe("it unpacks to more than " + (MAX_UNPACKED >> 30) + " GB");
+                    }
                     Files.copy(source, out, StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
                 } else {
                     createDirectories(target, out.getParent());
                     Files.deleteIfExists(out);
-                    Files.copy(tar, out);
+                    budget.copy(tar, out);
                     setMode(out, entry.getMode());
                 }
             }
@@ -69,17 +144,19 @@ public final class Archives {
 
     private static void extractZip(Path archive, Path target) throws IOException {
         try (ZipFile zip = ZipFile.builder().setPath(archive).get()) {
+            Budget budget = new Budget();
             for (ZipArchiveEntry entry : Collections.list(zip.getEntries())) {
+                budget.entry();
                 Path out = safe(target, entry.getName());
                 if (entry.isDirectory()) {
                     createDirectories(target, out);
                 } else if (entry.isUnixSymlink()) {
-                    symlink(target, out, zip.getUnixSymlink(entry), entry.getName());
+                    symlink(target, out, linkTarget(zip, entry), entry.getName());
                 } else {
                     createDirectories(target, out.getParent());
                     Files.deleteIfExists(out);
                     try (InputStream in = zip.getInputStream(entry)) {
-                        Files.copy(in, out);
+                        budget.copy(in, out);
                     }
                     setMode(out, entry.getUnixMode());
                 }
@@ -96,7 +173,7 @@ public final class Archives {
      */
     private static void symlink(Path target, Path out, String linkName, String entryName) throws IOException {
         if (linkName == null || linkName.isEmpty()) {
-            throw new IOException("archive symlink without a target: " + entryName);
+            throw unsafe("archive symlink without a target: " + entryName);
         }
         Path link = Path.of(linkName);
         boolean named = false;
@@ -113,11 +190,29 @@ public final class Archives {
         Path inside = relative.getNameCount() > 1 ? target.resolve(relative.getName(0)) : target;
         if (link.isAbsolute() || link.getRoot() != null || climbsAfterName
                 || !out.getParent().resolve(link).normalize().startsWith(inside)) {
-            throw new IOException("archive symlink points outside the target folder: " + entryName + " -> " + linkName);
+            throw unsafe("archive symlink points outside the target folder: " + entryName + " -> " + linkName);
         }
         createDirectories(target, out.getParent());
-        Files.deleteIfExists(out);
+        try {
+            Files.deleteIfExists(out);
+        } catch (java.nio.file.DirectoryNotEmptyException e) {
+            throw unsafe("a link replaces a folder already unpacked: " + entryName);
+        }
         Files.createSymbolicLink(out, link);
+    }
+
+    /** A zip symlink's target, read only up to a path's length: ZipFile would read any size whole. */
+    private static String linkTarget(ZipFile zip, ZipArchiveEntry entry) throws IOException {
+        if (entry.getSize() > ArchiveScan.MAX_NAME) {
+            throw unsafe("a symlink entry holds " + entry.getSize() + " bytes: " + entry.getName());
+        }
+        try (InputStream in = zip.getInputStream(entry)) {
+            byte[] bytes = in.readNBytes(ArchiveScan.MAX_NAME + 1);
+            if (bytes.length > ArchiveScan.MAX_NAME) {
+                throw unsafe("a symlink entry is too long: " + entry.getName());
+            }
+            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 
     /** createDirectories that refuses to go through a symlink an earlier entry made. */
@@ -130,7 +225,7 @@ public final class Archives {
     private static void noLinksBetween(Path target, Path path, String entryName) throws IOException {
         for (Path p = path; p != null && !p.equals(target); p = p.getParent()) {
             if (Files.isSymbolicLink(p)) {
-                throw new IOException("archive entry goes through a symlink: " + entryName);
+                throw unsafe("archive entry goes through a symlink: " + entryName);
             }
         }
     }
@@ -138,7 +233,7 @@ public final class Archives {
     private static Path safe(Path target, String name) throws IOException {
         Path out = target.resolve(name).normalize();
         if (!out.startsWith(target)) {
-            throw new IOException("archive entry escapes the target folder: " + name);
+            throw unsafe("archive entry escapes the target folder: " + name);
         }
         return out;
     }
@@ -147,6 +242,7 @@ public final class Archives {
         if (!POSIX || mode == 0) {
             return;
         }
+        mode &= 0775; // never writable by everyone, whatever the archive says
         Set<PosixFilePermission> perms = EnumSet.noneOf(PosixFilePermission.class);
         PosixFilePermission[] order = {
             PosixFilePermission.OTHERS_EXECUTE, PosixFilePermission.OTHERS_WRITE, PosixFilePermission.OTHERS_READ,

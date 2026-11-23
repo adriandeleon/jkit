@@ -14,6 +14,8 @@ class SuggestTest {
         assertThat(Suggest.closest("temurn", vendors)).isEqualTo("temurin");
         assertThat(Suggest.closest("Zulu", vendors)).isEqualTo("zulu");
         assertThat(Suggest.closest("sapmachin", vendors)).isEqualTo("sapmachine");
+        assertThat(Suggest.closest("zuul", vendors)).isEqualTo("zulu");
+        assertThat(Suggest.closest("liber", vendors)).isEqualTo("liberica");
     }
 
     @Test

@@ -92,7 +92,7 @@ class EnvTest {
                     assertThat(e.exitCode()).isEqualTo(JkitException.NOT_INSTALLED);
                     assertThat(e.getMessage()).isEqualTo("jkit.toml wants jdk 11, gradle 8, not installed");
                     assertThat(e.hints()).containsExactly("install it: jkit install jdk@11",
-                            "install it: jkit install gradle@8", "or ignore the project file: jkit env --global");
+                            "install it: jkit install gradle@8", "or ignore the project file: jkit env --no-project");
                 });
     }
 
@@ -112,7 +112,8 @@ class EnvTest {
     @Test
     void shellSyntaxAndJson() throws Exception {
         EnvCommand.Result result = compute(false);
-        assertThat(ShellEnv.format(result.variables(), "fish")).startsWith("set -gx JAVA_HOME '" + home.resolve("global/jdk"));
+        assertThat(ShellEnv.format(result.variables(), "fish")).startsWith("set -gx JAVA_HOME "
+                + dev.jkit.model.ShellQuote.quote("fish", home.resolve("global/jdk").toString()));
         JsonNode doc = JSON.readTree(JsonOut.write(EnvCommand.json(result)));
         assertThat(doc.path("dir").asText()).isEqualTo(project.toString());
         assertThat(doc.path("project").isNull()).isTrue();
