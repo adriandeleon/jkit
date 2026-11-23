@@ -15,9 +15,14 @@ class ShellRcTest {
     void startupFilePerShell() {
         assertThat(ShellRc.file("bash", Map.of(), HOME)).isEqualTo(HOME.resolve(".bashrc"));
         assertThat(ShellRc.file("zsh", Map.of(), HOME)).isEqualTo(HOME.resolve(".zshrc"));
-        assertThat(ShellRc.file("zsh", Map.of("ZDOTDIR", "/etc/zdot"), HOME)).isEqualTo(Path.of("/etc/zdot/.zshrc"));
+        // absolute on every OS (C:\\etc\\zdot on Windows); a relative value falls back to HOME
+        Path zdot = Path.of("/etc/zdot").toAbsolutePath();
+        assertThat(ShellRc.file("zsh", Map.of("ZDOTDIR", zdot.toString()), HOME)).isEqualTo(zdot.resolve(".zshrc"));
+        assertThat(ShellRc.file("zsh", Map.of("ZDOTDIR", "rel"), HOME)).isEqualTo(HOME.resolve(".zshrc"));
         assertThat(ShellRc.file("fish", Map.of(), HOME)).isEqualTo(HOME.resolve(".config/fish/conf.d/jkit.fish"));
-        assertThat(ShellRc.file("fish", Map.of("XDG_CONFIG_HOME", "/x"), HOME)).isEqualTo(Path.of("/x/fish/conf.d/jkit.fish"));
+        Path xdg = Path.of("/x").toAbsolutePath();
+        assertThat(ShellRc.file("fish", Map.of("XDG_CONFIG_HOME", xdg.toString()), HOME))
+                .isEqualTo(xdg.resolve("fish/conf.d/jkit.fish"));
         assertThatThrownBy(() -> ShellRc.file("pwsh", Map.of(), HOME)).isInstanceOf(JkitException.class)
                 .hasMessageContaining("pwsh");
     }
