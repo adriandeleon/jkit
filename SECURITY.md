@@ -33,17 +33,34 @@ matters:
   marked unverified. For Maven, jkit asks the repository for `.sha512` and, for releases older
   than 3.9.1, `.sha1`; a mirror that has only `.md5` counts as having no checksum.
 - A download with no checksum at all is refused unless you pass `--allow-unverified`.
-- Temurin and Microsoft Build of OpenJDK downloads are also checked against the vendor's detached
-  OpenPGP signature, when foojay lists one (it does for current builds), using keys built into
-  jkit: Adoptium's `3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B` and Microsoft's
-  `B602 4333 84B8 9913 0292 4D82 3553 1D31 5B21 C189`. Each key is tied to its vendor: a Temurin
-  download signed by any other key doesn't count. Unlike a checksum, a signature shows who built the
-  file, so it catches a compromised download source or foojay entry, not only tampering in transit.
-  - A signature by the vendor's key that doesn't match the download stops the install.
-  - A signature jkit can't fetch, read, or tie to the vendor's key (a new key, a weak hash) leaves
-    the checksum as the only check, and the install says so.
-  - Other vendors, Maven, Gradle and sbt: no signatures are checked yet (foojay lists none for the
-    other vendors). Signatures are checked as well as checksums, never instead of them.
+- Some downloads are also checked against their publisher's detached OpenPGP signature, using
+  keys built into jkit. Each key was taken from where the publisher's own documentation points and
+  confirmed by verifying real downloads with it:
+
+  | Downloads | Signature | Key (primary fingerprint) |
+  | --- | --- | --- |
+  | Temurin | listed by foojay | Adoptium `3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B` |
+  | Microsoft Build of OpenJDK | listed by foojay | Microsoft `B602 4333 84B8 9913 0292 4D82 3553 1D31 5B21 C189` |
+  | Amazon Corretto | `.sig` next to the download on corretto.aws | Amazon `6DC3 636D AE53 4049 C8B9 4623 A122 542A B04F 24E3` |
+  | Apache Maven 3.9.0 and later | `.asc` next to the zip on Maven Central (or your mirror) | the release managers who signed them, from Maven's [KEYS](https://downloads.apache.org/maven/KEYS) file: Tamas Cservenak `29BE A2A6 45F2 D6CE D7FB 12E0 2B17 2E3E 1564 66E8` and `88BE 34F9 4BDB 2B53 5704 4E2E 3A38 7D43 9641 43E3`, Slawomir Jaranowski `8478 9D24 DF77 A324 33CE 1F07 9EB8 0E92 EB21 35B1`, Guillaume Nodet `EA23 DB13 60D9 0294 81E7 F2EF ECDF EA3C B449 3B94` |
+  | sbt | `.asc` on sbt's GitHub releases | sbt build tool `2EE0 EA64 E40A 89B8 4B2D F734 99E8 2A75 642A C823` (its subkey `05B3 70DC 1261 4519 62FF E35A CD4E AA59 06F9 BF46` signs 1.12.2 on) |
+
+  Keys are tied to what they sign: a Temurin download signed by Amazon's key, or a Maven zip signed
+  by sbt's, doesn't count. Unlike a checksum, a signature shows who built the file, so it catches
+  a compromised download source, mirror or foojay entry, not only tampering in transit.
+  - A signature by the publisher's key that doesn't match the download stops the install.
+  - A signature jkit can't fetch, read, or tie to the publisher's keys (a new key, a weak hash)
+    leaves the checksum as the only check, and the install says so. Expect this most from Maven:
+    each release is signed by whichever Apache release manager cut it, so a release by someone new
+    installs with that warning until a jkit release adds their key. A Maven mirror
+    (`JKIT_SOURCES_MAVEN_URL`) that doesn't serve the `.asc` files gives it too. jkit pins the keys
+    rather than fetching the KEYS file, because a file fetched at install time is only as
+    trustworthy as the server it comes from.
+  - Maven releases before 3.9.0 aren't checked: they were signed with SHA-1, DSA-1024 keys, or
+    keys that have since expired. Other JDK vendors aren't checked (foojay lists no signatures for
+    them), nor is Gradle, which publishes none. Signatures are checked as well as checksums, never
+    instead of them: Corretto, which publishes no per-version checksum that foojay lists, still
+    needs `--allow-unverified`, and its signature is then the check that does run.
 - `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
   against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
   version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same

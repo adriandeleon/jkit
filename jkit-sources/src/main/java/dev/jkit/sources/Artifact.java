@@ -11,7 +11,7 @@ import java.net.URI;
  * @param vendor null for Maven and Gradle
  * @param checksumAlgorithm "sha256", "sha512", ... or null when the source publishes none
  * @param fx true for a JDK build with JavaFX bundled
- * @param signature the vendor's detached OpenPGP signature of the download, or null when none is listed
+ * @param signature the publisher's detached OpenPGP signature of the download, or null when there is none
  */
 public record Artifact(
         Tool tool,

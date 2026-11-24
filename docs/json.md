@@ -68,10 +68,12 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
   source (foojay or the vendor for JDKs, Maven Central, services.gradle.org, sbt's GitHub releases).
   It proves the file is the one the source lists, not who built it. False for md5/sha1-only
   checksums, for `--allow-unverified` installs, and for installs made before jkit recorded it.
-- `signedBy` names whose OpenPGP signature the download was checked against (`"Adoptium"` for
-  Temurin, `"Microsoft"` for Microsoft builds), using a key built into jkit. That does say who built
-  it. Null for other vendors and tools, when the signature couldn't be fetched or checked (the
-  install's `notes` say why), and for installs made before jkit checked signatures.
+- `signedBy` names whose OpenPGP signature the download was checked against, using a key built
+  into jkit: `"Adoptium"` for Temurin, `"Microsoft"` for Microsoft builds, `"Amazon"` for Corretto,
+  `"Apache Maven"` for Maven 3.9.0 and later (the install's `notes` name the release manager), and
+  `"sbt"` for sbt. That does say who built it. Null for other vendors, Gradle and older Maven
+  releases, when the signature couldn't be fetched or checked (the install's `notes` say why), and
+  for installs made before jkit checked signatures.
 - `global` lists the slots (`jdk`, `graalvm`, `maven`, `gradle`, `sbt`) whose global link points here;
   `activeInShell` the slots the calling shell's hook points here.
 

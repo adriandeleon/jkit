@@ -23,7 +23,7 @@ public final class Installer {
     /**
      * @param verified false when the source published no checksum, or only an md5 or sha1 one
      * @param removedLeftovers tmp/ folders of interrupted installs that this install deleted
-     * @param signedBy whose OpenPGP signature was checked (Adoptium, Microsoft), or null
+     * @param signedBy whose OpenPGP signature was checked (Adoptium, Amazon, Apache Maven, ...), or null
      * @param notes what the signature check found, for the user: checked, or why it couldn't be
      */
     public record Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers,
@@ -78,7 +78,7 @@ public final class Installer {
                     verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
                 List<String> notes = new java.util.ArrayList<>();
-                String signedBy = artifact.signature() != null && Signatures.covers(artifact.vendor())
+                String signedBy = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor())
                         ? checkSignature(artifact, archive, work, notes) : null;
                 Path out = work.resolve("out");
                 try {
@@ -118,7 +118,7 @@ public final class Installer {
     }
 
     /**
-     * Fetches the vendor's signature and checks the archive with it. A signature that doesn't
+     * Fetches the publisher's signature and checks the archive with it. A signature that doesn't
      * match refuses the install; one jkit can't fetch or check leaves the checksum as the only
      * check, and says so in {@code notes}. Returns who signed it, or null.
      */
@@ -136,7 +136,7 @@ public final class Installer {
                     + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")" + unchecked);
             return null;
         }
-        Signatures.Result result = Signatures.verify(archive, bytes, artifact.vendor());
+        Signatures.Result result = Signatures.verify(archive, bytes, artifact.tool(), artifact.vendor());
         switch (result.outcome()) {
             case GOOD -> {
                 notes.add("signature checked: signed by " + result.detail());

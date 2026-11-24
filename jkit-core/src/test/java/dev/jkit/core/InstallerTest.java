@@ -63,7 +63,7 @@ class InstallerTest {
 
             @Override
             public void download(URI uri, Path target, Progress progress) throws IOException {
-                if (!uri.getPath().endsWith(".sig")) {
+                if (!uri.getPath().endsWith(".sig") && !uri.getPath().endsWith(".asc")) {
                     Files.copy(file, target);
                 } else if (signature == null) {
                     throw new dev.jkit.sources.HttpStatusException(404, uri);
@@ -123,6 +123,58 @@ class InstallerTest {
                 .install(signed(sha256(archive)), Http.Progress.NONE);
         assertThat(result.fresh()).isTrue();
         assertThat(result.notes()).singleElement().asString().startsWith("warning: couldn't fetch the signature");
+    }
+
+    /** A Maven-shaped zip: apache-maven-{@code version}/bin/mvn. */
+    private static Path mavenZip(Path dir, String version) throws IOException {
+        Path zip = dir.resolve("apache-maven-" + version + "-bin.zip");
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new java.util.zip.ZipEntry("apache-maven-" + version + "/bin/mvn"));
+            out.write("#!/bin/sh\necho fake maven\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        return zip;
+    }
+
+    private static Artifact tool(Tool tool, String version, Path zip, String checksum) {
+        URI url = URI.create("https://example.invalid/" + zip.getFileName());
+        return new Artifact(tool, Version.parse(version), null, url, zip.getFileName().toString(), "zip", "sha256",
+                checksum, false, URI.create(url + ".asc"));
+    }
+
+    @Test
+    void mavenIsCheckedAgainstTheReleaseManagersKeys() throws Exception {
+        // the real .asc of Maven 3.9.9, by Tamas Cservenak's Ed25519 key, over a zip that isn't 3.9.9
+        Path zip = mavenZip(tmp, "3.9.9");
+        byte[] asc;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("maven-3.9.9.asc")) {
+            asc = in.readAllBytes();
+        }
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] real = asc;
+        assertThatThrownBy(() -> new Installer(home, withSignature(zip, real))
+                .install(tool(Tool.MAVEN, "3.9.9", zip, sha256(zip)), Http.Progress.NONE))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("signature of maven 3.9.9 doesn't match the download")
+                .hasMessageContaining("Apache Maven's key 3A387D43964143E3 made it");
+        assertThat(new Store(home).list(Tool.MAVEN)).isEmpty();
+    }
+
+    @Test
+    void anSbtSignatureThatCantBeFetchedInstallsWithAWarning() throws Exception {
+        Path zip = tmp.resolve("sbt-1.10.7.zip");
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new java.util.zip.ZipEntry("sbt/bin/sbt"));
+            out.write("#!/bin/sh\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, withSignature(zip, null))
+                .install(tool(Tool.SBT, "1.10.7", zip, sha256(zip)), Http.Progress.NONE);
+        assertThat(result.fresh()).isTrue();
+        assertThat(result.signedBy()).isNull();
+        assertThat(result.notes()).singleElement().asString()
+                .startsWith("warning: couldn't fetch the signature of sbt 1.10.7");
     }
 
     @Test
