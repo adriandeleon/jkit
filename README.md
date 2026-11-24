@@ -33,6 +33,7 @@ jkit exec jdk@17 -- mvn test           # one command, no shell change (scripts, 
 jkit status                            # what's active here, and why
 jkit doctor                            # what's wrong with the setup, and how to fix it
 jkit upgrade                           # newest build within each installed release (21.0.5 → 21.0.9)
+jkit prune --dry-run                   # what old builds, leftovers and old cache prune would remove
 jkit self-update                       # jkit itself (or how to, for brew, apt, dnf and winget)
 ```
 
@@ -145,7 +146,7 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 ## Not yet
 
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
-completion, `prune`, a `config` command, vendor signature checks, and Windows on ARM
+completion, a `config` command, vendor signature checks, and Windows on ARM
 natively.
 
 ## Build
