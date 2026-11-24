@@ -49,7 +49,7 @@ folder are read together, the earlier one in this list winning per tool.
 
 | File | Example | Notes |
 |---|---|---|
-| `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9` | SDKMAN's vendor suffixes map to jkit's vendors (`tem` temurin, `zulu`, `amzn` corretto, `librca` liberica, `ms` microsoft, `sapmchn` sapmachine, `sem` semeru, `graalce` graalvm-ce, `graal` graalvm, `nik` liberica-nik, `mandrel`, `oracle`, `open` openjdk, `kona`, `albba` dragonwell, `jbr` jetbrains). `21.0.5.fx-zulu` means a JavaFX build. Other candidates are skipped with one warning. |
+| `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9` | SDKMAN's vendor suffixes map to jkit's vendors (`tem` temurin, `zulu`, `amzn` corretto, `librca` liberica, `ms` microsoft, `sapmchn` sapmachine, `sem` semeru, `graalce` graalvm-ce, `graal` graalvm, `nik` liberica-nik, `mandrel`, `oracle`, `open` openjdk, `kona`, `albba` dragonwell, `jbr` jetbrains, `trava` trava, `bsg` bisheng). `21.0.5.fx-zulu` means a JavaFX build. Other candidates are skipped with one warning. |
 | `.tool-versions` (asdf, mise) | `java temurin-21.0.5+11.0.LTS`, `maven 3.9.9` | asdf names map to jkit's (`adoptopenjdk` temurin, `graalvm-community` graalvm-ce, …). Only the first version on a line counts. `system`, `ref:` and `path:` are skipped. asdf's Zulu ids use Zulu's own numbering and don't match. |
 | `.java-version` | `21`, `17.0.2` | jdk only, any vendor; `1.8` reads as 8. |
 

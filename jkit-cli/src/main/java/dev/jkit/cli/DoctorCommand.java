@@ -44,7 +44,7 @@ import picocli.CommandLine.Option;
                 "Exits 1 when a check fails. Uses the network only with --network."})
 final class DoctorCommand implements Callable<Integer> {
 
-    @Option(names = "--network", description = "Also check that foojay, services.gradle.org and Maven Central can be reached.")
+    @Option(names = "--network", description = "Also check that foojay, services.gradle.org, Maven Central and GitHub (sbt) can be reached.")
     boolean network;
 
     @Mixin

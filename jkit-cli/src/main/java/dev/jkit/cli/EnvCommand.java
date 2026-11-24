@@ -78,10 +78,23 @@ final class EnvCommand implements Callable<Integer> {
         Context ctx = Context.readOnly();
         String syntax = shell != null ? shell : defaultShell(ctx.env);
         if (!SHELLS.contains(syntax)) {
+            if (!json.json) {
+                ctx.out.println(failLine("bash"));
+            }
             throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
         }
         Path cwd = Path.of("").toAbsolutePath();
-        Result result = compute(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), noProject || global);
+        Result result;
+        try {
+            result = compute(ctx, dir == null ? cwd : cwd.resolve(dir).normalize(), noProject || global);
+        } catch (Exception e) {
+            if (!json.json) {
+                // The error goes to stderr; this line makes eval "$(jkit env)" fail too, so a set -e
+                // script or a CI step stops instead of running with half an environment.
+                ctx.out.println(failLine(syntax));
+            }
+            throw e;
+        }
         if (json.json) {
             ctx.out.println(JsonOut.write(json(result)));
         } else if (result.homes().isEmpty()) {
@@ -90,6 +103,14 @@ final class EnvCommand implements Callable<Integer> {
             ctx.out.print(ShellEnv.format(result.variables(), syntax));
         }
         return 0;
+    }
+
+    /** Shell code that fails when evaluated, printed on stdout when jkit env fails. */
+    static String failLine(String syntax) {
+        return switch (syntax) {
+            case "pwsh", "powershell" -> "throw 'jkit env failed: see the error above'";
+            default -> "false";
+        };
     }
 
     /**

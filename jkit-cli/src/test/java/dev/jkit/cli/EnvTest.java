@@ -97,6 +97,16 @@ class EnvTest {
     }
 
     @Test
+    void aFailureLeavesShellCodeThatFailsWhenEvaluated() {
+        // eval "" succeeds, so without this a set -e script would carry on after jkit env failed.
+        assertThat(EnvCommand.failLine("bash")).isEqualTo("false");
+        assertThat(EnvCommand.failLine("zsh")).isEqualTo("false");
+        assertThat(EnvCommand.failLine("fish")).isEqualTo("false");
+        assertThat(EnvCommand.failLine("pwsh")).startsWith("throw ");
+        assertThat(EnvCommand.failLine("powershell")).startsWith("throw ");
+    }
+
+    @Test
     void brokenProjectFileIsAnError() throws Exception {
         Files.writeString(project.resolve("jkit.toml"), "[tools\n");
         assertThatThrownBy(() -> compute(false)).hasMessageContaining("invalid TOML");

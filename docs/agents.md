@@ -9,7 +9,7 @@ Aider, …) and CI. The rules an agent needs:
 - **Nothing asks a question.** No command prompts or reads stdin; the download progress bar is off
   when jkit isn't attached to a terminal.
 - **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `pin`,
-  `unpin`, `sync` and `remove` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
+  `unpin`, `sync`, `remove`, `prune`, `config` and `self-update` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
   list of commands to try. Shapes: [json.md](json.md).
 - **Exit codes** are stable: `0` ok, `1` failure, `2` bad arguments, `3` the version isn't
   installed. `jkit exec` passes the command's own exit code through.

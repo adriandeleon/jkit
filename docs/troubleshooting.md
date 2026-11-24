@@ -18,7 +18,7 @@ that isn't what jkit would pick, with the command that fixes it:
 ```console
 $ jkit status
 jdk      17.0.13 zulu        shell
-         jkit.toml wants jdk 21; this shell chose 17 with jkit use: jkit reset jdk
+         jkit.toml wants jdk 21; this shell chose another with jkit use, to follow it: jkit reset jdk
 maven    3.9.11              global
 ```
 
@@ -54,4 +54,5 @@ jkit env --shell fish | source
 ```
 
 A project pin that isn't installed is an error (exit 3), so a CI step never runs with half an
-environment.
+environment. On failure jkit env also prints `false` on stdout, so `eval "$(jkit env)"` fails too
+and a `set -e` script stops there.

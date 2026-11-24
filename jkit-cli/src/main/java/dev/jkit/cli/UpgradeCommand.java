@@ -79,6 +79,18 @@ final class UpgradeCommand implements Callable<Integer> {
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
         java.io.PrintStream say = json ? ctx.err : ctx.out;
+        if (lines.isEmpty() && spec != null && vendorText != null) {
+            // Nothing matched: a typo (zuluu) should say so, as jkit install does, not look up to date.
+            try {
+                Resolve.knownVendor(ctx, spec, vendorText);
+            } catch (java.io.IOException e) {
+                // unreachable: the plain message below still applies
+            } catch (JkitException e) {
+                if (!e.getMessage().startsWith("--offline")) {
+                    throw e; // foojay answered: not a vendor it knows
+                }
+            }
+        }
         if (lines.isEmpty() && !json) {
             ctx.out.println(spec == null ? "nothing installed yet · try: jkit search jdk"
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");

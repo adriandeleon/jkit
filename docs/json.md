@@ -5,7 +5,7 @@ document on stdout**, also when it fails. Progress, download bars and messages g
 program can read stdout whole and show stderr lines as progress.
 
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
-`pin`, `unpin`, `sync`, `remove`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout
+`pin`, `unpin`, `sync`, `remove`, `prune`, `config` and `self-update`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout
 belongs to the command it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
 print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
@@ -176,7 +176,7 @@ Exit code 1 when any check has level `fail`, 0 otherwise; the document is printe
 {
   "schemaVersion": 1,
   "checks": [
-    { "id": "home", "level": "ok", "message": "jkit 0.2.1, linux-x64, home ~/.jkit", "fix": null },
+    { "id": "home", "level": "ok", "message": "jkit 0.4.0, linux-x64, home ~/.jkit", "fix": null },
     { "id": "links", "level": "fail", "message": "global maven → ~/.jkit/tools/maven/3.9.6, which no longer exists",
       "fix": "jkit use maven@3.9.11 --global, or remove the link: rm ~/.jkit/global/maven" }
   ],
@@ -223,7 +223,8 @@ What `available` holds for a JDK (or `graalvm`):
 
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
 prints a line for each change under its own message, and with `--json` lists them in `changes`
-(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`).
+(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`,
+`prune`, `config set` and `config unset`, `self-update`).
 The `cd` hook (`shell.auto_switch`) follows the same rule: whenever it switches versions it prints
 the same lines on stderr, under a `jkit: using …` or `jkit: left the project …` line.
 

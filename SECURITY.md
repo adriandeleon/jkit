@@ -8,9 +8,6 @@ adriandeleon/jkit (GitHub private vulnerability reporting). Include the jkit ver
 (`jkit --version`), your OS, and steps to reproduce. You should get a reply within a week; once a
 fix is released, the advisory is published with credit to you unless you'd rather stay anonymous.
 
-> Maintainer note: private vulnerability reporting must be switched on under
-> Settings → Code security → Private vulnerability reporting for that link to work.
-
 ## Supported versions
 
 Only the latest release gets security fixes. Upgrade before reporting if you can.
