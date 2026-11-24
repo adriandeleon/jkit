@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 
 /**
  * sbt launchers. Versions come from Maven Central ({@code org.scala-sbt:sbt}); the zips and their
- * {@code .sha256} files from the sbt GitHub releases. One zip serves every platform.
+ * {@code .sha256} and {@code .asc} files from the sbt GitHub releases. One zip serves every platform.
  *
  * <p>The launcher only starts a build: each project names its own sbt version in
  * {@code project/build.properties}, and the launcher fetches that one itself.
@@ -67,8 +67,10 @@ public final class SbtSource {
         String file = "sbt-" + v.raw() + ".zip";
         URI url = Http.requireSecure(downloads.resolve("v" + v.raw() + "/" + file));
         Checksum checksum = checksum(url, file);
+        // every release jkit lists (1.3.0 on) has a .asc next to its zip
         return new Artifact(Tool.SBT, v, null, url, file, "zip",
-                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
+                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false,
+                URI.create(url + ".asc"));
     }
 
     /** The .sha256 next to the zip; null for the early 1.3.x releases that have none. */

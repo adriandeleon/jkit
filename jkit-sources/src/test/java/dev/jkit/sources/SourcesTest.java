@@ -60,6 +60,34 @@ class SourcesTest {
         assertThat(a.url()).hasToString("https://example.invalid/b.tar.gz");
         assertThat(a.checksumAlgorithm()).isEqualTo("sha256");
         assertThat(a.checksum()).isEqualTo("abc123");
+        assertThat(a.signature()).isNull(); // none listed, and not a Corretto download
+    }
+
+    @Test
+    void aListedSignatureIsUsedAndCorrettoGetsItsSigDerived() throws IOException {
+        String temurin = """
+                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"abc123",
+                "checksum_type":"sha256","signature_uri":"https://example.invalid/b.tar.gz.sig"}]}""";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", temurin)),
+                FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false).signature())
+                .hasToString("https://example.invalid/b.tar.gz.sig");
+
+        // foojay lists no signature for Corretto; corretto.aws has one next to each download
+        String corretto = """
+                {"result":[{"direct_download_uri":
+                "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz",
+                "checksum":"abc123","checksum_type":"sha256","signature_uri":""}]}""";
+        foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", corretto)), FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false).signature())
+                .hasToString("https://corretto.aws/downloads/resources/21.0.13.1.2/"
+                        + "amazon-corretto-21.0.13.1.2-linux-x64.tar.gz.sig");
+        // only for corretto.aws downloads, and never a link with a query to append to
+        assertThat(FoojaySource.correttoSignature(URI.create("https://corretto.aws/downloads/latest/x.tar.gz"))).isNull();
+        assertThat(FoojaySource.correttoSignature(
+                URI.create("https://corretto.aws/downloads/resources/1/x.tar.gz?a=b"))).isNull();
+        assertThat(FoojaySource.correttoSignature(
+                URI.create("https://example.invalid/downloads/resources/1/x.tar.gz"))).isNull();
     }
 
     @Test
@@ -117,6 +145,7 @@ class SourcesTest {
         Artifact a = maven.resolve(null, false);
         assertThat(a.version().raw()).isEqualTo("3.9.11");
         assertThat(a.checksum()).isEqualTo("d".repeat(128));
+        assertThat(a.signature()).hasToString(a.url() + ".asc");
         assertThatThrownBy(() -> maven.resolve("4", false))
                 .hasMessageContaining("only pre-releases match maven@4: 4.0.0-rc-7");
     }
@@ -130,6 +159,8 @@ class SourcesTest {
         Artifact a = maven.resolve("3.8.8", false);
         assertThat(a.checksumAlgorithm()).isEqualTo("sha1");
         assertThat(a.checksum()).isEqualTo(sha1);
+        // signed before the release managers whose keys jkit has: no signature to check
+        assertThat(a.signature()).isNull();
     }
 
     @Test
@@ -299,6 +330,8 @@ class SourcesTest {
         assertThat(a.fileName()).isEqualTo("sbt-1.10.7.zip");
         assertThat(a.checksumAlgorithm()).isEqualTo("sha256");
         assertThat(a.checksum()).isEqualTo(hash);
+        assertThat(a.signature())
+                .hasToString("https://github.com/sbt/sbt/releases/download/v1.10.7/sbt-1.10.7.zip.asc");
     }
 
     @Test

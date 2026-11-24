@@ -16,6 +16,11 @@ public final class MavenSource {
     public static final URI DEFAULT_BASE = URI.create("https://repo.maven.apache.org/maven2/");
     private static final String PATH = "org/apache/maven/apache-maven/";
     private static final Pattern VERSION = Pattern.compile("<version>([^<]+)</version>");
+    /**
+     * The first release whose {@code .asc} jkit checks: 3.9.0 on were signed by release managers
+     * whose keys jkit has. Older ones were signed with SHA-1, DSA-1024 or keys since expired.
+     */
+    static final Version FIRST_SIGNED = Version.parse("3.9.0");
 
     private final Http http;
     private final URI base;
@@ -51,8 +56,10 @@ public final class MavenSource {
         String file = "apache-maven-" + v.raw() + "-bin.zip";
         URI url = Http.requireSecure(base.resolve(PATH + v.raw() + "/" + file));
         Checksum checksum = checksum(url, file, v);
+        URI signature = v.compareTo(FIRST_SIGNED) >= 0 ? URI.create(url + ".asc") : null;
         return new Artifact(Tool.MAVEN, v, null, url, file, "zip",
-                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false);
+                checksum == null ? null : checksum.algorithm(), checksum == null ? null : checksum.hash(), false,
+                signature);
     }
 
     /**

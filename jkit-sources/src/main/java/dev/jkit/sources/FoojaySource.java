@@ -69,21 +69,15 @@ public final class FoojaySource {
     }
 
     /**
-     * Checks a vendor against foojay's distribution list (names and their synonyms, so "SAP
-     * Machine" or "OpenJDK" work too) and returns it under foojay's name. An unknown name fails
-     * with the closest match, before any version request can come back as a bare HTTP 400.
-     *
-     * @param source how the name was given, for the message: "" when typed, else e.g. "your
-     *               default vendor (jdk.vendor)"
+     * The package's signature link: the one foojay lists (Temurin, Microsoft), https only, or for
+     * Corretto, which publishes a {@code .sig} next to each download on corretto.aws that foojay
+     * doesn't list, that one. A listed link that isn't https is dropped rather than refused, since
+     * the checksum still guards the download.
      */
-    /**
-     * The package's signature link, when foojay lists one: https only. A link that isn't is
-     * dropped rather than refused, since the checksum still guards the download.
-     */
-    private static URI signature(JsonNode info, URI base) {
+    static URI signature(JsonNode info, URI download, URI base) {
         String sig = Json.text(info, "signature_uri");
         if (sig.isEmpty()) {
-            return null;
+            return correttoSignature(download);
         }
         try {
             return Http.sent(sig, "a signature", base);
@@ -92,6 +86,22 @@ public final class FoojaySource {
         }
     }
 
+    /** {@code <download>.sig} for a Corretto build served from corretto.aws, else null. */
+    static URI correttoSignature(URI download) {
+        boolean corretto = "https".equals(download.getScheme()) && "corretto.aws".equals(download.getHost())
+                && download.getRawQuery() == null && download.getRawFragment() == null
+                && download.getRawPath() != null && download.getRawPath().startsWith("/downloads/resources/");
+        return corretto ? URI.create(download + ".sig") : null;
+    }
+
+    /**
+     * Checks a vendor against foojay's distribution list (names and their synonyms, so "SAP
+     * Machine" or "OpenJDK" work too) and returns it under foojay's name. An unknown name fails
+     * with the closest match, before any version request can come back as a bare HTTP 400.
+     *
+     * @param source how the name was given, for the message: "" when typed, else e.g. "your
+     *               default vendor (jdk.vendor)"
+     */
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
         JsonNode root = Json.fetch(http, base.resolve(
                 "distributions?include_versions=false&include_synonyms=true"));
@@ -201,9 +211,10 @@ public final class FoojaySource {
                         ? Checksum.parseStrict(http.getFresh(uri), pkg.fileName(), named)
                         : Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
-            return new Artifact(tool, pkg.version(), pkg.vendor(), Http.sent(url, "a download", base), pkg.fileName(),
+            URI download = Http.sent(url, "a download", base);
+            return new Artifact(tool, pkg.version(), pkg.vendor(), download, pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
-                    checksum == null ? null : checksum.hash(), fx, signature(info, base));
+                    checksum == null ? null : checksum.hash(), fx, signature(info, download, base));
         }
         Pkg newest = candidates.getFirst();
         if (candidates.size() > MAX_LOOKUPS) {

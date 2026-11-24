@@ -155,7 +155,7 @@ public final class Store {
         writeMarker(dir, installed, url, verified, null);
     }
 
-    /** @param signedBy whose signature was checked (Adoptium, Microsoft), or null */
+    /** @param signedBy whose signature was checked (Adoptium, Apache Maven, ...), or null */
     static void writeMarker(Path dir, Installed installed, String url, boolean verified, String signedBy)
             throws IOException {
         Properties p = new Properties();
