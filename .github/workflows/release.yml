@@ -503,10 +503,38 @@ jobs:
           pattern: jkit-*
           merge-multiple: true
 
+      # An artifact uploaded seconds before this job starts can be missing from the list the
+      # download sees (macos-pack finishing last): look for every platform's archives, and if
+      # any is missing, wait and download again
+      - name: Check every platform is here
+        id: complete
+        run: |
+          missing=()
+          for platform in linux-x64 linux-aarch64 macos-x64 macos-aarch64 windows-x64; do
+            compgen -G "dist/jkit-*-$platform.zip" > /dev/null || missing+=("$platform")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::warning::not downloaded yet: ${missing[*]}; trying again in 30 s"
+            echo "retry=true" >> "$GITHUB_OUTPUT"
+            sleep 30
+          fi
+
+      - name: Download again
+        if: steps.complete.outputs.retry == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: jkit-*
+          merge-multiple: true
+
       - name: Generate and check
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
+          for platform in linux-x64 linux-aarch64 macos-x64 macos-aarch64 windows-x64; do
+            compgen -G "dist/jkit-*-$platform.zip" > /dev/null \
+              || { echo "::error::no $platform archives were downloaded, even after a retry"; exit 1; }
+          done
           (cd dist && sha256sum * > "$RUNNER_TEMP/SHA256SUMS")
           case "$version" in
             *-*) echo "a pre-release: Homebrew and winget skip it, but the files are still checked" ;;
