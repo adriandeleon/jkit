@@ -70,7 +70,7 @@ versions; prefix commands with `jkit exec` instead:
   only if the user is fine with that.
 - Don't change the global default (`jkit use … --global`) or remove installs unless asked. Note
   that the first install of a tool becomes its default; add `--no-default` to avoid that.
-- jkit refuses downloads with no published checksum. Don't add `--allow-unverified` unless the user
-  says so.
+- jkit refuses downloads with no published checksum, and signed downloads whose signature it
+  can't check. Don't add `--allow-unverified` unless the user says so.
 - On failure, read the `error:` line and the hints under it on stderr (`--json`: `error.hints`).
 ```

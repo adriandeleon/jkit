@@ -16,7 +16,8 @@ import picocli.CommandLine.Option;
 @Command(name = "self-update", description = {"Updates jkit itself to the newest release.",
         "A jkit from Homebrew, apt, dnf or winget is updated there: this says how.",
         "A jkit from a release archive is replaced in place, after checking the",
-        "download against the release's SHA256SUMS and that the new binary runs.",
+        "download against the release's SHA256SUMS, signed by jkit's release key,",
+        "and that the new binary runs.",
         "",
         "  jkit self-update --check   only say whether a newer jkit is out"})
 final class SelfUpdateCommand implements Callable<Integer> {
@@ -26,6 +27,9 @@ final class SelfUpdateCommand implements Callable<Integer> {
 
     @Mixin
     JsonOut.Flag json = new JsonOut.Flag();
+
+    /** How SHA256SUMS.asc is checked: jkit's release key; tests sign with their own. */
+    SelfUpdate.SumsCheck sumsCheck = dev.jkit.core.Signatures::verifyRelease;
 
     @Override
     public Integer call() throws Exception {
@@ -51,13 +55,17 @@ final class SelfUpdateCommand implements Callable<Integer> {
             report.fileDeleted(binary.resolveSibling(binary.getFileName() + ".old")); // left by the last update
         }
         URI base = ctx.url("JKIT_SOURCES_RELEASES_URL", SelfUpdate.DEFAULT_BASE);
-        SelfUpdate.Release latest = SelfUpdate.parse(ctx.http().getFresh(SelfUpdate.sumsUrl(base)), ctx.platform);
+        String sums = ctx.http().getFresh(SelfUpdate.sumsUrl(base));
+        SelfUpdate.Release latest = SelfUpdate.parse(sums, ctx.platform);
+        SelfUpdate.requireSigned(ctx.http(), base, latest, sums, sumsCheck);
         boolean newer = SelfUpdate.newer(latest, current);
         String how = kind.command(latest, ctx.platform);
         String status;
         if (!newer) {
             status = "up-to-date";
-            say.println("jkit " + current + " is the newest release");
+            // a development build or a pre-release can be ahead of the newest release
+            say.println(latest.version().raw().equals(current) ? "jkit " + current + " is the newest release"
+                    : "jkit " + current + " is up to date: the newest release is " + latest.version());
         } else if (check) {
             status = "available";
             say.println("jkit " + latest.version() + " is out (this is " + current + ")");

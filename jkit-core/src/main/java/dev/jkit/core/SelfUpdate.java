@@ -18,10 +18,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code jkit self-update}: finds the newest jkit release from its SHA256SUMS, tells how jkit was
- * installed (a package manager's copy is that package manager's to replace), and for a copy from a
- * release archive downloads the archive, checks it against SHA256SUMS, checks the new binary runs,
- * and puts it in place of the old one.
+ * {@code jkit self-update}: finds the newest jkit release from its SHA256SUMS, checks that file's
+ * signature by jkit's release key, tells how jkit was installed (a package manager's copy is that
+ * package manager's to replace), and for a copy from a release archive downloads the archive,
+ * checks it against SHA256SUMS, checks the new binary runs, and puts it in place of the old one.
  */
 public final class SelfUpdate {
     /** The releases page; {@code latest/download/SHA256SUMS} and {@code download/v<version>/<file>} under it. */
@@ -34,7 +34,10 @@ public final class SelfUpdate {
     /** How this copy of jkit was installed, and so what updates it. */
     public enum Kind {
         HOMEBREW("Homebrew", "brew upgrade jkit"),
+        /** A .deb from the Vitrina apt repository: apt upgrades it. */
         DEB("a .deb package", "sudo apt update && sudo apt install --only-upgrade jkit"),
+        /** A .deb installed from a file, with no apt repository that has jkit: apt can't upgrade it. */
+        DEB_FILE("a .deb package", null),
         RPM("an .rpm package", null),
         WINGET("winget", "winget upgrade AdrianDeLeon.jkit"),
         ARCHIVE("a release archive", null);
@@ -49,15 +52,22 @@ public final class SelfUpdate {
 
         /** The command that updates this kind of install to {@code release}; null for an archive (jkit does it). */
         public String command(Release release, Platform platform) {
+            // the packages' versions have "~" for "-" (1.2.0~rc.1), which GitHub's asset names turn into "."
+            String pkgVersion = release.version().raw().replace('-', '.');
+            boolean arm = platform.arch().equals("aarch64");
             if (this == RPM) {
-                String arch = platform.arch().equals("aarch64") ? "aarch64" : "x86_64";
-                return "sudo dnf install " + release.url(DEFAULT_BASE, "jkit-" + release.version().raw() + "-1." + arch + ".rpm");
+                return "sudo dnf install " + release.url(DEFAULT_BASE,
+                        "jkit-" + pkgVersion + "-1." + (arm ? "aarch64" : "x86_64") + ".rpm");
+            }
+            if (this == DEB_FILE) {
+                String file = "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
+                return "curl -fLo /tmp/" + file + " " + release.url(DEFAULT_BASE, file) + " && sudo apt install /tmp/" + file;
             }
             return command;
         }
 
         public String id() {
-            return name().toLowerCase(Locale.ROOT);
+            return this == DEB_FILE ? "deb" : name().toLowerCase(Locale.ROOT);
         }
     }
 
@@ -66,6 +76,38 @@ public final class SelfUpdate {
         /** Where {@code file} of this release is published under {@code base}. */
         public URI url(URI base, String file) {
             return base.resolve("download/v" + version.raw() + "/" + file);
+        }
+    }
+
+    /** Checks a release's SHA256SUMS against its signature: {@link Signatures#verifyRelease}, or a test's own. */
+    @FunctionalInterface
+    public interface SumsCheck {
+        Signatures.Result verify(byte[] sums, byte[] signature) throws IOException;
+    }
+
+    /**
+     * Fetches {@code release}'s SHA256SUMS.asc and checks it signs {@code sums}, by jkit's release
+     * key: the archive and SHA256SUMS sit side by side on GitHub, so whoever could replace one could
+     * replace both, but not sign them.
+     */
+    public static void requireSigned(Http http, URI base, Release release, String sums, SumsCheck check)
+            throws IOException {
+        String what = "the SHA256SUMS of jkit " + release.version();
+        String hint = "download jkit by hand from " + DEFAULT_BASE + " and check it with: gh attestation verify"
+                + " <file> --repo adriandeleon/jkit";
+        String signature;
+        try {
+            signature = http.getFresh(release.url(base, "SHA256SUMS.asc"));
+        } catch (IOException | JkitException e) {
+            throw new JkitException("couldn't fetch the signature of " + what + " ("
+                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + "); nothing was changed",
+                    "try again later", "or " + hint);
+        }
+        Signatures.Result result = check.verify(sums.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (result.outcome() != Signatures.Outcome.GOOD) {
+            throw new JkitException(what + " isn't signed by jkit's release key (" + result.detail()
+                    + "); nothing was changed", hint);
         }
     }
 
@@ -117,7 +159,10 @@ public final class SelfUpdate {
         }
         if (platform.isLinux() && (path.startsWith("/usr/bin/") || path.startsWith("/usr/lib/"))) {
             if (exists.test(Path.of("/var/lib/dpkg/info/jkit.list"))) {
-                return Kind.DEB;
+                // the Vitrina repository, as jkit's install guide sets it up
+                boolean repo = exists.test(Path.of("/etc/apt/sources.list.d/vitrina.sources"))
+                        || exists.test(Path.of("/etc/apt/sources.list.d/vitrina.list"));
+                return repo ? Kind.DEB : Kind.DEB_FILE;
             }
             if (exists.test(Path.of("/var/lib/rpm")) || exists.test(Path.of("/usr/lib/sysimage/rpm"))) {
                 return Kind.RPM;
@@ -164,14 +209,20 @@ public final class SelfUpdate {
 
     /** What {@code binary --version} prints, first line, or empty if it fails or takes over 30 seconds. */
     static String runVersion(Path binary) {
+        Path said = binary.resolveSibling("version.out");
         try {
+            // into a file, not a pipe: a binary that hangs with its output open can't block the read,
+            // so the time limit holds
             Process p = new ProcessBuilder(binary.toString(), "--version").redirectErrorStream(true)
-                    .redirectInput(ProcessBuilder.Redirect.PIPE).start();
+                    .redirectOutput(said.toFile()).redirectInput(ProcessBuilder.Redirect.PIPE).start();
             p.getOutputStream().close();
-            byte[] head = p.getInputStream().readNBytes(4096);
             if (!p.waitFor(30, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 return "";
+            }
+            byte[] head;
+            try (java.io.InputStream in = Files.newInputStream(said)) {
+                head = in.readNBytes(4096);
             }
             return new String(head, java.nio.charset.StandardCharsets.UTF_8).lines().findFirst().orElse("").strip();
         } catch (IOException e) {
@@ -179,6 +230,12 @@ public final class SelfUpdate {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return "";
+        } finally {
+            try {
+                Files.deleteIfExists(said);
+            } catch (IOException ignored) {
+                // in the work folder, which is deleted after
+            }
         }
     }
 

@@ -28,6 +28,8 @@ class SelfUpdateTest {
     @TempDir
     Path tmp;
     HttpServer server;
+    /** What the mirror serves as SHA256SUMS.asc; the test's check takes "good" as a good signature. */
+    String signature = "good";
     Map<String, String> env;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     final ByteArrayOutputStream json = new ByteArrayOutputStream();
@@ -43,6 +45,7 @@ class SelfUpdateTest {
         server.createContext("/", ex -> {
             String path = ex.getRequestURI().getPath();
             byte[] body = path.equals("/latest/download/SHA256SUMS") ? sums.getBytes(StandardCharsets.UTF_8)
+                    : path.equals("/download/v9.9.9/SHA256SUMS.asc") ? signature.getBytes(StandardCharsets.UTF_8)
                     : path.equals("/download/v9.9.9/" + archiveName) ? archive : null;
             ex.sendResponseHeaders(body == null ? 404 : 200, body == null ? -1 : body.length);
             if (body != null) {
@@ -81,6 +84,9 @@ class SelfUpdateTest {
         SelfUpdateCommand cmd = new SelfUpdateCommand();
         cmd.check = check;
         cmd.json.json = asJson;
+        cmd.sumsCheck = (data, sig) -> new String(sig, StandardCharsets.UTF_8).equals("good")
+                ? new dev.jkit.core.Signatures.Result(dev.jkit.core.Signatures.Outcome.GOOD, "jkit", "jkit")
+                : new dev.jkit.core.Signatures.Result(dev.jkit.core.Signatures.Outcome.UNKNOWN_KEY, null, "made with key X");
         cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8)), binary, current);
         return out.toString(StandardCharsets.UTF_8);
     }
@@ -113,6 +119,16 @@ class SelfUpdateTest {
         String said = run(binary, "0.3.0", false, true);
         assertThat(said).contains("\"status\" : \"managed\"").contains("\"installedWith\" : \"homebrew\"")
                 .contains("\"command\" : \"brew upgrade jkit\"");
+        assertThat(Files.readString(binary)).isEqualTo("old");
+    }
+
+    @Test
+    void refusesSumsNotSignedByJkitsKey() throws Exception {
+        Path binary = binary("bin");
+        signature = "forged";
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
+                .hasMessageContaining("the SHA256SUMS of jkit 9.9.9 isn't signed by jkit's release key")
+                .hasMessageContaining("nothing was changed");
         assertThat(Files.readString(binary)).isEqualTo("old");
     }
 }

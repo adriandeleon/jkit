@@ -7,3 +7,5 @@ README.md text eol=lf
 # shell scripts run on Windows too (Git Bash in the release workflow)
 *.sh text eol=lf
 mvnw text eol=lf
+# signed test fixtures: their exact bytes are what the signatures cover
+jkit-core/src/test/resources/dev/jkit/core/release-SHA256SUMS -text

@@ -102,13 +102,31 @@ class InstallerTest {
     }
 
     @Test
-    void aSignatureJkitCantCheckInstallsWithAWarning() throws Exception {
+    void aSignatureJkitCantCheckRefusesTheInstallEvenWithAChecksum() throws Exception {
+        // whoever serves the download and its checksum could serve no signature, or their own
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        for (byte[] sig : new byte[][] {"<html>".getBytes(), null}) {
+            assertThatThrownBy(() -> new Installer(home, withSignature(archive, sig))
+                    .install(signed(sha256(archive)), Http.Progress.NONE, true))
+                    .isInstanceOf(Installer.SignatureRequired.class)
+                    .hasMessageContaining("signature of jdk 21.0.13+9 temurin")
+                    .hasMessageEndingWith("; nothing was installed")
+                    .hasMessageNotContaining("no published checksum");
+        }
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void allowedUnverifiedASignatureJkitCantCheckInstallsUnverifiedWithAWarning() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, withSignature(archive, "<html>".getBytes()))
                 .install(signed(sha256(archive)), Http.Progress.NONE);
         assertThat(result.fresh()).isTrue();
-        assertThat(result.verified()).isTrue();
+        assertThat(result.verified()).isFalse();
+        assertThat(Store.verified(result.installed().home())).isFalse();
         assertThat(result.signedBy()).isNull();
         assertThat(result.notes()).singleElement().asString().startsWith("warning: couldn't check the signature")
                 .contains("only its checksum checked");
@@ -206,6 +224,27 @@ class InstallerTest {
                 .hasMessageContaining("Amazon's key A122542AB04F24E3 made it");
         assertThat(new Store(home).list(Tool.JDK)).isEmpty();
         assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void aJdkCheckedOnlyByItsSignatureMustBeTheVersionAskedFor() throws Exception {
+        Path jdk = Files.createDirectories(tmp.resolve("jdk"));
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13\"\nIMPLEMENTOR=\"Amazon.com Inc.\"\n");
+        Installer.requireReleaseVersion(jdk, corretto()); // 21.0.13.1+2 is Corretto's name for 21.0.13
+
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.5\"\n");
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
+                .hasMessageContaining("is signed, but it is JDK 21.0.5; nothing was installed");
+        Files.delete(jdk.resolve("release"));
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
+                .hasMessageContaining("whose release file names no version");
+
+        // Java 8 writes its old numbering
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"1.8.0_514\"\n");
+        URI url = URI.create("https://corretto.aws/downloads/resources/8.514.01.1/jdk.tar.gz");
+        Artifact eight = new Artifact(Tool.JDK, Version.parse("8.0.514"), Vendor.of("corretto"), url, "jdk.tar.gz",
+                "tar.gz", null, null, false, URI.create(url + ".sig"));
+        Installer.requireReleaseVersion(jdk, eight);
     }
 
     @Test

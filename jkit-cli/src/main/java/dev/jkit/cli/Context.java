@@ -141,6 +141,15 @@ final class Context {
         return ctx;
     }
 
+    /**
+     * For jkit config set and unset: a config.toml with a wrong value mustn't stop the command
+     * that fixes it, so it is recorded in {@link #configError} rather than thrown. One that isn't
+     * TOML at all is still refused when the edit is made.
+     */
+    static Context forConfigEdit(Map<String, String> env, PrintStream out, boolean offline) {
+        return new Context(env, false, offline, out, true);
+    }
+
     /** For tests: a context over an explicit environment, never online. */
     static Context forEnv(Map<String, String> env) {
         return forEnv(env, System.out);

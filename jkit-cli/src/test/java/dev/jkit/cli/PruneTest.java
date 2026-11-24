@@ -129,6 +129,28 @@ class PruneTest {
     }
 
     @Test
+    void aBuildThatCantBeRemovedDoesntStopTheRest() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+                .supportedFileAttributeViews().contains("posix") && !"root".equals(System.getProperty("user.name")));
+        Path stuck = install(Tool.MAVEN, "3.9.9", "");
+        install(Tool.MAVEN, "3.9.11", "");
+        Path old = install(Tool.JDK, "21.0.5+11", "temurin");
+        install(Tool.JDK, "21.0.9+10", "temurin");
+        Path leftover = Files.createDirectories(home.resolve("tmp/install-999"));
+        Path mavenDir = stuck.getParent();
+        Files.setPosixFilePermissions(mavenDir, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+        try {
+            assertThat(prune(false)).isZero();
+        } finally {
+            Files.setPosixFilePermissions(mavenDir, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        }
+        assertThat(stuck).exists();
+        assertThat(old).doesNotExist();
+        assertThat(leftover).doesNotExist();
+        assertThat(output()).contains("warning: couldn't remove maven 3.9.9").contains("removed jdk 21.0.5+11 temurin");
+    }
+
+    @Test
     void aMissingHomeIsNothingToPruneAndIsNotCreated() throws Exception {
         Files.delete(home);
         prune(false);

@@ -27,7 +27,8 @@ import picocli.CommandLine.Option;
  * Frees disk space: builds that {@code jkit upgrade} superseded, folders interrupted installs and
  * removals left, and cached version lists too old to be worth keeping for {@code --offline}.
  */
-@Command(name = "prune", description = {"Removes what jkit no longer needs, to free disk space:",
+@Command(name = "prune", description = {"Removes what jkit no longer needs, to free disk space.",
+        "It removes:",
         "- older builds within a release line once a newer one is installed (21.0.5",
         "  once 21.0.9 is in), unless global, used in this shell or pinned here",
         "- folders left by interrupted installs and removals",
@@ -96,7 +97,7 @@ final class PruneCommand implements Callable<Integer> {
             }
             say.println("would free " + human(bytes) + "; run without --dry-run to remove");
         } else {
-            prune(ctx, here, builds, leftovers, cache, report, say);
+            bytes = prune(ctx, cwd, builds, cache, report, say);
             report.print(say);
             say.println("freed " + human(bytes));
         }
@@ -106,32 +107,59 @@ final class PruneCommand implements Callable<Integer> {
         return 0;
     }
 
-    private void prune(Context ctx, ToolStates.Result here, List<Superseded> builds, List<Path> leftovers,
-            List<Path> cache, Changes report, PrintStream say) throws Exception {
+    /**
+     * Removes what was found, carrying on past anything that can't be removed (a build an IDE holds
+     * open on Windows) with a warning, and returns the bytes actually freed.
+     */
+    private long prune(Context ctx, Path cwd, List<Superseded> builds, List<Path> cache, Changes report,
+            PrintStream say) throws Exception {
+        long freed = 0;
         // the same locks as jkit remove: not while an install runs, nor while a link moves
         try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
+            // decide again under the lock: a jkit use --global or an install since the scan may
+            // have made one of these builds the one in use
+            ToolStates.Result here = StatusCommand.read(ctx, cwd);
+            java.util.Set<Path> still = new java.util.HashSet<>();
+            for (Superseded s : superseded(ctx, here)) {
+                still.add(s.install().home());
+            }
             for (Superseded s : builds) {
-                removedBuilds.addAll(RemoveCommand.remove(ctx, s.install(), here, say).json());
+                if (!still.contains(s.install().home())) {
+                    continue;
+                }
+                try {
+                    removedBuilds.addAll(RemoveCommand.remove(ctx, s.install(), here, say).json());
+                    freed += s.bytes();
+                } catch (dev.jkit.model.JkitException | IOException e) {
+                    report.note("warning: couldn't remove " + s.install().tool() + " " + s.install().label() + " ("
+                            + e.getMessage() + ")" + (ctx.platform.isWindows()
+                                    ? "; something may have it open (IDE or Gradle daemon?)" : ""));
+                }
             }
             // read again under the lock: an install that started meanwhile has its own folder
             for (Path p : leftovers(ctx)) {
+                long size = size(p);
                 try {
                     Fs.deleteRecursively(p);
                     report.folder(p, false);
+                    freed += size;
                 } catch (IOException e) {
                     report.note("warning: couldn't delete " + Changes.tilde(p.toString()) + " (" + e.getMessage() + ")");
                 }
             }
         }
         for (Path p : cache) {
+            long size = size(p);
             try {
                 if (Files.deleteIfExists(p)) {
                     report.fileDeleted(p);
+                    freed += size;
                 }
             } catch (IOException e) {
                 report.note("warning: couldn't delete " + Changes.tilde(p.toString()) + " (" + e.getMessage() + ")");
             }
         }
+        return freed;
     }
 
     /** The changes {@link RemoveCommand#remove} reported, which it has printed already. */

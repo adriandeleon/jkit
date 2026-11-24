@@ -31,7 +31,7 @@ import org.bouncycastle.openpgp.operator.bc.BcPGPContentVerifierBuilderProvider;
  * OpenPGP signatures of downloads, checked against keys built into jkit and tied to who publishes
  * the download: a Temurin download must be signed by Adoptium's key, a Maven zip by one of the
  * Maven release managers' keys, not by any key jkit knows. A signature is checked on top of the
- * checksum, never instead of it.
+ * checksum, except for Corretto, which publishes none: there the signature is the only check.
  */
 public final class Signatures {
 
@@ -44,8 +44,9 @@ public final class Signatures {
      */
     record Key(String vendor, Tool tool, String owner, String resource, List<String> fingerprints) {
         Key {
-            if ((vendor == null) == (tool == null) || fingerprints.isEmpty()) {
-                throw new IllegalArgumentException("a key is for one vendor or one tool");
+            // neither: jkit's own release key (JKIT), which signs jkit's releases, not downloads
+            if ((vendor != null && tool != null) || fingerprints.isEmpty()) {
+                throw new IllegalArgumentException("a key is for one vendor, one tool, or jkit");
             }
             fingerprints = List.copyOf(fingerprints);
         }
@@ -92,6 +93,16 @@ public final class Signatures {
                     "84789D24DF77A32433CE1F079EB80E92EB2135B1",  // Slawomir Jaranowski
                     "EA23DB1360D9029481E7F2EFECDFEA3CB4493B94"), // Guillaume Nodet
             Key.tool(Tool.SBT, "sbt", "sbt.asc", "2EE0EA64E40A89B84B2DF73499E82A75642AC823"));
+
+    /** The primary fingerprint of jkit's release key; release.yml checks the signing key against it too. */
+    public static final String JKIT_FINGERPRINT = "A9444E8F5048FEBCB942E110FC89EBE68C4539E6";
+
+    /**
+     * jkit's own release key: the release workflow signs each release's SHA256SUMS with it
+     * (SHA256SUMS.asc), and jkit self-update checks that signature before it trusts the sums.
+     * Not in {@link #KEYS}: it signs nothing jkit installs.
+     */
+    static final Key JKIT = new Key(null, null, "jkit", "jkit-release.asc", List.of(JKIT_FINGERPRINT));
 
     /** A signature file is a few hundred bytes; anything this big isn't one. */
     static final int MAX_SIGNATURE = 64 * 1024;
@@ -144,8 +155,23 @@ public final class Signatures {
         return verify(file, signature, key, ring(key));
     }
 
+    /** Checks {@code signature} over {@code data}, a jkit release's SHA256SUMS, against jkit's own release key. */
+    public static Result verifyRelease(byte[] data, byte[] signature) throws IOException {
+        return verify(() -> new ByteArrayInputStream(data), signature, JKIT, ring(JKIT));
+    }
+
     /** {@link #verify(Path, byte[], Tool, Vendor)} with the key ring given: tests sign with keys of their own. */
     static Result verify(Path file, byte[] signature, Key key, PGPPublicKeyRingCollection ring) throws IOException {
+        return verify(() -> Files.newInputStream(file), signature, key, ring);
+    }
+
+    /** What a signature is over: opened once per signature tried. */
+    @FunctionalInterface
+    interface Data {
+        InputStream open() throws IOException;
+    }
+
+    static Result verify(Data data, byte[] signature, Key key, PGPPublicKeyRingCollection ring) throws IOException {
         if (signature.length > MAX_SIGNATURE) {
             return new Result(Outcome.UNREADABLE, null, "the signature file is " + signature.length + " bytes");
         }
@@ -177,7 +203,7 @@ public final class Signatures {
             }
             try {
                 sig.init(new BcPGPContentVerifierBuilderProvider(), signer);
-                try (InputStream in = Files.newInputStream(file)) {
+                try (InputStream in = data.open()) {
                     byte[] buffer = new byte[1 << 16];
                     int n;
                     while ((n = in.read(buffer)) > 0) {

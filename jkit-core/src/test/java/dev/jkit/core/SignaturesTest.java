@@ -91,6 +91,41 @@ class SignaturesTest {
     }
 
     @Test
+    void releaseSumsAreCheckedInMemoryAgainstJkitsKey() throws Exception {
+        String fpr = HexFormat.of().withUpperCase().formatHex(vendor.getPublicKey().getFingerprint());
+        Signatures.Key jkit = new Signatures.Key(null, null, "jkit", "test.asc", List.of(fpr));
+        PGPPublicKeyRingCollection ring = new PGPPublicKeyRingCollection(
+                List.of(new PGPPublicKeyRing(List.of(vendor.getPublicKey()))));
+        byte[] sums = "abc  jkit-9.9.9-linux-x64.tar.gz\n".getBytes(StandardCharsets.UTF_8);
+        byte[] sig = sign(vendor, sums, HashAlgorithmTags.SHA256, true);
+        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums), sig, jkit, ring).outcome())
+                .isEqualTo(Signatures.Outcome.GOOD);
+        byte[] other = "def  jkit-9.9.9-linux-x64.tar.gz\n".getBytes(StandardCharsets.UTF_8);
+        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(other), sig, jkit, ring).outcome())
+                .isEqualTo(Signatures.Outcome.BAD);
+        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums),
+                sign(stranger, sums, HashAlgorithmTags.SHA256, true), jkit, ring).outcome())
+                .isEqualTo(Signatures.Outcome.UNKNOWN_KEY);
+    }
+
+    @Test
+    void aSha256sumsSignedByGpgAsTheReleaseWorkflowDoesIsGood() throws Exception {
+        // made with gpg --armor --detach-sign --digest-algo SHA512 by an ed25519 test key, as release.yml signs
+        Signatures.Key key = new Signatures.Key(null, null, "jkit", "test-release.asc",
+                List.of("A8009E6BC1CE7D1F3FE14F791064202FA98AB817"));
+        byte[] sums;
+        byte[] sig;
+        try (java.io.InputStream a = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS");
+             java.io.InputStream b = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS.asc")) {
+            sums = a.readAllBytes();
+            sig = b.readAllBytes();
+        }
+        PGPPublicKeyRingCollection ring = Signatures.ring(key);
+        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums), sig, key, ring).outcome())
+                .isEqualTo(Signatures.Outcome.GOOD);
+    }
+
+    @Test
     void aChangedFileIsBad() throws Exception {
         byte[] sig = sign(vendor, DATA, HashAlgorithmTags.SHA256, false);
         byte[] changed = DATA.clone();
@@ -165,11 +200,13 @@ class SignaturesTest {
     }
 
     @Test
-    void aKeyIsForOneVendorOrOneTool() {
+    void aKeyIsForOneVendorOneToolOrJkit() {
         assertThatThrownBy(() -> new Signatures.Key("temurin", Tool.JDK, "x", "x.asc", List.of("AB")))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new Signatures.Key(null, null, "x", "x.asc", List.of("AB")))
-                .isInstanceOf(IllegalArgumentException.class);
+        // neither is jkit's own release key, which no download lookup finds
+        assertThat(Signatures.KEYS).doesNotContain(Signatures.JKIT);
+        assertThat(Signatures.ring(Signatures.JKIT).size()).isEqualTo(1); // the built-in key is the one named
+        assertThat(Signatures.covers(Tool.JDK, null)).isFalse();
         assertThatThrownBy(() -> Signatures.Key.tool(Tool.SBT, "x", "x.asc"))
                 .isInstanceOf(IllegalArgumentException.class);
     }

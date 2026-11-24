@@ -57,9 +57,10 @@ public final class Installer {
     }
 
     /**
-     * @param signatureRequired the download has no checksum, so its signature is the check: one
-     *                          that can't be fetched or checked throws {@link SignatureRequired}
-     *                          rather than installing unchecked
+     * @param signatureRequired a signature that can't be fetched or checked throws
+     *                          {@link SignatureRequired} rather than installing on the checksum
+     *                          alone: jkit's commands require one whenever the publisher signs its
+     *                          downloads, unless --allow-unverified
      */
     @SuppressWarnings("try") // the lock is held for the whole block
     public Result install(Artifact artifact, Http.Progress progress, boolean signatureRequired) throws IOException {
@@ -104,8 +105,10 @@ public final class Installer {
                             + " check; nothing was installed");
                 }
                 String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
-                // a good signature by a built-in key is a stronger check than any checksum
-                verified |= signedBy != null;
+                // a good signature by a built-in key is a stronger check than any checksum; one that
+                // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
+                // whoever can replace the download can usually replace its checksum too
+                verified = signedBy != null || (verified && !signable);
                 Path out = work.resolve("out");
                 try {
                     Archives.extract(archive, out, artifact.archiveType());
@@ -121,6 +124,9 @@ public final class Installer {
                 Path toolHome = locateHome(out);
                 requireLinksInside(toolHome);
                 requireExecutable(storeTool, toolHome, artifact.label());
+                if (signedBy != null && artifact.checksum() == null && storeTool == Tool.JDK) {
+                    requireReleaseVersion(toolHome, artifact);
+                }
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
                 dev.jkit.model.Perms.mkdirs(dest.getParent());
                 moveIntoPlace(toolHome, dest);
@@ -145,15 +151,17 @@ public final class Installer {
 
     /**
      * Fetches the publisher's signature and checks the archive with it. A signature that doesn't
-     * match refuses the install; one jkit can't fetch or check leaves the checksum as the only
-     * check, and says so in {@code notes}. Returns who signed it, or null.
+     * match refuses the install; one jkit can't fetch or check refuses it too when {@code required},
+     * otherwise leaves the checksum as the only check and says so in {@code notes}. Returns who
+     * signed it, or null.
      */
     private String checkSignature(Artifact artifact, Path archive, Path work, List<String> notes, boolean required)
             throws IOException {
         String label = artifact.label();
         String unchecked = artifact.checksum() == null ? "; installed unchecked (--allow-unverified)"
                 : "; installed with only its checksum checked";
-        String refused = ", and it has no published checksum; nothing was installed";
+        String refused = artifact.checksum() == null ? ", and it has no published checksum; nothing was installed"
+                : "; nothing was installed";
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
@@ -181,10 +189,12 @@ public final class Installer {
                             + "pick another build or vendor");
             default -> {
                 String why = "couldn't check the signature of " + label + ": " + result.detail();
+                String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
+                        ? " (a newer jkit may know a new key: jkit self-update)" : "";
                 if (required) {
-                    throw new SignatureRequired(why + refused);
+                    throw new SignatureRequired(why + newer + refused);
                 }
-                notes.add("warning: " + why + unchecked + " (a newer jkit may know a new key)");
+                notes.add("warning: " + why + newer + unchecked);
                 return null;
             }
         }
@@ -345,6 +355,28 @@ public final class Installer {
             }
         } catch (IOException e) {
             throw new JkitException("cannot make " + bin + " executable: " + e.getMessage());
+        }
+    }
+
+    /**
+     * For a JDK checked by its signature alone (Corretto): the publisher's signature covers the
+     * file, not its name, so any build it signed would pass, an older one included. The unpacked
+     * JDK's {@code release} file must report the version jkit asked for.
+     */
+    static void requireReleaseVersion(Path jdkHome, Artifact artifact) {
+        String found = ToolStates.releaseVersion(jdkHome);
+        dev.jkit.model.Version wanted = artifact.version();
+        dev.jkit.model.Version got = found == null ? null
+                : dev.jkit.model.Version.parse(dev.jkit.model.Version.fromLegacyJava(found));
+        boolean same = got != null && got.partCount() > 0;
+        for (int i = 0; same && i < 3; i++) {
+            same = got.part(i) == wanted.part(i);
+        }
+        if (!same) {
+            throw new JkitException("the download for " + artifact.label() + " is signed, but it is "
+                    + (found == null ? "a JDK whose release file names no version" : "JDK " + found)
+                    + "; nothing was installed",
+                    "the source served a different build than it listed: try again later, or pick another vendor");
         }
     }
 

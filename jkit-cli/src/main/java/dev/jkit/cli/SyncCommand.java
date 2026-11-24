@@ -28,7 +28,7 @@ import picocli.CommandLine.Option;
 final class SyncCommand implements Callable<Integer> {
 
     @Option(names = "--allow-unverified",
-            description = "Install pins even when the source publishes no checksum for the download.")
+            description = "Install pins even when a download has no published checksum, or its publisher's signature can't be checked.")
     boolean allowUnverified;
 
     @Option(names = "--dry-run", description = "Only list what would be installed.")

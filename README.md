@@ -54,9 +54,13 @@ macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (
 hyphen) are on the releases page only.
 
 `jkit self-update` updates a jkit from a `.tar.gz` or `.zip` in place, after checking it against
-the release's `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that tool's upgrade command.
+the release's `SHA256SUMS` and that file's signature by jkit's release key; for Homebrew, apt, dnf
+and winget it prints that tool's upgrade command (for a `.deb` installed from a file, the download
+that replaces it).
 
-To check a download: `sha256sum -c SHA256SUMS --ignore-missing`, and for where it was built,
+To check a download: `sha256sum -c SHA256SUMS --ignore-missing` (from 0.4.0, `gpg --verify
+SHA256SUMS.asc SHA256SUMS` checks that file against jkit's release key, in
+[SECURITY.md](SECURITY.md)), and for where it was built,
 `gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM,
 made from the Linux x64 build: the other builds compile in the same libraries, and the macOS x64
 binary is built with Liberica NIK instead of GraalVM CE.
@@ -90,8 +94,9 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   warning, marked unverified; a download with no checksum is refused unless you pass
   `--allow-unverified`. Temurin, Microsoft and Corretto builds, Maven 3.9.0 and later, and sbt
   are also checked against their publisher's OpenPGP signature, with keys built into jkit; a
-  signature that doesn't match stops the install. Corretto publishes no checksum, so its
-  signature is the check. See [SECURITY.md](SECURITY.md).
+  signature that is missing, doesn't match, or isn't by the publisher's key stops the install
+  (`--allow-unverified` installs it anyway, marked unverified). Corretto publishes no checksum,
+  so its signature is the check. See [SECURITY.md](SECURITY.md).
 
 | Path | What |
 | --- | --- |
