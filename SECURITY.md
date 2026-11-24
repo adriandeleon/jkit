@@ -61,6 +61,11 @@ matters:
     them), nor is Gradle, which publishes none. Signatures are checked as well as checksums, never
     instead of them: Corretto, which publishes no per-version checksum that foojay lists, still
     needs `--allow-unverified`, and its signature is then the check that does run.
+- `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
+  against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
+  version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same
+  place as the archive; the release's build attestation is not checked (`gh attestation verify`
+  does that by hand). A jkit installed with Homebrew, apt, dnf or winget is left to that tool.
 
 ## Project files
 

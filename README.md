@@ -34,6 +34,7 @@ jkit status                            # what's active here, and why
 jkit doctor                            # what's wrong with the setup, and how to fix it
 jkit upgrade                           # newest build within each installed release (21.0.5 → 21.0.9)
 jkit prune --dry-run                   # what old builds, leftovers and old cache prune would remove
+jkit self-update                       # jkit itself (or how to, for brew, apt, dnf and winget)
 ```
 
 ## Install
@@ -51,6 +52,9 @@ anywhere on your `PATH`. Linux builds, Homebrew's included, need glibc 2.34 or n
 (Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04, RHEL 8 or Alpine);
 macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
 hyphen) are on the releases page only.
+
+`jkit self-update` updates a jkit from a `.tar.gz` or `.zip` in place, after checking it against
+the release's `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that tool's upgrade command.
 
 To check a download: `sha256sum -c SHA256SUMS --ignore-missing`, and for where it was built,
 `gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM,
@@ -110,9 +114,12 @@ vendor = "graalvm-ce"     # default GraalVM vendor
 auto_switch = true        # switch to a project's versions on cd (jkit hook --install --auto-switch)
 ```
 
+`jkit config` lists each setting, its value and where it comes from; `jkit config set jdk.vendor zulu`
+and `jkit config unset jdk.vendor` change the file, keeping its comments.
+
 Environment variables: `JKIT_HOME`, `JKIT_JDK_VENDOR`, `JKIT_GRAALVM_VENDOR`, `JKIT_AUTO_SWITCH`
 (`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE` (`1`/`true`: like `--offline`),
-`HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT}_URL`
+`HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT,RELEASES}_URL`
 for https mirrors.
 
 ## Projects
@@ -144,8 +151,8 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 ## Not yet
 
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
-completion, a `config` command, self-update, signature checks for other JDK vendors (Gradle
-publishes no signatures), and Windows on ARM natively.
+completion, signature checks for other JDK vendors (Gradle publishes no signatures), and
+Windows on ARM natively.
 
 ## Build
 
