@@ -177,6 +177,60 @@ class InstallerTest {
                 .startsWith("warning: couldn't fetch the signature of sbt 1.10.7");
     }
 
+    /** A Corretto build as foojay lists it: no checksum, a .sig jkit derives. */
+    private static Artifact corretto() {
+        URI url = URI.create("https://corretto.aws/downloads/resources/21.0.13.1.2/jdk.tar.gz");
+        return new Artifact(Tool.JDK, Version.parse("21.0.13.1+2"), Vendor.of("corretto"), url, "jdk.tar.gz", "tar.gz",
+                null, null, false, URI.create(url + ".sig"));
+    }
+
+    @Test
+    void withNoChecksumASignatureThatCantBeCheckedRefusesTheInstall() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        // junk, a 404, and a signature by another vendor's key: none may stand in for the checksum
+        for (byte[] sig : new byte[][] {"<html>".getBytes(), null, realTemurinSignature()}) {
+            assertThatThrownBy(() -> new Installer(home, withSignature(archive, sig))
+                    .install(corretto(), Http.Progress.NONE, true))
+                    .isInstanceOf(Installer.SignatureRequired.class)
+                    .hasMessageContaining("signature of jdk 21.0.13.1+2 corretto")
+                    .hasMessageEndingWith("and it has no published checksum; nothing was installed");
+        }
+        // and one that doesn't match is refused as always
+        byte[] amazon;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("corretto-21.0.13.1.2.sig")) {
+            amazon = in.readAllBytes();
+        }
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, amazon))
+                .install(corretto(), Http.Progress.NONE, true))
+                .hasMessageContaining("Amazon's key A122542AB04F24E3 made it");
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void aRequiredSignatureNeedsOneJkitCanCheck() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Artifact unsigned = new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("zulu"),
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", null, null, false);
+        assertThatThrownBy(() -> new Installer(home, serving(archive)).install(unsigned, Http.Progress.NONE, true))
+                .isInstanceOf(Installer.SignatureRequired.class)
+                .hasMessageContaining("no published checksum or signature jkit can check");
+    }
+
+    @Test
+    void allowedUnverifiedTheSignatureIsStillCheckedAndTheWarningSaysUnchecked() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, withSignature(archive, null))
+                .install(corretto(), Http.Progress.NONE, false);
+        assertThat(result.verified()).isFalse();
+        assertThat(result.notes()).singleElement().asString()
+                .startsWith("warning: couldn't fetch the signature of jdk 21.0.13.1+2 corretto")
+                .endsWith("installed unchecked (--allow-unverified)");
+    }
+
     @Test
     void noSignatureListedMeansNoCheckAndNoNote() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");

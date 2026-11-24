@@ -21,7 +21,18 @@ import java.util.stream.Stream;
 public final class Installer {
 
     /**
-     * @param verified false when the source published no checksum, or only an md5 or sha1 one
+     * Thrown, with nothing installed, when a download with no checksum was to be checked by its
+     * signature alone and the signature couldn't be fetched or checked.
+     */
+    public static final class SignatureRequired extends JkitException {
+        SignatureRequired(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * @param verified true when the download matched a sha256-or-stronger checksum or a good
+     *                 signature by a key built into jkit; false for md5 or sha1 only, or nothing
      * @param removedLeftovers tmp/ folders of interrupted installs that this install deleted
      * @param signedBy whose OpenPGP signature was checked (Adoptium, Amazon, Apache Maven, ...), or null
      * @param notes what the signature check found, for the user: checked, or why it couldn't be
@@ -41,8 +52,17 @@ public final class Installer {
         this.http = http;
     }
 
-    @SuppressWarnings("try") // the lock is held for the whole block
     public Result install(Artifact artifact, Http.Progress progress) throws IOException {
+        return install(artifact, progress, false);
+    }
+
+    /**
+     * @param signatureRequired the download has no checksum, so its signature is the check: one
+     *                          that can't be fetched or checked throws {@link SignatureRequired}
+     *                          rather than installing unchecked
+     */
+    @SuppressWarnings("try") // the lock is held for the whole block
+    public Result install(Artifact artifact, Http.Progress progress, boolean signatureRequired) throws IOException {
         Http.requireSecure(artifact.url());
         Tool storeTool = artifact.tool().storeTool();
         Path toolsDir = home.tools(storeTool);
@@ -78,8 +98,14 @@ public final class Installer {
                     verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
                 List<String> notes = new java.util.ArrayList<>();
-                String signedBy = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor())
-                        ? checkSignature(artifact, archive, work, notes) : null;
+                boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
+                if (signatureRequired && !signable) {
+                    throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
+                            + " check; nothing was installed");
+                }
+                String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
+                // a good signature by a built-in key is a stronger check than any checksum
+                verified |= signedBy != null;
                 Path out = work.resolve("out");
                 try {
                     Archives.extract(archive, out, artifact.archiveType());
@@ -122,9 +148,12 @@ public final class Installer {
      * match refuses the install; one jkit can't fetch or check leaves the checksum as the only
      * check, and says so in {@code notes}. Returns who signed it, or null.
      */
-    private String checkSignature(Artifact artifact, Path archive, Path work, List<String> notes) throws IOException {
+    private String checkSignature(Artifact artifact, Path archive, Path work, List<String> notes, boolean required)
+            throws IOException {
         String label = artifact.label();
-        String unchecked = "; installed with only its checksum checked";
+        String unchecked = artifact.checksum() == null ? "; installed unchecked (--allow-unverified)"
+                : "; installed with only its checksum checked";
+        String refused = ", and it has no published checksum; nothing was installed";
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
@@ -132,8 +161,12 @@ public final class Installer {
             bytes = Files.size(file) > Signatures.MAX_SIGNATURE ? new byte[Signatures.MAX_SIGNATURE + 1]
                     : Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
-            notes.add("warning: couldn't fetch the signature of " + label + " ("
-                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")" + unchecked);
+            String why = "couldn't fetch the signature of " + label + " ("
+                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")";
+            if (required) {
+                throw new SignatureRequired(why + refused);
+            }
+            notes.add("warning: " + why + unchecked);
             return null;
         }
         Signatures.Result result = Signatures.verify(archive, bytes, artifact.tool(), artifact.vendor());
@@ -147,8 +180,11 @@ public final class Installer {
                     "try again; if it keeps happening, the download or the signature is wrong at the source: "
                             + "pick another build or vendor");
             default -> {
-                notes.add("warning: couldn't check the signature of " + label + ": " + result.detail() + unchecked
-                        + " (a newer jkit may know a new key)");
+                String why = "couldn't check the signature of " + label + ": " + result.detail();
+                if (required) {
+                    throw new SignatureRequired(why + refused);
+                }
+                notes.add("warning: " + why + unchecked + " (a newer jkit may know a new key)");
                 return null;
             }
         }

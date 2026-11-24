@@ -55,6 +55,8 @@ final class InstallCommand implements Callable<Integer> {
      * Downloads and installs {@code artifact}, saying beforehand what can't be checked: no checksum
      * at all is refused unless {@code allowUnverified} ({@code retry} is the command that allows it),
      * md5 or sha1 only is a warning. A project's jkit sync must not install unchecked code unasked.
+     * A download with no checksum but a signature jkit can check (Corretto) is checked by that
+     * signature alone, and refused if it can't be.
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
@@ -62,7 +64,13 @@ final class InstallCommand implements Callable<Integer> {
             throw new dev.jkit.model.JkitException("--offline, so " + artifact.label() + " can't be downloaded",
                     "run the command without --offline");
         }
-        if (artifact.checksum() == null) {
+        String signer = signer(artifact);
+        boolean signatureRequired = false;
+        if (artifact.checksum() == null && signer != null) {
+            signatureRequired = !allowUnverified;
+            ctx.err.println("note: " + artifact.label() + " has no published checksum; checking " + signer
+                    + "'s signature instead");
+        } else if (artifact.checksum() == null) {
             if (!allowUnverified) {
                 throw new dev.jkit.model.JkitException(artifact.label() + " from " + artifact.url().getHost()
                         + " has no published checksum, so jkit can't check the download; nothing installed",
@@ -75,7 +83,18 @@ final class InstallCommand implements Callable<Integer> {
                     + artifact.label() + ": it catches a broken download, not a tampered one");
         }
         ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
-        return ctx.installer().install(artifact, new ProgressBar(ctx.err));
+        try {
+            return ctx.installer().install(artifact, new ProgressBar(ctx.err), signatureRequired);
+        } catch (dev.jkit.core.Installer.SignatureRequired e) {
+            throw new dev.jkit.model.JkitException(e.getMessage(), "install it anyway: " + retry,
+                    "or pick another version or vendor");
+        }
+    }
+
+    /** Whose signature can stand in for a missing checksum of {@code artifact}, or null. */
+    static String signer(Artifact artifact) {
+        return artifact.signature() == null ? null
+                : dev.jkit.core.Signatures.owner(artifact.tool(), artifact.vendor());
     }
 
     private static boolean isStrong(String algorithm) {

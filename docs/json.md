@@ -65,9 +65,10 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
 - `vendor` is null for Maven, Gradle and sbt.
 - `home` is the folder to use as `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME` or `SBT_HOME`.
 - `verified` is true when the download matched a sha256, sha384 or sha512 checksum published by its
-  source (foojay or the vendor for JDKs, Maven Central, services.gradle.org, sbt's GitHub releases).
-  It proves the file is the one the source lists, not who built it. False for md5/sha1-only
-  checksums, for `--allow-unverified` installs, and for installs made before jkit recorded it.
+  source (foojay or the vendor for JDKs, Maven Central, services.gradle.org, sbt's GitHub releases),
+  or a good signature (see `signedBy`; Corretto, which publishes no checksum, is verified this
+  way). False for md5/sha1-only checksums, for `--allow-unverified` installs whose signature
+  couldn't be checked, and for installs made before jkit recorded it.
 - `signedBy` names whose OpenPGP signature the download was checked against, using a key built
   into jkit: `"Adoptium"` for Temurin, `"Microsoft"` for Microsoft builds, `"Amazon"` for Corretto,
   `"Apache Maven"` for Maven 3.9.0 and later (the install's `notes` name the release manager), and
@@ -264,7 +265,8 @@ couldn't be fetched or checked, `notes` says so. Upgrade rows carry the same `si
 `status` is `installed` or `already-installed` (then `verified` is null; the install object's own
 `verified` says how it was installed). `verified` is false when the source publishes only an md5
 or sha1 checksum (jkit still checks those, but they don't count as verified), or for an
-`--allow-unverified` install; a download with no checksum at all is refused without that flag.
+`--allow-unverified` install; a download with no checksum at all is refused without that flag,
+unless a good signature stands in for it (Corretto).
 Downloads and checksums come only over https. The first install of a tool also sets its global
 link (in `changes`), unless `--no-default`.
 
@@ -349,7 +351,7 @@ latest release (`jkit pin jdk@latest`, written as `jdk = "latest"`). With the sh
 ```
 
 `status` per tool: `already-installed`, `installed`, or in a dry run `would-install` or
-`would-refuse` (the source publishes no checksum, so the real sync needs `--allow-unverified`);
+`would-refuse` (the source publishes no checksum or signature jkit can check, so the real sync needs `--allow-unverified`);
 `installed` is null in a dry run. `changes` lists new install folders and, with the shell hook active, the variables of this
 shell that now follow the project; without the hook `notes` says the shell is unchanged.
 
