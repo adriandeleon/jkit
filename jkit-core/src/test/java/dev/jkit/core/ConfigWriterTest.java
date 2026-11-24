@@ -56,4 +56,41 @@ class ConfigWriterTest {
         assertThat(on("[jdk]\r\nvendor = \"zulu\"\r\n").text())
                 .isEqualTo("[jdk]\r\nvendor = \"zulu\"\r\n\r\n[shell]\r\nauto_switch = true\r\n");
     }
+
+    private static ConfigWriter.Edit off(String text) {
+        return ConfigWriter.unset(FILE, text, "shell", "auto_switch");
+    }
+
+    @Test
+    void unsetRemovesTheLineAndKeepsTheRest() {
+        assertThat(off("[shell]\nother = 1 # keep\nauto_switch = true\n\n[jdk]\nvendor = \"zulu\"\n").text())
+                .isEqualTo("[shell]\nother = 1 # keep\n\n[jdk]\nvendor = \"zulu\"\n");
+    }
+
+    @Test
+    void unsetDropsATableLeftEmpty() {
+        assertThat(off("[shell]\nauto_switch = true\n\n[jdk]\nvendor = \"zulu\"\n").text())
+                .isEqualTo("[jdk]\nvendor = \"zulu\"\n");
+        assertThat(off("[jdk]\nvendor = \"zulu\"\n\n[shell]\nauto_switch = true\n").text())
+                .isEqualTo("[jdk]\nvendor = \"zulu\"\n");
+        assertThat(off("[shell]\nauto_switch = true\n").text()).isEmpty();
+    }
+
+    @Test
+    void unsetKeepsATableThatStillHasAComment() {
+        assertThat(off("[shell]\n# on for work\nauto_switch = true\n").text()).isEqualTo("[shell]\n# on for work\n");
+    }
+
+    @Test
+    void unsetOfAMissingKeyChangesNothing() {
+        ConfigWriter.Edit edit = off("[jdk]\nvendor = \"zulu\"\n");
+        assertThat(edit.changed()).isFalse();
+        assertThat(edit.text()).isEqualTo("[jdk]\nvendor = \"zulu\"\n");
+    }
+
+    @Test
+    void unsetRefusesADottedKeyItCantFind() {
+        assertThatThrownBy(() -> off("shell.auto_switch = true\n")).isInstanceOf(JkitException.class)
+                .hasMessageContaining("can't set shell.auto_switch");
+    }
 }

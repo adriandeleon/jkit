@@ -173,7 +173,7 @@ final class HookCommand implements Callable<Integer> {
         return 0;
     }
 
-    private static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
+    static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
         Path dir = file.toAbsolutePath().getParent();
         if (!Files.isDirectory(dir)) {
             // every folder that is new, outermost first: fish's ~/.config, ~/.config/fish and conf.d
