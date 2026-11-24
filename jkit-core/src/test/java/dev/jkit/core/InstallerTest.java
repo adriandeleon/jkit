@@ -53,6 +53,87 @@ class InstallerTest {
                 URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", checksum, fx);
     }
 
+    /** Serves {@code file} for the download and {@code signature} (null: 404) for the .sig. */
+    private static Http withSignature(Path file, byte[] signature) {
+        return new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                if (!uri.getPath().endsWith(".sig")) {
+                    Files.copy(file, target);
+                } else if (signature == null) {
+                    throw new dev.jkit.sources.HttpStatusException(404, uri);
+                } else {
+                    Files.write(target, signature);
+                }
+            }
+        };
+    }
+
+    private static Artifact signed(String checksum) {
+        return new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"),
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", checksum, false,
+                URI.create("https://example.invalid/jdk.tar.gz.sig"));
+    }
+
+    private static byte[] realTemurinSignature() throws IOException {
+        try (InputStream in = InstallerTest.class.getResourceAsStream("temurin-21.0.13.1.sig")) {
+            return in.readAllBytes();
+        }
+    }
+
+    @Test
+    void aSignatureByTheVendorsKeyThatDoesntMatchRefusesTheInstall() throws Exception {
+        // Adoptium's real signature of a real Temurin build, over a different archive
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, realTemurinSignature()))
+                .install(signed(sha256(archive)), Http.Progress.NONE))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("signature of jdk 21.0.13+9 temurin doesn't match the download")
+                .hasMessageContaining("Adoptium's key 843C48A565F8F04B made it")
+                .hasMessageContaining("nothing was installed");
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void aSignatureJkitCantCheckInstallsWithAWarning() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, withSignature(archive, "<html>".getBytes()))
+                .install(signed(sha256(archive)), Http.Progress.NONE);
+        assertThat(result.fresh()).isTrue();
+        assertThat(result.verified()).isTrue();
+        assertThat(result.signedBy()).isNull();
+        assertThat(result.notes()).singleElement().asString().startsWith("warning: couldn't check the signature")
+                .contains("only its checksum checked");
+        assertThat(Store.signedBy(result.installed().home())).isNull();
+    }
+
+    @Test
+    void aMissingSignatureInstallsWithAWarning() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, withSignature(archive, null))
+                .install(signed(sha256(archive)), Http.Progress.NONE);
+        assertThat(result.fresh()).isTrue();
+        assertThat(result.notes()).singleElement().asString().startsWith("warning: couldn't fetch the signature");
+    }
+
+    @Test
+    void noSignatureListedMeansNoCheckAndNoNote() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE);
+        assertThat(result.notes()).isEmpty();
+        assertThat(result.signedBy()).isNull();
+    }
+
     @Test
     void installsIntoToolsAndIsFoundByTheStore() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");

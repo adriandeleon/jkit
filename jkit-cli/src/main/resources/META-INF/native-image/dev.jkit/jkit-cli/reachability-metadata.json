@@ -1,5 +1,6 @@
 {
   "resources": [
-    { "glob": "jkit-version.properties" }
+    { "glob": "jkit-version.properties" },
+    { "glob": "dev/jkit/core/keys/*.asc" }
   ]
 }

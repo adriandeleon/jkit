@@ -76,6 +76,22 @@ public final class FoojaySource {
      * @param source how the name was given, for the message: "" when typed, else e.g. "your
      *               default vendor (jdk.vendor)"
      */
+    /**
+     * The package's signature link, when foojay lists one: https only. A link that isn't is
+     * dropped rather than refused, since the checksum still guards the download.
+     */
+    private static URI signature(JsonNode info, URI base) {
+        String sig = Json.text(info, "signature_uri");
+        if (sig.isEmpty()) {
+            return null;
+        }
+        try {
+            return Http.sent(sig, "a signature", base);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
         JsonNode root = Json.fetch(http, base.resolve(
                 "distributions?include_versions=false&include_synonyms=true"));
@@ -187,7 +203,7 @@ public final class FoojaySource {
             }
             return new Artifact(tool, pkg.version(), pkg.vendor(), Http.sent(url, "a download", base), pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
-                    checksum == null ? null : checksum.hash(), fx);
+                    checksum == null ? null : checksum.hash(), fx, signature(info, base));
         }
         Pkg newest = candidates.getFirst();
         if (candidates.size() > MAX_LOOKUPS) {
