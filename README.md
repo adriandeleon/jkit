@@ -84,7 +84,9 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 - Downloads come over https only and are checked against the checksum their source publishes:
   SHA-256 or stronger counts as verified; old Maven releases that only have SHA-1 install with a
   warning, marked unverified; a download with no checksum is refused unless you pass
-  `--allow-unverified`. No vendor signatures are checked yet. See [SECURITY.md](SECURITY.md).
+  `--allow-unverified`. Temurin and Microsoft builds are also checked against the vendor's OpenPGP
+  signature, with keys built into jkit; a signature that doesn't match stops the install. See
+  [SECURITY.md](SECURITY.md).
 
 | Path | What |
 | --- | --- |
@@ -145,7 +147,7 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 ## Not yet
 
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
-completion, self-update, vendor signature checks, and Windows on ARM
+completion, self-update, signature checks for other vendors and tools, and Windows on ARM
 natively.
 
 ## Build

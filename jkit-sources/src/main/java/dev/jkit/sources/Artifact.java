@@ -11,6 +11,7 @@ import java.net.URI;
  * @param vendor null for Maven and Gradle
  * @param checksumAlgorithm "sha256", "sha512", ... or null when the source publishes none
  * @param fx true for a JDK build with JavaFX bundled
+ * @param signature the vendor's detached OpenPGP signature of the download, or null when none is listed
  */
 public record Artifact(
         Tool tool,
@@ -21,7 +22,14 @@ public record Artifact(
         String archiveType,
         String checksumAlgorithm,
         String checksum,
-        boolean fx) {
+        boolean fx,
+        URI signature) {
+
+    /** An artifact with no listed signature. */
+    public Artifact(Tool tool, Version version, Vendor vendor, URI url, String fileName, String archiveType,
+            String checksumAlgorithm, String checksum, boolean fx) {
+        this(tool, version, vendor, url, fileName, archiveType, checksumAlgorithm, checksum, fx, null);
+    }
 
     public String label() {
         return tool.id() + " " + version + (vendor == null ? "" : " " + vendor.name()) + (fx ? " fx" : "");

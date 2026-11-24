@@ -33,7 +33,17 @@ matters:
   marked unverified. For Maven, jkit asks the repository for `.sha512` and, for releases older
   than 3.9.1, `.sha1`; a mirror that has only `.md5` counts as having no checksum.
 - A download with no checksum at all is refused unless you pass `--allow-unverified`.
-- Vendor signatures (GPG, Sigstore and the like) are not checked yet.
+- Temurin and Microsoft Build of OpenJDK downloads are also checked against the vendor's detached
+  OpenPGP signature, when foojay lists one (it does for current builds), using keys built into
+  jkit: Adoptium's `3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B` and Microsoft's
+  `B602 4333 84B8 9913 0292 4D82 3553 1D31 5B21 C189`. Each key is tied to its vendor: a Temurin
+  download signed by any other key doesn't count. Unlike a checksum, a signature shows who built the
+  file, so it catches a compromised download source or foojay entry, not only tampering in transit.
+  - A signature by the vendor's key that doesn't match the download stops the install.
+  - A signature jkit can't fetch, read, or tie to the vendor's key (a new key, a weak hash) leaves
+    the checksum as the only check, and the install says so.
+  - Other vendors, Maven, Gradle and sbt: no signatures are checked yet (foojay lists none for the
+    other vendors). Signatures are checked as well as checksums, never instead of them.
 
 ## Project files
 
