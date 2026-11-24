@@ -29,9 +29,9 @@ public final class Archives {
 
     private Archives() { }
 
-    /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 10,000 files. */
+    /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 1,000 files. */
     static final long MAX_UNPACKED = 3L << 30;
-    static final int MAX_ENTRIES = 200_000;
+    static final int MAX_ENTRIES = 50_000;
     /** {@link #MAX_ENTRIES}, lowered by tests. */
     static int entryLimit = MAX_ENTRIES;
 

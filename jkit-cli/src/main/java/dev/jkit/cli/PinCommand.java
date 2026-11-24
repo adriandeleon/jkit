@@ -23,10 +23,12 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 @Command(name = "pin",
-        description = {"Records a version in the project's jkit.toml, creating it if needed.",
+        description = {"Records a version in the project's jkit.toml.",
+                "Creates the file if needed.",
                 "Edits the jkit.toml found here or above, or with --here the one in this folder;",
                 "only that tool's line changes. The version must be installed or downloadable.",
-                "Without a version, pins the one this shell uses (jdk and graalvm: its feature release).",
+                "Without a version, pins the one this shell uses (for jdk and graalvm, its",
+                "feature release: 21).",
                 "",
                 "  jkit pin jdk@21          any vendor, newest installed 21",
                 "  jkit pin jdk@21 zulu --exact",

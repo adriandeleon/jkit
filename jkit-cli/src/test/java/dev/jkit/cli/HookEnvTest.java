@@ -154,6 +154,23 @@ class HookEnvTest {
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", zulu17.toString()).containsEntry("JKIT_PROJECT_JDK", temurin21.toString());
         assertThat(said()).contains("this shell chose its own jdk with jkit use, which wins over jkit.toml");
+        cd(elsewhere); // leaving changes no version: the shell's own choice stays, and that is what it says
+        assertThat(env).containsEntry("JAVA_HOME", zulu17.toString());
+        assertThat(said()).contains("this shell's own jdk stays").doesNotContain("back to the global");
+    }
+
+    @Test
+    void leavingNamesWhichToolsGoBackAndWhichStay() throws Exception {
+        // the project pins jdk and maven; this shell chose its own jdk; PATH was reordered meanwhile
+        install("maven", "3.9.11", "version=3.9.11\nvendor=\n");
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\nmaven = \"3.9\"\n");
+        env.put("JKIT_SHELL_JDK", zulu17.toString());
+        env.put("JAVA_HOME", zulu17.toString());
+        cd(project);
+        env.put("PATH", "/venv/bin" + java.io.File.pathSeparator + env.get("PATH"));
+        cd(elsewhere);
+        assertThat(said()).contains("maven back to the global version; this shell's own jdk stays");
+        assertThat(env).containsEntry("JAVA_HOME", zulu17.toString()).doesNotContainKey("MAVEN_HOME");
     }
 
     @Test

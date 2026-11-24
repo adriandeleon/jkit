@@ -279,6 +279,22 @@ class ArchivesTest {
     }
 
     @Test
+    void aNegativeBase256SizeIsRefused() throws IOException {
+        // commons-compress reads 0xff... as a negative size; the scan must not read it as a huge one
+        byte[] h = header("f", '0', 0);
+        java.util.Arrays.fill(h, 124, 136, (byte) 0xff);
+        java.util.Arrays.fill(h, 148, 156, (byte) ' ');
+        long sum = 0;
+        for (byte b : h) {
+            sum += b & 0xff;
+        }
+        System.arraycopy(String.format("%06o\0 ", sum).getBytes(StandardCharsets.US_ASCII), 0, h, 148, 8);
+        Path archive = tarOf("neg.tar.gz", h);
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("negative size");
+    }
+
+    @Test
     void theLastPaxSizeIsTheOneCounted() throws IOException {
         // commons-compress uses the last size record: the scan must count that one, not the first
         byte[] two = pax("size=0", "size=5000000000");

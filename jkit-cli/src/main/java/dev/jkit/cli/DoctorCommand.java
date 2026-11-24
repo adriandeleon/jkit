@@ -39,7 +39,8 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 @Command(name = "doctor",
-        description = {"Checks your setup for problems and says how to fix them. Changes nothing.",
+        description = {"Checks your setup for problems and says how to fix them.",
+                "Changes nothing.",
                 "Exits 1 when a check fails. Uses the network only with --network."})
 final class DoctorCommand implements Callable<Integer> {
 
@@ -221,8 +222,10 @@ final class DoctorCommand implements Callable<Integer> {
             return;
         }
         List<String> problems = new ArrayList<>();
-        boolean checked = true;
-        for (Tool tool : List.of(Tool.JDK, Tool.GRAALVM)) {
+        // no cache yet: nothing to check against, and opening it would create the jkit home, which
+        // doctor never does (it changes nothing)
+        boolean checked = Files.isDirectory(r.ctx.home.index());
+        for (Tool tool : checked ? List.of(Tool.JDK, Tool.GRAALVM) : List.<Tool>of()) {
             Vendor vendor = r.ctx.config.defaultVendor(tool);
             try {
                 r.ctx.foojay().requireKnown(vendor, vendor.name(), tool == Tool.JDK

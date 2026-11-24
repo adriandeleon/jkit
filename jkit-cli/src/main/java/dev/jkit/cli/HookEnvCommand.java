@@ -78,7 +78,7 @@ final class HookEnvCommand implements Callable<Integer> {
             new Changes(ctx).env(changes).print(err);
             return ShellEnv.format(changes, shell);
         }
-        err.println("jkit: " + headline(plan, applied));
+        err.println("jkit: " + headline(plan, applied, ctx.env));
         Changes report = new Changes(ctx);
         report.env(changes);
         plan.notes().forEach(report::note);
@@ -106,10 +106,32 @@ final class HookEnvCommand implements Callable<Integer> {
 
     /** {@code using ~/src/app/jkit.toml: jdk 21.0.9+10 temurin, maven 3.9.11}, or what leaving means. */
     static String headline(ProjectShell.Plan plan, String applied) {
+        return headline(plan, applied, Map.of());
+    }
+
+    /**
+     * {@link #headline(ProjectShell.Plan, String)} for a shell with {@code env}. Leaving a project,
+     * each tool it applied goes back to the global version, unless this shell chose its own with
+     * jkit use: that one stays, and saying "back to global" would be wrong for it.
+     */
+    static String headline(ProjectShell.Plan plan, String applied, Map<String, String> env) {
         if (plan.project().isEmpty()) {
             String left = appliedDir(applied);
-            return "left the project" + (left == null ? "" : " in " + Changes.tilde(left))
-                    + ": back to the global versions";
+            List<String> back = new ArrayList<>();
+            List<String> own = new ArrayList<>();
+            for (Tool t : Tool.values()) {
+                if (env.containsKey(ShellEnv.projectVariable(t))) {
+                    (env.containsKey(ShellEnv.stateVariable(t)) ? own : back).add(t.toString());
+                }
+            }
+            String where = "left the project" + (left == null ? "" : " in " + Changes.tilde(left));
+            if (own.isEmpty()) {
+                return where + ": back to the global versions";
+            }
+            String stays = "this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay");
+            return where + (back.isEmpty() ? "; " + stays
+                    : ": " + String.join(", ", back) + " back to the global " + (back.size() == 1 ? "version" : "versions")
+                            + "; " + stays);
         }
         String where = Changes.tilde(plan.project().get().dir().toString()) + "/" + plan.project().get().source();
         List<String> tools = new ArrayList<>();

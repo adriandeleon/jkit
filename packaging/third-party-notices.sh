@@ -67,6 +67,10 @@ if [ "$extra" = 1 ]; then
   exit 1
 fi
 
+# 1c. Code embedded in a component (ANTLR in tomlj, ...) is listed by version in sbom-runtime.py:
+# a bump of the component must update that list too.
+python3 -I "$root/packaging/sbom-runtime.py" --check-embedded "$table"
+
 # 2. Render the notices.
 jar_of() { # group:artifact version
   local g=${1%%:*} a=${1#*:}

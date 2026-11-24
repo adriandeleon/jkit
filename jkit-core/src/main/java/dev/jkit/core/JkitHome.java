@@ -49,6 +49,9 @@ public record JkitHome(Path root) {
 
     public Path lockFile() { return root.resolve(".lock"); }
 
+    /** Held only while global links change or an install folder is moved away: never for a download. */
+    public Path linkLockFile() { return root.resolve(".links.lock"); }
+
     public Path config() { return root.resolve("config.toml"); }
 
     private static final boolean POSIX =

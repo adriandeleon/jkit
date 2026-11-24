@@ -8,8 +8,9 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
 @Command(name = "completion",
-        description = "Prints the bash completion script (zsh works through bashcompinit). "
-                + "The shell hook and the Linux packages already load it.")
+        description = {"Prints the bash completion script.",
+                "zsh works through bashcompinit.",
+                "The shell hook and the Linux packages already load it."})
 final class CompletionCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<shell>", defaultValue = "bash",

@@ -20,8 +20,12 @@ import dev.jkit.model.Suggest;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
 public final class FoojaySource {
-    /** How many builds an install looks up for a direct download before giving up. */
-    static final int MAX_LOOKUPS = 5;
+    /**
+     * How many builds an install looks up for a direct download before giving up. Oracle lists its
+     * newer JDK 17 updates without one (they need a licence click-through), and that list grows by
+     * a build each quarter: 32 covers years of that, while still bounding what a hostile list costs.
+     */
+    static final int MAX_LOOKUPS = 32;
 
     public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
 
@@ -186,8 +190,16 @@ public final class FoojaySource {
                     checksum == null ? null : checksum.hash(), fx);
         }
         Pkg newest = candidates.getFirst();
+        if (candidates.size() > MAX_LOOKUPS) {
+            Pkg next = candidates.get(MAX_LOOKUPS);
+            throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download, nor do the next "
+                    + (MAX_LOOKUPS - 1) + " builds", "an older build may have one: jkit install " + tool.id() + "@"
+                    + next.version().raw() + " " + next.vendor().name() + (fx ? " --fx" : "")
+                    + (pre && next.version().isPreRelease() ? " --pre" : ""),
+                    "or download it from the vendor's site, or pick another vendor");
+        }
         throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download"
-                + (candidates.size() > MAX_LOOKUPS ? " (nor the next " + (MAX_LOOKUPS - 1) + " builds)" : ""),
+                + (candidates.size() > 1 ? ", nor does any other matching build" : ""),
                 "download it from the vendor's site, or pick another vendor");
     }
 

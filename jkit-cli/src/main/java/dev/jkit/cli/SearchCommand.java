@@ -22,7 +22,8 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "search", description = {"Lists available versions (online; cached 24 h, --offline uses the cache).",
+@Command(name = "search", description = {"Lists the versions available to install.",
+        "Online, cached for 24 h; --offline uses the cache.",
         "",
         "  jkit search jdk                  newest build per vendor and release",
         "  jkit search jdk@21 zulu          every Zulu 21 build",

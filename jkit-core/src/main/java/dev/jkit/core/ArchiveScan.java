@@ -353,6 +353,10 @@ final class ArchiveScan {
 
     /** The size field: octal text, or GNU base-256 when the first byte has its top bit set. */
     private static long size(byte[] h) throws IOException {
+        if ((h[124] & 0xff) == 0xff) {
+            // base-256 with the sign bit: commons-compress reads a negative size here
+            throw Archives.unsafe("a tar entry has a negative size");
+        }
         if ((h[124] & 0x80) != 0) {
             long v = 0;
             for (int i = 125; i < 136; i++) {

@@ -15,7 +15,8 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "unpin", description = "Removes a tool from the project's jkit.toml; it follows the shell or global choice again.")
+@Command(name = "unpin", description = {"Removes a tool from the project's jkit.toml.",
+        "The tool then follows the shell or global choice again."})
 final class UnpinCommand implements Callable<Integer> {
 
     @Parameters(index = "0", paramLabel = "<tool>", completionCandidates = Candidates.Tools.class,
