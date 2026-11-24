@@ -151,6 +151,11 @@ final class Context {
         return new Context(env, false, true, out);
     }
 
+    /** For tests: like {@link #forEnv(Map, PrintStream)}, but online (for a server on localhost). */
+    static Context forEnvOnline(Map<String, String> env, PrintStream out) {
+        return new Context(env, false, false, out);
+    }
+
     FoojaySource foojay() {
         return new FoojaySource(http(), url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
     }

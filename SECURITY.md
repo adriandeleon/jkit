@@ -34,6 +34,11 @@ matters:
   than 3.9.1, `.sha1`; a mirror that has only `.md5` counts as having no checksum.
 - A download with no checksum at all is refused unless you pass `--allow-unverified`.
 - Vendor signatures (GPG, Sigstore and the like) are not checked yet.
+- `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
+  against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
+  version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same
+  place as the archive; the release's build attestation is not checked (`gh attestation verify`
+  does that by hand). A jkit installed with Homebrew, apt, dnf or winget is left to that tool.
 
 ## Project files
 

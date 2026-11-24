@@ -342,6 +342,19 @@ latest release (`jkit pin jdk@latest`, written as `jdk = "latest"`). With the sh
 `installed` is null in a dry run. `changes` lists new install folders and, with the shell hook active, the variables of this
 shell that now follow the project; without the hook `notes` says the shell is unchanged.
 
+## `jkit self-update [--check] --json`
+
+```json
+{ "schemaVersion": 1, "current": "0.3.0", "latest": "0.4.0", "status": "managed",
+  "installedWith": "homebrew", "binary": "/opt/homebrew/Cellar/jkit/0.3.0/bin/jkit",
+  "command": "brew upgrade jkit", "changes": [], "notes": [] }
+```
+
+`status`: `up-to-date`, `available` (with `--check`), `updated` (a release-archive install,
+replaced in place: `changes` names the binary), or `managed` (installed with a package manager,
+left alone: `command` is what updates it). `installedWith`: `homebrew`, `deb`, `rpm`, `winget` or
+`archive`. `latest` is the newest stable release; pre-releases are on the releases page only.
+
 ## `jkit remove <tool>@<version> [vendor] --json`
 
 ```json
