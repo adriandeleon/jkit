@@ -301,9 +301,14 @@ jobs:
         run: |
           bin=stage/jkit
           chmod 755 "$bin"
-          # all five, so a missing one fails here with this message, not later inside security or notarytool
-          if [ -z "$CERT_P12" ] || [ -z "$CERT_PASSWORD" ] || [ -z "$API_KEY_P8" ] || [ -z "$API_KEY_ID" ] \
-             || [ -z "$API_ISSUER_ID" ]; then
+          # None set: a pre-release ships ad-hoc signed, a release fails. Some set but not all is a setup
+          # mistake (an empty value saved by a failed pipe, a typo in a name): always fail, naming them,
+          # rather than quietly ship an unsigned pre-release or fail later inside security or notarytool
+          missing=()
+          for name in CERT_P12 CERT_PASSWORD API_KEY_P8 API_KEY_ID API_ISSUER_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" = 5 ]; then
             case "$GITHUB_REF_NAME" in
               *-*) echo "::warning::signing secrets are not set; this pre-release ships ad-hoc signed (no Developer ID, not notarized) for macOS"
                    codesign --force --sign - "$bin"   # ad-hoc, so macos-pack's codesign --verify passes
@@ -311,6 +316,10 @@ jobs:
               *)   echo "::error::signing secrets are not set; a release needs a notarized macOS binary"
                    exit 1 ;;
             esac
+          elif [ "${#missing[@]}" != 0 ]; then
+            echo "::error::some signing secrets are empty or missing (${missing[*]}; see the env names above for" \
+              "the secret each one reads): set them in the release environment, or remove all five to ship unsigned"
+            exit 1
           fi
 
           # a throwaway keychain holding only the Developer ID identity
