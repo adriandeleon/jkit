@@ -105,7 +105,7 @@ public final class Main implements Runnable {
             return message;
         }
         java.util.regex.Pattern p = java.util.regex.Pattern.compile("(^|[\\s(])" + java.util.regex.Pattern.quote(home)
-                + "(?=[" + java.util.regex.Pattern.quote(java.io.File.separator) + "\\s:;,)]|$)");
+                + "(?=[/\\\\\\s:;,)]|$)"); // either slash: Windows paths can come with /
         return p.matcher(message).replaceAll(m -> java.util.regex.Matcher.quoteReplacement(m.group(1) + "~"));
     }
 
