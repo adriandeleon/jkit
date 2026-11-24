@@ -29,9 +29,28 @@ public final class FoojaySource {
 
     public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
 
-    /** One JDK package for one platform. */
+    /**
+     * One JDK package for one platform.
+     *
+     * @param directlyDownloadable what foojay's list says; false for builds behind a licence form
+     */
     public record Pkg(String id, Vendor vendor, int major, Version version, String fileName,
-                      String archiveType, String termOfSupport) { }
+                      String archiveType, String termOfSupport, boolean directlyDownloadable) { }
+
+    /**
+     * What an install of a build would find, so search can say beforehand what install refuses.
+     *
+     * @param pkg       the build install would download, or null when none has a direct download
+     * @param checksum  whether a checksum is published for it (in foojay's answer or as a file)
+     * @param signature its publisher's signature link, or null
+     */
+    public record Availability(Pkg pkg, boolean checksum, URI signature) {
+        static final Availability NONE = new Availability(null, false, null);
+
+        public boolean downloadable() {
+            return pkg != null;
+        }
+    }
 
     /** A feature release and its support status. */
     public record Major(int major, String termOfSupport, boolean maintained) {
@@ -230,6 +249,54 @@ public final class FoojaySource {
                 "download it from the vendor's site, or pick another vendor");
     }
 
+    /**
+     * What installing exactly this build would find: one lookup, cached like the version lists.
+     * Mirrors {@link #resolve}: no direct download link means none; a checksum counts when foojay
+     * gives one or links a checksum file.
+     */
+    public Availability availability(Pkg pkg) throws IOException {
+        JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id()))).path("result").path(0);
+        String url = Json.text(info, "direct_download_uri");
+        if (url.isEmpty()) {
+            return Availability.NONE;
+        }
+        boolean checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type")) != null
+                || !Json.text(info, "checksum_uri").isEmpty();
+        URI download = Http.sent(url, "a download", base);
+        return new Availability(pkg, checksum, signature(info, download, base));
+    }
+
+    /**
+     * What {@code jkit install <tool>@<versionSpec> <vendor>} would find, given the newest matching
+     * build {@code newest}: that build, or like {@link #resolve} the newest matching one with a
+     * direct download (Oracle lists its newer JDK 17 updates without one).
+     */
+    public Availability availability(Pkg newest, String versionSpec, Platform platform, boolean fx, boolean pre)
+            throws IOException {
+        if (newest.directlyDownloadable()) {
+            Availability a = availability(newest);
+            if (a.downloadable()) {
+                return a;
+            }
+        }
+        String spec = versionSpec == null ? String.valueOf(newest.major()) : versionSpec;
+        List<Pkg> candidates = builds(newest.major(), newest.vendor(), platform, fx, pre).stream()
+                .filter(p -> p.version().matches(spec))
+                .filter(p -> pre || !p.version().isPreRelease())
+                .limit(MAX_LOOKUPS) // as many as install looks at
+                .toList();
+        for (Pkg p : candidates) {
+            if (!p.directlyDownloadable() || p.id().equals(newest.id())) {
+                continue; // the newest was looked up above
+            }
+            Availability a = availability(p);
+            if (a.downloadable()) {
+                return a;
+            }
+        }
+        return Availability.NONE;
+    }
+
     private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,
                                   boolean fx, int major) {
         String what = tool.id() + (spec == null ? "" : "@" + spec);
@@ -278,7 +345,8 @@ public final class FoojaySource {
             }
             Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),
                     n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
-                    Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"));
+                    Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"),
+                    !n.path("directly_downloadable").isBoolean() || n.path("directly_downloadable").asBoolean());
             if (pkg.vendor().isRetired()) {
                 continue;
             }

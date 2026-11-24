@@ -96,7 +96,7 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   are also checked against their publisher's OpenPGP signature, with keys built into jkit; a
   signature that is missing, doesn't match, or isn't by the publisher's key stops the install
   (`--allow-unverified` installs it anyway, marked unverified). Corretto publishes no checksum,
-  so its signature is the check. See [SECURITY.md](SECURITY.md).
+  so its signature is the check. `jkit search` marks builds with neither as ○. See [SECURITY.md](SECURITY.md).
 
 | Path | What |
 | --- | --- |

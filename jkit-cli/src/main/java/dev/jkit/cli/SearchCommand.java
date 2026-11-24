@@ -123,8 +123,10 @@ final class SearchCommand implements Callable<Integer> {
                 }
             }
             doc.put("majors", majors);
+            Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, pkgs, spec.version() != null && vendorText != null);
             for (Pkg p : pkgs) {
                 Major m = info.get(p.major());
+                Verdict verdict = verdicts.getOrDefault(p, Verdict.UNKNOWN);
                 available.add(JsonOut.fields(
                         "tool", spec.tool().id(),
                         "version", p.version().raw(),
@@ -135,7 +137,10 @@ final class SearchCommand implements Callable<Integer> {
                         "lts", m != null && m.isLts(),
                         "maintained", m == null || m.maintained(),
                         "preRelease", p.version().isPreRelease(),
-                        "installed", !mark(installed, p.version(), p.vendor(), fx).isEmpty()));
+                        "installed", !mark(installed, p.version(), p.vendor(), fx).isEmpty(),
+                        "downloadable", verdict == Verdict.UNKNOWN ? null : verdict != Verdict.NO_DOWNLOAD,
+                        "verifiable", verdict == Verdict.UNKNOWN || verdict == Verdict.NO_DOWNLOAD ? null
+                                : verdict == Verdict.OK));
             }
         } else {
             doc.put("majors", List.of());
@@ -174,33 +179,142 @@ final class SearchCommand implements Callable<Integer> {
             return;
         }
         if (spec.version() == null) {
-            majorTable(ctx, foojay.majors(), index, vendor, installed);
+            majorTable(ctx, foojay, foojay.majors(), index, vendor, installed);
         } else if (vendorText == null) {
-            vendorRows(ctx, newestMatchingPerVendor(ctx, foojay, index), vendor, installed);
+            vendorRows(ctx, foojay, newestMatchingPerVendor(ctx, foojay, index), vendor, installed);
         } else {
-            for (Pkg p : foojay.builds(spec.major(), vendor, ctx.platform, fx, pre)) {
-                if (p.version().matches(spec.version())) {
-                    ctx.out.println(p.version() + mark(installed, p.version(), p.vendor(), fx));
+            List<Pkg> builds = foojay.builds(spec.major(), vendor, ctx.platform, fx, pre).stream()
+                    .filter(p -> p.version().matches(spec.version())).toList();
+            Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, builds, true);
+            Set<Verdict> shown = java.util.EnumSet.noneOf(Verdict.class);
+            for (Pkg p : builds) {
+                String installedMark = mark(installed, p.version(), p.vendor(), fx);
+                Verdict v = verdicts.getOrDefault(p, Verdict.UNKNOWN);
+                String note = !installedMark.isEmpty() ? "" : v.note;
+                if (!note.isEmpty()) {
+                    shown.add(v);
+                }
+                ctx.out.println(p.version() + installedMark + note);
+            }
+            legendForRefused(ctx, shown);
+        }
+    }
+
+    /** What install would do with a build, as far as search can tell before downloading it. */
+    enum Verdict {
+        /** Installs: a checksum, or a publisher signature jkit checks. */
+        OK(""),
+        /** Refused without --allow-unverified: no checksum and no signature jkit can check. */
+        UNVERIFIED("  ○ no checksum"),
+        /** Refused outright: no build that matches has a direct download. */
+        NO_DOWNLOAD("  – no direct download"),
+        /** Not looked up (offline and not cached, or the lookup failed): shown as available. */
+        UNKNOWN("");
+
+        final String note;
+
+        Verdict(String note) {
+            this.note = note;
+        }
+    }
+
+    /** How many builds search looks up at once: each is a small request, cached for 24 h. */
+    static final int LOOKUP_THREADS = 8;
+
+    /**
+     * What install would do with each of {@code pkgs}: one cached lookup each, {@link
+     * #LOOKUP_THREADS} at a time. {@code exact}: that very build (a vendor's build list); otherwise
+     * what install picks for the version typed (the newest matching build with a direct download).
+     */
+    Map<Pkg, Verdict> verdicts(Context ctx, FoojaySource foojay, List<Pkg> pkgs, boolean exact) {
+        Map<Pkg, Verdict> out = new java.util.concurrent.ConcurrentHashMap<>();
+        if (pkgs.isEmpty()) {
+            return out;
+        }
+        java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<String> why = new java.util.concurrent.atomic.AtomicReference<>();
+        boolean offline = ctx.http().offline();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(
+                Math.min(LOOKUP_THREADS, pkgs.size()), r -> {
+                    Thread t = new Thread(r, "jkit-search-lookup");
+                    t.setDaemon(true);
+                    return t;
+                });
+        try {
+            List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            for (Pkg p : pkgs) {
+                futures.add(pool.submit(() -> {
+                    try {
+                        FoojaySource.Availability a = exact ? foojay.availability(p)
+                                : foojay.availability(p, spec.version(), ctx.platform, fx, pre);
+                        out.put(p, verdict(a));
+                    } catch (java.io.IOException | RuntimeException e) {
+                        // offline and not cached, or the lookup failed: the build is listed as before
+                        if (!offline) {
+                            failed.incrementAndGet();
+                            why.compareAndSet(null, String.valueOf(e.getMessage()));
+                        }
+                    }
+                }));
+            }
+            for (java.util.concurrent.Future<?> f : futures) {
+                try {
+                    f.get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    // each task catches its own failures
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
             }
+        } finally {
+            pool.shutdownNow();
+        }
+        if (failed.get() > 0) {
+            ctx.err.println("warning: couldn't check " + failed.get() + " of " + pkgs.size()
+                    + " builds for a checksum (" + dev.jkit.model.Visible.of(why.get())
+                    + "); they're listed as available");
+        }
+        return out;
+    }
+
+    Verdict verdict(FoojaySource.Availability a) {
+        if (!a.downloadable()) {
+            return Verdict.NO_DOWNLOAD;
+        }
+        boolean signed = a.signature() != null
+                && dev.jkit.core.Signatures.owner(spec.tool(), a.pkg().vendor()) != null;
+        return a.checksum() || signed ? Verdict.OK : Verdict.UNVERIFIED;
+    }
+
+    private void legendForRefused(Context ctx, Set<Verdict> shown) {
+        if (shown.contains(Verdict.UNVERIFIED)) {
+            ctx.out.println("○ no published checksum: install refuses it unless --allow-unverified");
+        }
+        if (shown.contains(Verdict.NO_DOWNLOAD)) {
+            ctx.out.println("– no direct download: get it from the vendor's site");
         }
     }
 
     private static final String AVAILABLE = "✓";
+    private static final String UNVERIFIED = "○";
     /** The most vendors search asks for a version's builds, one request each. */
     static final int MAX_VENDOR_LOOKUPS = 64;
     private static final String GAP = "  ";
 
     /** One column per major (maintained first, then end of life), one row per vendor. */
-    private void majorTable(Context ctx, List<Major> majors, List<Pkg> index, Vendor vendor,
+    private void majorTable(Context ctx, FoojaySource foojay, List<Major> majors, List<Pkg> index, Vendor vendor,
                             List<Installed> installed) {
         Map<Integer, Major> info = new TreeMap<>();
         majors.forEach(m -> info.put(m.major(), m));
         TreeSet<Integer> all = new TreeSet<>(java.util.Comparator.reverseOrder());
         Map<String, Set<Integer>> byVendor = new TreeMap<>();
+        Map<String, Pkg> newest = new LinkedHashMap<>(); // per vendor and major
         for (Pkg p : index) {
             all.add(p.major());
             byVendor.computeIfAbsent(p.vendor().name(), k -> new HashSet<>()).add(p.major());
+            newest.merge(p.vendor().name() + "|" + p.major(), p,
+                    (a, b) -> a.version().compareTo(b.version()) >= 0 ? a : b);
         }
         List<Integer> current = new ArrayList<>();
         List<Integer> ended = new ArrayList<>();
@@ -212,6 +326,13 @@ final class SearchCommand implements Callable<Integer> {
             ended.clear();
             byVendor.values().removeIf(set -> set.stream().noneMatch(current::contains));
         }
+        List<Pkg> shownPkgs = newest.values().stream()
+                .filter(p -> byVendor.containsKey(p.vendor().name()))
+                .filter(p -> current.contains(p.major()) || ended.contains(p.major()))
+                .toList();
+        Map<Pkg, Verdict> found = verdicts(ctx, foojay, shownPkgs, false);
+        Map<String, Verdict> verdicts = new java.util.HashMap<>();
+        found.forEach((p, v) -> verdicts.put(p.vendor().name() + "|" + p.major(), v));
 
         String chosen = vendor.name();
         List<String> vendors = new ArrayList<>();
@@ -242,15 +363,17 @@ final class SearchCommand implements Callable<Integer> {
             Set<Integer> has = byVendor.get(v);
             String label = v.equals(chosen) ? v + " *" : v;
             StringBuilder line = new StringBuilder(String.format("%-" + nameWidth + "s", label));
-            cells(line, current, has, v, installed, fx);
+            cells(line, current, has, v, installed, fx, verdicts);
             if (!ended.isEmpty()) {
                 line.append(GAP);
-                cells(line, ended, has, v, installed, fx);
+                cells(line, ended, has, v, installed, fx, verdicts);
             }
             ctx.out.println(line.toString().stripTrailing());
         }
         ctx.out.println();
-        ctx.out.println("✓ available   ● installed   ‾‾ LTS   * " + (vendorText == null ? "default vendor" : "chosen vendor"));
+        boolean anyUnverified = verdicts.containsValue(Verdict.UNVERIFIED);
+        ctx.out.println("✓ available   " + (anyUnverified ? "○ no checksum (needs --allow-unverified)   " : "")
+                + "● installed   ‾‾ LTS   * " + (vendorText == null ? "default vendor" : "chosen vendor"));
         ctx.out.println("versions per vendor: jkit search " + spec.tool().name().toLowerCase() + "@<major>");
     }
 
@@ -273,11 +396,15 @@ final class SearchCommand implements Callable<Integer> {
     }
 
     private static void cells(StringBuilder line, List<Integer> majors, Set<Integer> has, String vendor,
-                              List<Installed> installed, boolean fx) {
+                              List<Installed> installed, boolean fx, Map<String, Verdict> verdicts) {
         for (int i = 0; i < majors.size(); i++) {
             int major = majors.get(i);
             String n = String.valueOf(major);
-            String mark = !has.contains(major) ? " " : isInstalled(installed, major, vendor, fx) ? "●" : AVAILABLE;
+            Verdict verdict = verdicts.getOrDefault(vendor + "|" + major, Verdict.UNKNOWN);
+            String mark = !has.contains(major) ? " "
+                    : isInstalled(installed, major, vendor, fx) ? "●"
+                    : verdict == Verdict.NO_DOWNLOAD ? " "
+                    : verdict == Verdict.UNVERIFIED ? UNVERIFIED : AVAILABLE;
             line.append(i == 0 ? "" : " ").append(" ".repeat(n.length() - 1)).append(mark);
         }
     }
@@ -293,17 +420,27 @@ final class SearchCommand implements Callable<Integer> {
         return false;
     }
 
-    private void vendorRows(Context ctx, List<Pkg> index, Vendor vendor, List<Installed> installed) {
+    private void vendorRows(Context ctx, FoojaySource foojay, List<Pkg> index, Vendor vendor,
+                            List<Installed> installed) {
         TreeMap<String, Pkg> byVendor = new TreeMap<>();
         for (Pkg p : index) {
             byVendor.put(p.vendor().name(), p);
         }
+        Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, new ArrayList<>(byVendor.values()), false);
+        Set<Verdict> shown = java.util.EnumSet.noneOf(Verdict.class);
         for (Pkg p : byVendor.values()) {
             String name = p.vendor().equals(vendor) ? p.vendor().name() + " *" : p.vendor().name();
-            ctx.out.println(String.format("%-16s %s", name, p.version() + mark(installed, p.version(), p.vendor(), fx)));
+            String installedMark = mark(installed, p.version(), p.vendor(), fx);
+            Verdict v = verdicts.getOrDefault(p, Verdict.UNKNOWN);
+            String note = installedMark.isEmpty() ? v.note : "";
+            if (!note.isEmpty()) {
+                shown.add(v);
+            }
+            ctx.out.println(String.format("%-16s %s", name, p.version() + installedMark + note));
         }
         ctx.out.println("* default vendor   ● installed   · all builds of one vendor: jkit search "
                 + spec + " <vendor>");
+        legendForRefused(ctx, shown);
     }
 
     private void grouped(Context ctx, List<Version> versions) throws Exception {
