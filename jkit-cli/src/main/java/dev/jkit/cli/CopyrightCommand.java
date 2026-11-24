@@ -17,8 +17,8 @@ final class CopyrightCommand implements Callable<Integer> {
         System.out.println("Copyright (c) " + YEAR + " " + AUTHOR + " <" + EMAIL + ">");
         System.out.println("Released under the MIT License.");
         System.out.println("Website: " + WEBSITE);
-        System.out.println("Includes Jackson, Apache Commons, picocli, tomlj, ANTLR and the GraalVM runtime, under their");
-        System.out.println("own licenses: see THIRD-PARTY-NOTICES next to the binary, or");
+        System.out.println("Includes Jackson, Apache Commons, picocli, tomlj, ANTLR, Bouncy Castle and the GraalVM runtime,");
+        System.out.println("under their own licenses: see THIRD-PARTY-NOTICES next to the binary, or");
         System.out.println("https://github.com/adriandeleon/jkit/blob/main/THIRD-PARTY-NOTICES");
         return 0;
     }

@@ -77,7 +77,11 @@ class SelfUpdateTest {
         assertThat(SelfUpdate.detect(Path.of("/home/linuxbrew/.linuxbrew/Cellar/jkit/0.3.0/bin/jkit"),
                 Platform.LINUX_X64, p -> false)).isEqualTo(SelfUpdate.Kind.HOMEBREW);
         assertThat(SelfUpdate.detect(Path.of("/usr/bin/jkit"), Platform.LINUX_X64, dpkg::contains))
+                .isEqualTo(SelfUpdate.Kind.DEB_FILE); // installed from a file: apt has nowhere to upgrade it from
+        Set<Path> vitrina = Set.of(Path.of("/var/lib/dpkg/info/jkit.list"), Path.of("/etc/apt/sources.list.d/vitrina.sources"));
+        assertThat(SelfUpdate.detect(Path.of("/usr/bin/jkit"), Platform.LINUX_X64, vitrina::contains))
                 .isEqualTo(SelfUpdate.Kind.DEB);
+        assertThat(SelfUpdate.Kind.DEB_FILE.id()).isEqualTo("deb");
         assertThat(SelfUpdate.detect(Path.of("/usr/bin/jkit"), Platform.LINUX_X64, rpm::contains))
                 .isEqualTo(SelfUpdate.Kind.RPM);
         assertThat(SelfUpdate.detect(Path.of("C:/Users/me/AppData/Local/Microsoft/WinGet/Packages/AdrianDeLeon.jkit_x/jkit.exe"),
@@ -92,7 +96,13 @@ class SelfUpdateTest {
         assertThat(SelfUpdate.Kind.HOMEBREW.command(r, Platform.LINUX_X64)).isEqualTo("brew upgrade jkit");
         assertThat(SelfUpdate.Kind.RPM.command(r, Platform.LINUX_X64)).isEqualTo(
                 "sudo dnf install https://github.com/adriandeleon/jkit/releases/download/v0.4.0/jkit-0.4.0-1.x86_64.rpm");
+        assertThat(SelfUpdate.Kind.DEB_FILE.command(r, Platform.LINUX_AARCH64)).isEqualTo(
+                "curl -fLo /tmp/jkit_0.4.0_arm64.deb https://github.com/adriandeleon/jkit/releases/download/v0.4.0/"
+                        + "jkit_0.4.0_arm64.deb && sudo apt install /tmp/jkit_0.4.0_arm64.deb");
         assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64)).isNull();
+        // a pre-release's package names, as GitHub publishes them
+        SelfUpdate.Release rc = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0-rc.1"), "x", "0".repeat(64));
+        assertThat(SelfUpdate.Kind.RPM.command(rc, Platform.LINUX_X64)).endsWith("/v0.4.0-rc.1/jkit-0.4.0.rc.1-1.x86_64.rpm");
     }
 
     /** A release archive whose jkit is a script printing {@code says}. */

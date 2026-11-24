@@ -139,4 +139,36 @@ class ConfigCommandTest {
         assertThat(output()).contains("\"schemaVersion\"").contains("\"key\" : \"jdk.vendor\"")
                 .contains("\"source\" : \"default\"").contains("\"envVariable\" : \"JKIT_JDK_VENDOR\"");
     }
+
+    @Test
+    void setAndUnsetCanRepairAWrongValue() throws Exception {
+        Files.createDirectories(home);
+        Files.writeString(home.resolve("config.toml"), "[jdk]\nvendor = \"zulu\"\n[shell]\nauto_switch = \"yes\"\n");
+        out.reset();
+        PrintStream print = new PrintStream(out, true, StandardCharsets.UTF_8);
+
+        // listing: the file's zulu isn't what jkit applies while the file is broken
+        Context broken = Context.lenient(env, print);
+        assertThat(ConfigCommand.effective(broken)).filteredOn(e -> e.setting().key().equals("jdk.vendor"))
+                .singleElement().satisfies(e -> {
+                    assertThat(e.value()).isEqualTo("temurin");
+                    assertThat(e.source()).isEqualTo("default");
+                    assertThat(e.inFile()).isEqualTo("zulu");
+                });
+        ConfigCommand.list(broken, true);
+        assertThat(output()).contains("\"error\" : \"invalid").contains("auto_switch must be true or false");
+
+        ConfigCommand.Set set = new ConfigCommand.Set();
+        set.key = "shell.auto_switch";
+        set.value = "true";
+        assertThat(set.run(Context.forConfigEdit(env, print, true))).isZero();
+        assertThat(home.resolve("config.toml")).content().contains("auto_switch = true").contains("vendor = \"zulu\"");
+        assertThat(get("jdk.vendor")).isEqualTo("zulu"); // a strict context loads it again
+
+        Files.writeString(home.resolve("config.toml"), "[shell]\nauto_switch = 3\n");
+        ConfigCommand.Unset unset = new ConfigCommand.Unset();
+        unset.key = "shell.auto_switch";
+        assertThat(unset.run(Context.forConfigEdit(env, print, true))).isZero();
+        assertThat(home.resolve("config.toml")).content().doesNotContain("auto_switch");
+    }
 }

@@ -51,25 +51,35 @@ matters:
   a compromised download source, mirror or foojay entry, not only tampering in transit.
   - A signature by the publisher's key that doesn't match the download stops the install.
   - A signature jkit can't fetch, read, or tie to the publisher's keys (a new key, a weak hash)
-    leaves the checksum as the only check, and the install says so. Expect this most from Maven:
-    each release is signed by whichever Apache release manager cut it, so a release by someone new
-    installs with that warning until a jkit release adds their key. A Maven mirror
-    (`JKIT_SOURCES_MAVEN_URL`) that doesn't serve the `.asc` files gives it too. jkit pins the keys
+    also stops the install: the checksum usually comes from the same server as the download, so
+    whoever can replace one can replace both, and a missing signature is exactly what they would
+    serve. `--allow-unverified` installs it anyway, on the checksum alone, marked unverified, and
+    says why. Expect this most from Maven: each release is signed by whichever Apache release
+    manager cut it, so a release by someone new is refused until a jkit release adds their key
+    (`jkit self-update`). A Maven mirror (`JKIT_SOURCES_MAVEN_URL`) that doesn't serve the `.asc`
+    files is refused too. jkit pins the keys
     rather than fetching the KEYS file, because a file fetched at install time is only as
     trustworthy as the server it comes from.
   - Maven releases before 3.9.0 aren't checked: they were signed with SHA-1, DSA-1024 keys, or
     keys that have since expired. Other JDK vendors aren't checked (foojay lists no signatures for
     them), nor is Gradle, which publishes none.
+  - Temurin and Microsoft builds are checked when foojay lists a signature for them, as it does
+    for current builds; one foojay lists without a signature is checked against its checksum only.
   - Where there is a checksum, the signature is checked as well, never instead of it. Corretto
     publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
-    installs it, counted as verified, and a signature jkit can't fetch or check refuses it, the
-    same as a download with no checksum, unless you pass `--allow-unverified`.
+    installs it, counted as verified. Amazon's signature covers the file, not its name, so jkit
+    also checks that the unpacked JDK's `release` file reports the version it asked for.
 - `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
   against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
-  version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same
-  place as the archive; the release's build attestation is not checked (`gh attestation verify`
-  does that by hand). A jkit installed with Homebrew, apt, dnf or winget is left to that tool.
+  version before it replaces the old one. `SHA256SUMS` comes from the same place as the archive,
+  so jkit first checks `SHA256SUMS.asc`, the release workflow's OpenPGP signature of it, against
+  jkit's release key, built into jkit (`A944 4E8F 5048 FEBC B942 E110 FC89 EBE6 8C45 39E6`, in
+  `jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc`):
+  someone who could replace the files on the releases page couldn't sign them. A release without
+  a good signature is refused. Releases before 0.4.0 have no `SHA256SUMS.asc`. Each release also
+  has a build attestation (`gh attestation verify <file> --repo adriandeleon/jkit`). A jkit
+  installed with Homebrew, apt, dnf or winget is left to that tool.
 
 ## Project files
 

@@ -197,11 +197,28 @@ jobs:
             echo "::warning::jkit search maven failed (network?)"
           fi
           # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
-          for cmd in "list --json" "status --json" "env --json --no-project" "doctor --json"; do
+          for cmd in "list --json" "status --json" "env --json --no-project" "doctor --json" "config --json" \
+                     "prune --dry-run --json"; do
             doc=$("$jkit" $cmd) || { echo "::error::jkit $cmd failed"; exit 1; }
             printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
               || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
           done
+          # signature checks run BouncyCastle and the built-in keys, which only the native binary
+          # can show are there: a signed install must say whose signature it checked
+          if out=$("$jkit" install maven@3.9 --no-default 2>&1); then
+            printf '%s\n' "$out" | grep "signature checked: signed by Apache Maven" \
+              || { printf '%s\n' "$out"; echo "::error::jkit install maven checked no signature"; exit 1; }
+          elif printf '%s\n' "$out" | grep -qi signature; then
+            printf '%s\n' "$out"; echo "::error::jkit install maven failed its signature check"; exit 1
+          else
+            printf '%s\n' "$out"; echo "::warning::jkit install maven failed (network?)"
+          fi
+          # self-update reads the newest published release, which may predate signed SHA256SUMS
+          if doc=$("$jkit" self-update --check --json); then
+            printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1'
+          else
+            echo "::warning::jkit self-update --check failed (network, or the newest release has no SHA256SUMS.asc)"
+          fi
           if [ "$RUNNER_OS" = Windows ]; then "$jkit" hook pwsh > /dev/null; else "$jkit" hook bash > /dev/null; fi
           if command -v file > /dev/null; then file "$jkit"; fi
           if [ "$RUNNER_OS" = macOS ]; then
@@ -508,6 +525,8 @@ jobs:
       && needs.macos-pack.result == 'success' && needs.packaging-check.result == 'success'
     outputs:
       latest: ${{ steps.publish.outputs.latest }}
+    # JKIT_RELEASE_KEY lives in this environment, limited to v* tags (Settings → Environments)
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
@@ -530,6 +549,42 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+
+      # Only the file that says which key jkit trusts: the release job runs no build code
+      - name: Check out jkit's release key fingerprint
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+          sparse-checkout: jkit-core/src/main/java/dev/jkit/core/Signatures.java
+          sparse-checkout-cone-mode: false
+
+      # jkit self-update refuses a release whose SHA256SUMS isn't signed by the key built into it.
+      # JKIT_RELEASE_KEY is that key's armored secret key, without a passphrase
+      # (gpg --armor --export-secret-keys <fingerprint>); its fingerprint is JKIT_FINGERPRINT in
+      # Signatures.java, and the public key is jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc.
+      - name: Sign SHA256SUMS
+        env:
+          RELEASE_KEY: ${{ secrets.JKIT_RELEASE_KEY }}
+        run: |
+          if [ -z "$RELEASE_KEY" ]; then
+            echo "::error::the JKIT_RELEASE_KEY secret isn't set: jkit self-update would refuse this release"
+            exit 1
+          fi
+          expected=$(sed -n 's/.*JKIT_FINGERPRINT = "\([0-9A-F]\{40\}\)".*/\1/p' src/jkit-core/src/main/java/dev/jkit/core/Signatures.java)
+          if [ -z "$expected" ]; then
+            echo "::error::no 40-digit JKIT_FINGERPRINT in Signatures.java"
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$RELEASE_KEY" | gpg --batch --quiet --import
+          cd dist
+          gpg --batch --yes --local-user "$expected!" --digest-algo SHA512 --armor --detach-sign \
+            --output SHA256SUMS.asc SHA256SUMS
+          gpg --batch --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -E "^\[GNUPG:\] VALIDSIG .* $expected$" \
+            || { echo "::error::SHA256SUMS.asc isn't signed by $expected"; exit 1; }
+          rm -rf "$GNUPGHOME" ../src
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

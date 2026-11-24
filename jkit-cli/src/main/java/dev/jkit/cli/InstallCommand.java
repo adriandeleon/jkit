@@ -42,7 +42,7 @@ final class InstallCommand implements Callable<Integer> {
     boolean noDefault;
 
     @Option(names = "--allow-unverified",
-            description = "Install even when the source publishes no checksum for the download.")
+            description = "Install even when the download has no published checksum, or its publisher's signature can't be checked.")
     boolean allowUnverified;
 
     @Mixin
@@ -55,8 +55,9 @@ final class InstallCommand implements Callable<Integer> {
      * Downloads and installs {@code artifact}, saying beforehand what can't be checked: no checksum
      * at all is refused unless {@code allowUnverified} ({@code retry} is the command that allows it),
      * md5 or sha1 only is a warning. A project's jkit sync must not install unchecked code unasked.
-     * A download with no checksum but a signature jkit can check (Corretto) is checked by that
-     * signature alone, and refused if it can't be.
+     * A download its publisher signs, with a key built into jkit, must have a good signature too:
+     * one that can't be fetched or checked refuses it unless {@code allowUnverified}. With no
+     * checksum (Corretto) the signature is the only check.
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
@@ -65,9 +66,10 @@ final class InstallCommand implements Callable<Integer> {
                     "run the command without --offline");
         }
         String signer = signer(artifact);
-        boolean signatureRequired = false;
+        // the publisher signs it: a signature jkit can't fetch or check refuses the install, since
+        // whoever can replace the download can usually replace its checksum next to it too
+        boolean signatureRequired = signer != null && !allowUnverified;
         if (artifact.checksum() == null && signer != null) {
-            signatureRequired = !allowUnverified;
             ctx.err.println("note: " + artifact.label() + " has no published checksum; checking " + signer
                     + "'s signature instead");
         } else if (artifact.checksum() == null) {
@@ -91,7 +93,7 @@ final class InstallCommand implements Callable<Integer> {
         }
     }
 
-    /** Whose signature can stand in for a missing checksum of {@code artifact}, or null. */
+    /** Whose signature checks {@code artifact} (and can stand in for a missing checksum), or null. */
     static String signer(Artifact artifact) {
         return artifact.signature() == null ? null
                 : dev.jkit.core.Signatures.owner(artifact.tool(), artifact.vendor());

@@ -22,7 +22,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "config", description = {"Shows and changes the settings in ~/.jkit/config.toml.",
+@Command(name = "config", description = {"Shows and changes the settings in config.toml, in jkit's home.",
         "With no subcommand, lists every setting, its value and where that comes from.",
         "Keys: jdk.vendor, graalvm.vendor, shell.auto_switch."},
         subcommands = {ConfigCommand.ListSettings.class, ConfigCommand.Get.class, ConfigCommand.Set.class,
@@ -48,7 +48,8 @@ final class ConfigCommand implements Callable<Integer> {
             String inFile = raw == null ? null : raw.toString();
             String inEnv = ctx.env.get(s.env);
             inEnv = inEnv == null || inEnv.isBlank() ? null : inEnv;
-            String source = inEnv != null ? "env" : inFile != null ? "file" : "default";
+            // a config.toml jkit can't use counts for nothing: its values aren't the ones applied
+            String source = inEnv != null ? "env" : inFile != null && ctx.configError == null ? "file" : "default";
             all.add(new Effective(s, s.value(ctx.config), source, inFile, inEnv));
         }
         return all;
@@ -81,6 +82,7 @@ final class ConfigCommand implements Callable<Integer> {
         if (asJson) {
             Map<String, Object> doc = JsonOut.document();
             doc.put("file", ctx.home.config());
+            doc.put("error", ctx.configError);
             doc.put("settings", all.stream().map(ConfigCommand::json).toList());
             ctx.out.println(JsonOut.write(doc));
             return 0;
@@ -171,7 +173,7 @@ final class ConfigCommand implements Callable<Integer> {
         }
     }
 
-    @Command(name = "set", description = {"Sets a value in ~/.jkit/config.toml, keeping comments and order.",
+    @Command(name = "set", description = {"Sets a value in config.toml, keeping comments and order.",
             "jkit config set jdk.vendor zulu",
             "jkit config set shell.auto_switch true"})
     static final class Set implements Callable<Integer> {
@@ -186,7 +188,7 @@ final class ConfigCommand implements Callable<Integer> {
 
         @Override
         public Integer call() throws Exception {
-            return run(Context.create(false, false));
+            return run(Context.forConfigEdit(dev.jkit.model.Envs.system(), System.out, false));
         }
 
         int run(Context ctx) throws Exception {
@@ -211,7 +213,7 @@ final class ConfigCommand implements Callable<Integer> {
         }
     }
 
-    @Command(name = "unset", description = {"Removes a setting from ~/.jkit/config.toml: the default applies.",
+    @Command(name = "unset", description = {"Removes a setting from config.toml: the default applies.",
             "A table left empty goes too; comments and the other settings stay."})
     static final class Unset implements Callable<Integer> {
         @Parameters(index = "0", paramLabel = "<key>", completionCandidates = Keys.class)
@@ -222,7 +224,7 @@ final class ConfigCommand implements Callable<Integer> {
 
         @Override
         public Integer call() throws Exception {
-            return run(Context.create(false, true));
+            return run(Context.forConfigEdit(dev.jkit.model.Envs.system(), System.out, true));
         }
 
         int run(Context ctx) throws Exception {

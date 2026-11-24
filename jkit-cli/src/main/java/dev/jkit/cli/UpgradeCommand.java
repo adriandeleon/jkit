@@ -57,7 +57,7 @@ final class UpgradeCommand implements Callable<Integer> {
     boolean fx;
 
     @Option(names = "--allow-unverified",
-            description = "Install upgrades even when the source publishes no checksum for the download.")
+            description = "Install upgrades even when a download has no published checksum, or its publisher's signature can't be checked.")
     boolean allowUnverified;
 
     @Option(names = "--pre", description = "Allow pre-releases.")
