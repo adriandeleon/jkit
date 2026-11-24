@@ -1,4 +1,9 @@
-# jkit
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/jkit-wordmark-dark.svg">
+    <img src="branding/jkit-wordmark.svg" alt="jkit" height="72">
+  </picture>
+</h1>
 
 Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
 globally. One native binary, no JDK needed to run it.
