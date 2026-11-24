@@ -117,7 +117,7 @@ vendor = "temurin"        # default JDK vendor
 [graalvm]
 vendor = "graalvm-ce"     # default GraalVM vendor
 [shell]
-auto_switch = true        # switch to a project's versions on cd (jkit hook --install --auto-switch)
+auto_switch = true        # switch to a project's versions on cd (default false; jkit hook --install --auto-switch)
 ```
 
 `jkit config` lists each setting, its value and where it comes from; `jkit config set jdk.vendor zulu`

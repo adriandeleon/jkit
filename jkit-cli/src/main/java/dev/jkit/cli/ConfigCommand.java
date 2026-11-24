@@ -286,10 +286,17 @@ final class ConfigCommand implements Callable<Integer> {
             return on.toString();
         }
         Vendor vendor = Vendor.of(value);
-        if (value.isBlank() || !Vendor.isSafeName(vendor.foojayName())) {
-            throw new JkitException("'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
+        JkitException notAVendor = new JkitException("'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
+        if (value.isBlank()) {
+            throw notAVendor;
         }
+        // A name like "SAP Machine" isn't safe as typed, but foojay may know it as a synonym, as
+        // jkit install does; only foojay's answer can make it usable.
+        boolean safe = Vendor.isSafeName(vendor.foojayName());
         if (s == Setting.GRAALVM_VENDOR) {
+            if (!safe) {
+                throw notAVendor;
+            }
             if (!vendor.isGraalVmBased()) {
                 throw new JkitException(vendor.name() + " doesn't include native-image, so it can't be the GraalVM vendor",
                         "GraalVM vendors: " + Vendor.graalVmVendorList());
@@ -301,6 +308,9 @@ final class ConfigCommand implements Callable<Integer> {
         } catch (IOException | JkitException e) {
             if (e instanceof JkitException je && !je.getMessage().startsWith("--offline")) {
                 throw je; // foojay answered: not a vendor it knows
+            }
+            if (!safe) {
+                throw notAVendor;
             }
             report.note("couldn't check " + vendor.name() + " against foojay's vendor list (" + e.getMessage()
                     + "); set anyway");
