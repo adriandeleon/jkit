@@ -118,7 +118,7 @@ final class RemoveCommand implements Callable<Integer> {
     }
 
     /** Removes one install and its global links; prints and returns what changed. */
-    private static Changes remove(Context ctx, Installed i, ToolStates.Result here, java.io.PrintStream say)
+    static Changes remove(Context ctx, Installed i, ToolStates.Result here, java.io.PrintStream say)
             throws IOException {
         Changes removedLinks = new Changes(ctx);
         dev.jkit.model.Perms.mkdirs(ctx.home.tmp());
