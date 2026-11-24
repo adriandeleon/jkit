@@ -1,4 +1,9 @@
-# jkit
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/jkit-wordmark-dark.svg">
+    <img src="branding/jkit-wordmark.svg" alt="jkit" height="72">
+  </picture>
+</h1>
 
 Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
 globally. One native binary, no JDK needed to run it.
@@ -28,6 +33,7 @@ jkit exec jdk@17 -- mvn test           # one command, no shell change (scripts, 
 jkit status                            # what's active here, and why
 jkit doctor                            # what's wrong with the setup, and how to fix it
 jkit upgrade                           # newest build within each installed release (21.0.5 → 21.0.9)
+jkit prune --dry-run                   # what old builds, leftovers and old cache prune would remove
 ```
 
 ## Install
@@ -139,7 +145,7 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 ## Not yet
 
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
-completion, `prune`, self-update, vendor signature checks, and Windows on ARM
+completion, self-update, vendor signature checks, and Windows on ARM
 natively.
 
 ## Build

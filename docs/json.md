@@ -361,6 +361,21 @@ each place holds, null where unset. Keys: `jdk.vendor`, `graalvm.vendor`, `shell
 `jkit config get <key> --json` prints one of those objects as the document. `jkit config set <key>
 <value> --json` and `jkit config unset <key> --json` print it as it is after the change, plus
 `changed` (false when the file already said so), `changes` and `notes`.
+## `jkit prune [--dry-run] --json`
+
+```json
+{ "schemaVersion": 1, "dryRun": false,
+  "builds": [ { "install": { "...": "the install object, as it was before removal" },
+                "newer": "21.0.9+10", "bytes": 201326592 } ],
+  "leftovers": [ "/home/me/.jkit/tmp/install-4821" ],
+  "cache": [ "/home/me/.jkit/index/0a579b56721481afc1486ff0.cache" ],
+  "bytes": 201330000, "changes": [], "notes": [] }
+```
+
+`builds` are installs with a newer stable build in the same release line (`newer`), other than a
+global one, one this shell uses, or one the project here pins. `leftovers` are folders interrupted
+installs and removals left; `cache` the cached version lists older than 30 days. `bytes` is the
+space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 
