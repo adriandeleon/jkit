@@ -26,6 +26,7 @@ import picocli.CommandLine.Command;
             DoctorCommand.class,
             RemoveCommand.class,
             PruneCommand.class,
+            ConfigCommand.class,
             HookCommand.class,
             CompletionCommand.class,
             CopyrightCommand.class,
