@@ -99,6 +99,11 @@ public final class SelfUpdate {
         try {
             signature = http.getFresh(release.url(base, "SHA256SUMS.asc"));
         } catch (IOException | JkitException e) {
+            if (e instanceof dev.jkit.sources.HttpStatusException status && status.status() == 404) {
+                // releases before 0.4.0 have none, and waiting won't make one appear
+                throw new JkitException("jkit " + release.version() + " has no signed SHA256SUMS (no SHA256SUMS.asc"
+                        + " on its release page), so jkit can't check it; nothing was changed", hint);
+            }
             throw new JkitException("couldn't fetch the signature of " + what + " ("
                     + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + "); nothing was changed",
                     "try again later", "or " + hint);

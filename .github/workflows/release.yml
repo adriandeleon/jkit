@@ -213,11 +213,11 @@ jobs:
           else
             printf '%s\n' "$out"; echo "::warning::jkit install maven failed (network?)"
           fi
-          # self-update reads the newest published release, which may predate signed SHA256SUMS
+          # self-update --check reads the newest published release (it needs no signature to say so)
           if doc=$("$jkit" self-update --check --json); then
             printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1'
           else
-            echo "::warning::jkit self-update --check failed (network, or the newest release has no SHA256SUMS.asc)"
+            echo "::warning::jkit self-update --check failed (network?)"
           fi
           if [ "$RUNNER_OS" = Windows ]; then "$jkit" hook pwsh > /dev/null; else "$jkit" hook bash > /dev/null; fi
           if command -v file > /dev/null; then file "$jkit"; fi

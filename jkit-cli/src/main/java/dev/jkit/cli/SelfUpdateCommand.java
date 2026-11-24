@@ -57,7 +57,8 @@ final class SelfUpdateCommand implements Callable<Integer> {
         URI base = ctx.url("JKIT_SOURCES_RELEASES_URL", SelfUpdate.DEFAULT_BASE);
         String sums = ctx.http().getFresh(SelfUpdate.sumsUrl(base));
         SelfUpdate.Release latest = SelfUpdate.parse(sums, ctx.platform);
-        SelfUpdate.requireSigned(ctx.http(), base, latest, sums, sumsCheck);
+        // the signature guards the binary jkit is about to run, so it's checked just before the
+        // download: saying a release is out, or which command updates it, needs no trust in it
         boolean newer = SelfUpdate.newer(latest, current);
         String how = kind.command(latest, ctx.platform);
         String status;
@@ -78,6 +79,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
             say.println("  " + how);
         } else {
             status = "updated";
+            SelfUpdate.requireSigned(ctx.http(), base, latest, sums, sumsCheck);
             Path old = update(ctx, base, latest, binary, report);
             say.println("updated jkit " + current + " → " + latest.version() + " at " + Changes.tilde(binary.toString()));
             if (old != null) {
