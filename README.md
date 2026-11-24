@@ -90,7 +90,8 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   warning, marked unverified; a download with no checksum is refused unless you pass
   `--allow-unverified`. Temurin, Microsoft and Corretto builds, Maven 3.9.0 and later, and sbt
   are also checked against their publisher's OpenPGP signature, with keys built into jkit; a
-  signature that doesn't match stops the install. See [SECURITY.md](SECURITY.md).
+  signature that doesn't match stops the install. Corretto publishes no checksum, so its
+  signature is the check. See [SECURITY.md](SECURITY.md).
 
 | Path | What |
 | --- | --- |

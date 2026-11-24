@@ -32,7 +32,8 @@ matters:
 - A download whose only checksum is SHA-1 (or MD5, where the source lists one) is installed but
   marked unverified. For Maven, jkit asks the repository for `.sha512` and, for releases older
   than 3.9.1, `.sha1`; a mirror that has only `.md5` counts as having no checksum.
-- A download with no checksum at all is refused unless you pass `--allow-unverified`.
+- A download with no checksum at all is refused unless you pass `--allow-unverified`, or unless
+  its publisher's signature checks out (Corretto, below).
 - Some downloads are also checked against their publisher's detached OpenPGP signature, using
   keys built into jkit. Each key was taken from where the publisher's own documentation points and
   confirmed by verifying real downloads with it:
@@ -58,9 +59,12 @@ matters:
     trustworthy as the server it comes from.
   - Maven releases before 3.9.0 aren't checked: they were signed with SHA-1, DSA-1024 keys, or
     keys that have since expired. Other JDK vendors aren't checked (foojay lists no signatures for
-    them), nor is Gradle, which publishes none. Signatures are checked as well as checksums, never
-    instead of them: Corretto, which publishes no per-version checksum that foojay lists, still
-    needs `--allow-unverified`, and its signature is then the check that does run.
+    them), nor is Gradle, which publishes none.
+  - Where there is a checksum, the signature is checked as well, never instead of it. Corretto
+    publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
+    latest build), so for Corretto the signature is the check: a good signature by Amazon's key
+    installs it, counted as verified, and a signature jkit can't fetch or check refuses it, the
+    same as a download with no checksum, unless you pass `--allow-unverified`.
 - `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
   against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
   version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same

@@ -130,8 +130,10 @@ final class SyncCommand implements Callable<Integer> {
         Artifact artifact = InstallCommand.artifact(ctx, pin.spec(), Resolve.knownVendor(ctx, pin.spec(), vendorName),
                 pin.fx(), pre);
         if (dryRun) {
-            // the real sync refuses a download it can't check; offline, the checksum isn't looked up
-            boolean refused = artifact.checksum() == null && !allowUnverified && !ctx.http().offline();
+            // the real sync refuses a download it can't check; offline, the checksum isn't looked up.
+            // One with a signature jkit can check (Corretto) is checked by that instead
+            boolean refused = artifact.checksum() == null && InstallCommand.signer(artifact) == null
+                    && !allowUnverified && !ctx.http().offline();
             return new Step(pin, refused ? "would-refuse" : "would-install", artifact.label(), null);
         }
         Installer.Result result = InstallCommand.download(ctx, artifact, allowUnverified, "jkit sync --allow-unverified");

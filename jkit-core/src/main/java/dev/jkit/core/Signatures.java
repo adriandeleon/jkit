@@ -123,6 +123,12 @@ public final class Signatures {
         return key(tool, vendor) != null;
     }
 
+    /** Whose keys check these downloads ("Amazon"), or null when jkit has none. */
+    public static String owner(Tool tool, Vendor vendor) {
+        Key key = key(tool, vendor);
+        return key == null ? null : key.owner();
+    }
+
     private static Key key(Tool tool, Vendor vendor) {
         return KEYS.stream()
                 .filter(k -> vendor != null ? vendor.foojayName().equals(k.vendor()) : k.tool() != null && k.tool() == tool)

@@ -188,6 +188,9 @@ class SignaturesTest {
         assertThat(Signatures.covers(Tool.SBT, null)).isTrue();
         assertThat(Signatures.covers(Tool.GRADLE, null)).isFalse(); // Gradle publishes none
         assertThat(Signatures.covers(Tool.JDK, null)).isFalse();
+        assertThat(Signatures.owner(Tool.JDK, Vendor.of("corretto"))).isEqualTo("Amazon");
+        assertThat(Signatures.owner(Tool.MAVEN, null)).isEqualTo("Apache Maven");
+        assertThat(Signatures.owner(Tool.JDK, Vendor.of("zulu"))).isNull();
     }
 
     private static byte[] resource(String name) throws Exception {
