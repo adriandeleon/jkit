@@ -242,9 +242,19 @@ final class DoctorCommand implements Callable<Integer> {
             r.warn(problem, "set jdk.vendor / graalvm.vendor in " + tilde(file) + ", or JKIT_JDK_VENDOR");
         }
         if (problems.isEmpty()) {
-            r.ok("default vendors: " + r.ctx.config.defaultVendor(Tool.JDK) + " (jdk), "
-                    + r.ctx.config.defaultVendor(Tool.GRAALVM) + " (graalvm)"
-                    + (Files.isRegularFile(file) ? ", from " + tilde(file) : "")
+            // where each comes from, as jkit config says: config.toml may hold other settings only
+            Map<dev.jkit.core.Config.Setting, String> from = new java.util.EnumMap<>(dev.jkit.core.Config.Setting.class);
+            for (ConfigCommand.Effective e : ConfigCommand.effective(r.ctx)) {
+                from.put(e.setting(), switch (e.source()) {
+                    case "env" -> "from " + e.setting().env;
+                    case "file" -> "from " + tilde(file);
+                    default -> "default";
+                });
+            }
+            r.ok("default vendors: " + r.ctx.config.defaultVendor(Tool.JDK) + " (jdk, "
+                    + from.get(dev.jkit.core.Config.Setting.JDK_VENDOR) + "), "
+                    + r.ctx.config.defaultVendor(Tool.GRAALVM) + " (graalvm, "
+                    + from.get(dev.jkit.core.Config.Setting.GRAALVM_VENDOR) + ")"
                     + (checked ? "" : "; not checked against foojay: no cached vendor list yet"));
         }
     }

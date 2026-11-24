@@ -120,7 +120,8 @@ final class ConfigCommand implements Callable<Integer> {
         if (s == null) {
             List<String> keys = Arrays.stream(Setting.values()).map(Setting::key).toList();
             String guess = Suggest.closest(key, keys);
-            throw new JkitException("unknown setting '" + key + "'",
+            // a bad argument, like an unknown vendor in config set jdk.vendor
+            throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown setting '" + key + "'",
                     guess != null ? "did you mean " + guess + "?" : "settings: " + String.join(", ", keys));
         }
         return s;
@@ -281,12 +282,12 @@ final class ConfigCommand implements Callable<Integer> {
         if (s.isSwitch()) {
             Boolean on = Config.parseSwitch(value);
             if (on == null) {
-                throw new JkitException(s.key() + " must be true or false, not '" + value + "'");
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, s.key() + " must be true or false, not '" + value + "'");
             }
             return on.toString();
         }
         Vendor vendor = Vendor.of(value);
-        JkitException notAVendor = new JkitException("'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
+        JkitException notAVendor = new JkitException(picocli.CommandLine.ExitCode.USAGE, "'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
         if (value.isBlank()) {
             throw notAVendor;
         }
@@ -298,7 +299,7 @@ final class ConfigCommand implements Callable<Integer> {
                 throw notAVendor;
             }
             if (!vendor.isGraalVmBased()) {
-                throw new JkitException(vendor.name() + " doesn't include native-image, so it can't be the GraalVM vendor",
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, vendor.name() + " doesn't include native-image, so it can't be the GraalVM vendor",
                         "GraalVM vendors: " + Vendor.graalVmVendorList());
             }
             return vendor.name();

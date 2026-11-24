@@ -38,4 +38,21 @@ class ErrorsTest {
         JkitException original = new JkitException(3, "no installed JDK matches 25");
         assertThat(Errors.describe(original)).isSameAs(original);
     }
+
+    @Test
+    void errorMessagesShowTheHomeFolderAsTilde() {
+        assertThat(Main.homeAsTilde("/home/ann/p5/jkit.toml:1: invalid TOML", "/home/ann"))
+                .isEqualTo("~/p5/jkit.toml:1: invalid TOML");
+        assertThat(Main.homeAsTilde("cannot create /home/ann: denied", "/home/ann")).isEqualTo("cannot create ~: denied");
+        assertThat(Main.homeAsTilde("in (/home/ann/x)", "/home/ann")).isEqualTo("in (~/x)");
+        // on any platform: a Windows home with either slash after it
+        assertThat(Main.homeAsTilde("C:\\Users\\ann\\p\\jkit.toml:1: bad", "C:\\Users\\ann"))
+                .isEqualTo("~\\p\\jkit.toml:1: bad");
+        assertThat(Main.homeAsTilde("C:\\Users\\ann/p/jkit.toml:1: bad", "C:\\Users\\ann"))
+                .isEqualTo("~/p/jkit.toml:1: bad");
+        // another user's folder, a longer name, or a path inside a word or quotes stays as it is
+        assertThat(Main.homeAsTilde("/home/anna/x and /srv/home/ann/x", "/home/ann"))
+                .isEqualTo("/home/anna/x and /srv/home/ann/x");
+        assertThat(Main.homeAsTilde("chmod o-w '/home/ann/.jkit'", "/home/ann")).isEqualTo("chmod o-w '/home/ann/.jkit'");
+    }
 }

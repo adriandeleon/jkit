@@ -109,6 +109,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
         try (AutoCloseable lock = ctx.store.lock()) {
             dev.jkit.model.Perms.mkdirs(ctx.home.tmp());
             Path work = Files.createTempDirectory(ctx.home.tmp(), "install-self-");
+            dev.jkit.core.WorkDirs.add(work);
             try {
                 Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
                 Path old = SelfUpdate.replace(fresh, binary, ctx.platform.isWindows());
@@ -122,6 +123,8 @@ final class SelfUpdateCommand implements Callable<Integer> {
                     Fs.deleteRecursively(work);
                 } catch (java.io.IOException e) {
                     // a leftover in tmp/ is cleaned up by the next install or jkit prune
+                } finally {
+                    dev.jkit.core.WorkDirs.remove(work);
                 }
             }
         }
