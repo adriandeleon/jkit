@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.sources.FoojaySource.Pkg;
 import dev.jkit.model.Platform;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
@@ -286,6 +287,74 @@ class SourcesTest {
                 .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("nor do the next 31 builds")
                 .satisfies(e -> assertThat(((dev.jkit.model.JkitException) e).hints())
                         .contains("an older build may have one: jkit install jdk@17.0.8 oracle"));
+    }
+
+    @Test
+    void availabilitySaysWhatInstallWouldFind() throws IOException {
+        Pkg b = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS)), FoojaySource.DEFAULT_BASE)
+                .builds(21, Vendor.of("temurin"), Platform.LINUX_X64, false, false).stream()
+                .filter(p -> p.id().equals("b")).findFirst().orElseThrow();
+        // a checksum in foojay's answer
+        FoojaySource.Availability a = new FoojaySource(fake(Map.of("ids/b", INFO)), FoojaySource.DEFAULT_BASE)
+                .availability(b);
+        assertThat(a.downloadable()).isTrue();
+        assertThat(a.checksum()).isTrue();
+        // a checksum file counts too, unread: install fetches it
+        String file = """
+                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
+                "checksum_uri":"https://example.invalid/b.tar.gz.sha256.txt"}]}""";
+        assertThat(new FoojaySource(fake(Map.of("ids/b", file)), FoojaySource.DEFAULT_BASE).availability(b).checksum())
+                .isTrue();
+        // neither: install refuses it without --allow-unverified
+        String bare = "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/b.tar.gz\",\"checksum\":\"\"}]}";
+        a = new FoojaySource(fake(Map.of("ids/b", bare)), FoojaySource.DEFAULT_BASE).availability(b);
+        assertThat(a.downloadable()).isTrue();
+        assertThat(a.checksum()).isFalse();
+        assertThat(a.signature()).isNull();
+        // a Corretto download has its .sig
+        String corretto = """
+                {"result":[{"direct_download_uri":"https://corretto.aws/downloads/resources/21.0.13.9.1/b.tar.gz",
+                "checksum":""}]}""";
+        assertThat(new FoojaySource(fake(Map.of("ids/b", corretto)), FoojaySource.DEFAULT_BASE).availability(b)
+                .signature()).hasToString("https://corretto.aws/downloads/resources/21.0.13.9.1/b.tar.gz.sig");
+        // no link
+        assertThat(new FoojaySource(fake(Map.of("ids/b", "{\"result\":[{\"direct_download_uri\":\"\"}]}")),
+                FoojaySource.DEFAULT_BASE).availability(b).downloadable()).isFalse();
+    }
+
+    @Test
+    void availabilityLooksFurtherWhenTheNewestHasNoDownloadLikeInstallDoes() throws IOException {
+        java.util.List<String> pkgs = new java.util.ArrayList<>();
+        java.util.Map<String, String> routes = new java.util.HashMap<>();
+        String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
+        for (int u = 40; u >= 1; u--) {
+            pkgs.add(pkg("o" + u, "oracle", 17, "17.0." + u, "glibc", ""));
+            routes.put("ids/o" + u, none);
+        }
+        routes.put("jdk_version=17", "{\"result\":[" + String.join(",", pkgs) + "]}");
+        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o9.tar.gz\",\"checksum\":\"\"}]}");
+        FoojaySource foojay = new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE);
+        Pkg newest = foojay.builds(17, Vendor.of("oracle"), Platform.LINUX_X64, false, false).getFirst();
+        FoojaySource.Availability a = foojay.availability(newest, "17", Platform.LINUX_X64, false, false);
+        assertThat(a.pkg().version().raw()).isEqualTo("17.0.9"); // the build install would pick
+        assertThat(a.checksum()).isFalse();
+
+        routes.put("ids/o9", none);
+        routes.put("ids/o8", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o8.tar.gz\"}]}");
+        // install gives up after 32 builds, and so does search
+        assertThat(new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
+                .availability(newest, "17", Platform.LINUX_X64, false, false).downloadable()).isFalse();
+    }
+
+    @Test
+    void buildsListedAsNotDirectlyDownloadableAreNotLookedUp() throws IOException {
+        String list = "{\"result\":[" + pkg("o2", "oracle", 11, "11.0.2", "glibc", "")
+                .replace("\"feature\"", "\"directly_downloadable\":false,\"feature\"") + "]}";
+        // no ids/ route: a lookup would be a 404
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=11", list)), FoojaySource.DEFAULT_BASE);
+        Pkg newest = foojay.builds(11, Vendor.of("oracle"), Platform.LINUX_X64, false, false).getFirst();
+        assertThat(newest.directlyDownloadable()).isFalse();
+        assertThat(foojay.availability(newest, null, Platform.LINUX_X64, false, false).downloadable()).isFalse();
     }
 
     @Test

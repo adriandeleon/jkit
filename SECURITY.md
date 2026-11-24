@@ -66,7 +66,8 @@ matters:
     publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
     installs it, counted as verified. Amazon's signature covers the file, not its name, so jkit
-    also checks that the unpacked JDK's `release` file reports the version it asked for.
+    also checks that the unpacked JDK's `release` file (`version.txt` for Corretto 8, which has no
+    `release` file) reports the version it asked for.
 - `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
   against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
   version before it replaces the old one. `SHA256SUMS` comes from the same place as the archive,
@@ -74,7 +75,8 @@ matters:
   jkit's release key, built into jkit (`A944 4E8F 5048 FEBC B942 E110 FC89 EBE6 8C45 39E6`, in
   `jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc`):
   someone who could replace the files on the releases page couldn't sign them. A release without
-  a good signature is refused. Releases before 0.4.0 have no `SHA256SUMS.asc`. Each release also
+  a good signature is refused. Releases before 0.4.0 have no `SHA256SUMS.asc`. `--check`, and the
+  upgrade command printed for Homebrew, apt, dnf and winget, download nothing, so they don't need it. Each release also
   has a build attestation (`gh attestation verify <file> --repo adriandeleon/jkit`). A jkit
   installed with Homebrew, apt, dnf or winget is left to that tool.
 

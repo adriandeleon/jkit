@@ -237,7 +237,7 @@ class InstallerTest {
                 .hasMessageContaining("is signed, but it is JDK 21.0.5; nothing was installed");
         Files.delete(jdk.resolve("release"));
         assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
-                .hasMessageContaining("whose release file names no version");
+                .hasMessageContaining("names its version in neither a release file nor version.txt");
 
         // Java 8 writes its old numbering
         Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"1.8.0_514\"\n");
@@ -245,6 +245,38 @@ class InstallerTest {
         Artifact eight = new Artifact(Tool.JDK, Version.parse("8.0.514"), Vendor.of("corretto"), url, "jdk.tar.gz",
                 "tar.gz", null, null, false, URI.create(url + ".sig"));
         Installer.requireReleaseVersion(jdk, eight);
+    }
+
+    @Test
+    void correttoEightHasNoReleaseFileSoItsVersionTxtIsRead() throws Exception {
+        // the layout of amazon-corretto-8.514.01.1-linux-x64.tar.gz: version.txt, no release file
+        Path jdk = Files.createDirectories(tmp.resolve("corretto8"));
+        Files.writeString(jdk.resolve("version.txt"), "8.514.01.1\n");
+        URI url = URI.create("https://corretto.aws/downloads/resources/8.514.01.1/jdk.tar.gz");
+        Artifact eight = new Artifact(Tool.JDK, Version.parse("8.0.514"), Vendor.of("corretto"), url, "jdk.tar.gz",
+                "tar.gz", null, null, false, URI.create(url + ".sig"));
+        Installer.requireReleaseVersion(jdk, eight);
+
+        // an older signed build is still refused
+        Files.writeString(jdk.resolve("version.txt"), "8.482.08.1\n");
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, eight))
+                .hasMessageContaining("is signed, but it is JDK 8.482.08.1; nothing was installed");
+
+        // later Corretto releases write the usual numbering there
+        Files.writeString(jdk.resolve("version.txt"), "21.0.13.1.2\n");
+        Installer.requireReleaseVersion(jdk, corretto());
+
+        // the release file wins when both are there
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.5\"\n");
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
+                .hasMessageContaining("is signed, but it is JDK 21.0.5");
+    }
+
+    @Test
+    void correttoEightNumberingMapsToTheUsualOne() {
+        assertThat(Installer.fromCorrettoEight("8.514.01.1")).isEqualTo("8.0.514.01.1");
+        assertThat(Installer.fromCorrettoEight("8.0.514")).isEqualTo("8.0.514");
+        assertThat(Installer.fromCorrettoEight("11.0.33.1.1")).isEqualTo("11.0.33.1.1");
     }
 
     @Test

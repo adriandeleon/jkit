@@ -40,7 +40,8 @@ final class Context {
     /** Set once a {@link Changes} has reported creating the home. */
     boolean homeReported;
     /** Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}. */
-    final java.util.List<CacheWrite> cacheWrites = new java.util.ArrayList<>();
+    // search looks builds up on several threads, each of which can write to the cache
+    final java.util.List<CacheWrite> cacheWrites = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
     /** One cached version list written: {@code created} false when it replaced an older copy. */
     /** A file the cache wrote ({@code source} is where it came from), or deleted ({@code source} null). */

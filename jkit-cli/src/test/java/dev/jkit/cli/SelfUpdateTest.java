@@ -28,7 +28,7 @@ class SelfUpdateTest {
     @TempDir
     Path tmp;
     HttpServer server;
-    /** What the mirror serves as SHA256SUMS.asc; the test's check takes "good" as a good signature. */
+    /** What the mirror serves as SHA256SUMS.asc (null: a 404); the test's check takes "good" as a good signature. */
     String signature = "good";
     Map<String, String> env;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -45,7 +45,8 @@ class SelfUpdateTest {
         server.createContext("/", ex -> {
             String path = ex.getRequestURI().getPath();
             byte[] body = path.equals("/latest/download/SHA256SUMS") ? sums.getBytes(StandardCharsets.UTF_8)
-                    : path.equals("/download/v9.9.9/SHA256SUMS.asc") ? signature.getBytes(StandardCharsets.UTF_8)
+                    : path.equals("/download/v9.9.9/SHA256SUMS.asc")
+                            ? (signature == null ? null : signature.getBytes(StandardCharsets.UTF_8))
                     : path.equals("/download/v9.9.9/" + archiveName) ? archive : null;
             ex.sendResponseHeaders(body == null ? 404 : 200, body == null ? -1 : body.length);
             if (body != null) {
@@ -119,6 +120,32 @@ class SelfUpdateTest {
         String said = run(binary, "0.3.0", false, true);
         assertThat(said).contains("\"status\" : \"managed\"").contains("\"installedWith\" : \"homebrew\"")
                 .contains("\"command\" : \"brew upgrade jkit\"");
+        assertThat(Files.readString(binary)).isEqualTo("old");
+    }
+
+    @Test
+    void checkAndPackageManagersNeedNoSignature() throws Exception {
+        // a release from before SHA256SUMS was signed: saying it's out, or how to get it, is fine
+        signature = null;
+        Path binary = binary("bin");
+        assertThat(run(binary, "0.3.0", true, false)).contains("jkit 9.9.9 is out (this is 0.3.0)");
+        assertThat(run(binary, "9.9.9", false, false)).contains("jkit 9.9.9 is the newest release");
+        assertThat(run(binary("Cellar/jkit/0.3.0/bin"), "0.3.0", false, false)).contains("brew upgrade jkit");
+        // so is one whose signature is bad: only replacing the binary trusts it
+        signature = "forged";
+        assertThat(run(binary, "0.3.0", true, false)).contains("jkit 9.9.9 is out (this is 0.3.0)");
+        assertThat(Files.readString(binary)).isEqualTo("old");
+    }
+
+    @Test
+    void anUnsignedReleaseIsNotInstalledAndSaysWhy() throws Exception {
+        signature = null;
+        Path binary = binary("bin");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
+                .hasMessageContaining("jkit 9.9.9 has no signed SHA256SUMS (no SHA256SUMS.asc on its release page)")
+                .hasMessageContaining("nothing was changed")
+                .satisfies(e -> assertThat(((dev.jkit.model.JkitException) e).hints())
+                        .noneMatch(h -> h.contains("try again later")));
         assertThat(Files.readString(binary)).isEqualTo("old");
     }
 
