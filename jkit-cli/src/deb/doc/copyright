@@ -58,6 +58,12 @@ Files: info.picocli/picocli
 Copyright: 2017 Remko Popma
 License: Apache-2.0
 
+Files: org.bouncycastle/bcpg-jdk18on
+ org.bouncycastle/bcprov-jdk18on
+ org.bouncycastle/bcutil-jdk18on
+Copyright: 2000-2026 The Legion of the Bouncy Castle Inc. (https://www.bouncycastle.org)
+License: MIT
+
 Files: org.tomlj/tomlj
 Copyright: the tomlj authors (Chris Leishman and contributors)
 License: Apache-2.0

@@ -53,6 +53,7 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
   "preRelease": false,
   "home": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin",
   "verified": true,
+  "signedBy": "Adoptium",
   "global": ["jdk"],
   "activeInShell": []
 }
@@ -65,9 +66,12 @@ that isn't one), `3` no installed match (`use`, `remove`, and `env` for a pin wi
 - `home` is the folder to use as `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME` or `SBT_HOME`.
 - `verified` is true when the download matched a sha256, sha384 or sha512 checksum published by its
   source (foojay or the vendor for JDKs, Maven Central, services.gradle.org, sbt's GitHub releases).
-  It proves the file is the one the source lists, not who built it: no signatures are checked. False
-  for md5/sha1-only checksums, for `--allow-unverified` installs, and for installs made before jkit
-  recorded it.
+  It proves the file is the one the source lists, not who built it. False for md5/sha1-only
+  checksums, for `--allow-unverified` installs, and for installs made before jkit recorded it.
+- `signedBy` names whose OpenPGP signature the download was checked against (`"Adoptium"` for
+  Temurin, `"Microsoft"` for Microsoft builds), using a key built into jkit. That does say who built
+  it. Null for other vendors and tools, when the signature couldn't be fetched or checked (the
+  install's `notes` say why), and for installs made before jkit checked signatures.
 - `global` lists the slots (`jdk`, `graalvm`, `maven`, `gradle`, `sbt`) whose global link points here;
   `activeInShell` the slots the calling shell's hook points here.
 
@@ -246,9 +250,14 @@ the same lines on stderr, under a `jkit: using …` or `jkit: left the project �
 ## `jkit install <tool>@<version> [vendor] --json`
 
 ```json
-{ "schemaVersion": 1, "status": "installed", "verified": true, "installed": { "...": "the install object" },
-  "changes": [ { "kind": "folder", "name": "…/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null } ] }
+{ "schemaVersion": 1, "status": "installed", "verified": true, "signedBy": "Adoptium",
+  "installed": { "...": "the install object" },
+  "changes": [ { "kind": "folder", "name": "…/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null } ],
+  "notes": [ "signature checked: signed by Adoptium (key 843C48A565F8F04B)" ] }
 ```
+
+`signedBy` is whose signature was checked, or null (see the install object); when a signature
+couldn't be fetched or checked, `notes` says so. Upgrade rows carry the same `signedBy` and `notes`.
 
 `status` is `installed` or `already-installed` (then `verified` is null; the install object's own
 `verified` says how it was installed). `verified` is false when the source publishes only an md5

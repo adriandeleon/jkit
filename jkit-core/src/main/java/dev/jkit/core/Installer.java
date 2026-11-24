@@ -23,8 +23,15 @@ public final class Installer {
     /**
      * @param verified false when the source published no checksum, or only an md5 or sha1 one
      * @param removedLeftovers tmp/ folders of interrupted installs that this install deleted
+     * @param signedBy whose OpenPGP signature was checked (Adoptium, Microsoft), or null
+     * @param notes what the signature check found, for the user: checked, or why it couldn't be
      */
-    public record Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers) { }
+    public record Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers,
+            String signedBy, List<String> notes) {
+        public Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers) {
+            this(installed, fresh, verified, removedLeftovers, null, List.of());
+        }
+    }
 
     private final JkitHome home;
     private final Http http;
@@ -70,6 +77,9 @@ public final class Installer {
                     Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
                     verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
+                List<String> notes = new java.util.ArrayList<>();
+                String signedBy = artifact.signature() != null && Signatures.covers(artifact.vendor())
+                        ? checkSignature(artifact, archive, work, notes) : null;
                 Path out = work.resolve("out");
                 try {
                     Archives.extract(archive, out, artifact.archiveType());
@@ -85,10 +95,10 @@ public final class Installer {
                 Path toolHome = locateHome(out);
                 requireLinksInside(toolHome);
                 requireExecutable(storeTool, toolHome, artifact.label());
-                Store.writeMarker(toolHome, installed, artifact.url().toString(), verified);
+                Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
                 dev.jkit.model.Perms.mkdirs(dest.getParent());
                 moveIntoPlace(toolHome, dest);
-                return new Result(installed, true, verified, removed);
+                return new Result(installed, true, verified, removed, signedBy, List.copyOf(notes));
             } catch (IOException | RuntimeException e) {
                 if (e instanceof IOException io) {
                     failure = io;
@@ -103,6 +113,43 @@ public final class Installer {
                     }
                     // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
                 }
+            }
+        }
+    }
+
+    /**
+     * Fetches the vendor's signature and checks the archive with it. A signature that doesn't
+     * match refuses the install; one jkit can't fetch or check leaves the checksum as the only
+     * check, and says so in {@code notes}. Returns who signed it, or null.
+     */
+    private String checkSignature(Artifact artifact, Path archive, Path work, List<String> notes) throws IOException {
+        String label = artifact.label();
+        String unchecked = "; installed with only its checksum checked";
+        Path file = work.resolve("download.sig");
+        byte[] bytes;
+        try {
+            http.download(artifact.signature(), file, Http.Progress.NONE);
+            bytes = Files.size(file) > Signatures.MAX_SIGNATURE ? new byte[Signatures.MAX_SIGNATURE + 1]
+                    : Files.readAllBytes(file);
+        } catch (IOException | JkitException e) {
+            notes.add("warning: couldn't fetch the signature of " + label + " ("
+                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")" + unchecked);
+            return null;
+        }
+        Signatures.Result result = Signatures.verify(archive, bytes, artifact.vendor());
+        switch (result.outcome()) {
+            case GOOD -> {
+                notes.add("signature checked: signed by " + result.detail());
+                return result.signer();
+            }
+            case BAD -> throw new JkitException("the signature of " + label + " doesn't match the download ("
+                    + result.detail() + "); nothing was installed",
+                    "try again; if it keeps happening, the download or the signature is wrong at the source: "
+                            + "pick another build or vendor");
+            default -> {
+                notes.add("warning: couldn't check the signature of " + label + ": " + result.detail() + unchecked
+                        + " (a newer jkit may know a new key)");
+                return null;
             }
         }
     }

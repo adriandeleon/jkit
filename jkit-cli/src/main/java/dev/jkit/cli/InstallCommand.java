@@ -98,7 +98,7 @@ final class InstallCommand implements Callable<Integer> {
             Changes changes = new Changes(ctx).disk();
             changes.print(say);
             if (json.json) {
-                printJson(ctx, "already-installed", null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
+                printJson(ctx, "already-installed", null, null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             }
             return 0;
         }
@@ -138,7 +138,8 @@ final class InstallCommand implements Callable<Integer> {
                 + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
         changes.print(say);
         if (json.json) {
-            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.fresh() ? result.verified() : null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
+            printJson(ctx, result.fresh() ? "installed" : "already-installed", result.fresh() ? result.verified() : null,
+                    result.fresh() ? result.signedBy() : null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
         if (!madeDefault) {
@@ -167,21 +168,24 @@ final class InstallCommand implements Callable<Integer> {
         if (result.fresh()) {
             changes.folder(result.installed().home(), true);
         }
+        result.notes().forEach(changes::note); // what the signature check found
         return changes;
     }
 
-    /** {@code {schemaVersion, status: installed|already-installed, verified, installed: {…}, changes: […]}}. */
-    private void printJson(Context ctx, String status, Boolean verified, dev.jkit.model.Version version,
+    /** {@code {schemaVersion, status: installed|already-installed, verified, signedBy, installed: {…}, changes: […]}}. */
+    private void printJson(Context ctx, String status, Boolean verified, String signedBy, dev.jkit.model.Version version,
                            Vendor vendor, boolean fxBuild, Changes changes) throws Exception {
         java.util.Map<String, Object> doc = JsonOut.document();
         doc.put("status", status);
         doc.put("verified", verified);
+        doc.put("signedBy", signedBy);
         for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
             if (i.version().equals(version) && java.util.Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
                 doc.put("installed", JsonOut.installed(ctx, i));
             }
         }
         doc.put("changes", changes.json());
+        doc.put("notes", changes.notes());
         ctx.out.println(JsonOut.write(doc));
     }
 }

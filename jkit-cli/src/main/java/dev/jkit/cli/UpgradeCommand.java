@@ -153,6 +153,8 @@ final class UpgradeCommand implements Callable<Integer> {
                     "jkit upgrade " + line.userTool() + " --allow-unverified");
             row.put("status", "upgraded");
             row.put("verified", result.verified());
+            row.put("signedBy", result.signedBy());
+            row.put("notes", result.notes());
             row.put("path", result.installed().home());
             Changes changes = InstallCommand.installed(ctx, result);
             try {

@@ -30,5 +30,10 @@
       <groupId>org.tomlj</groupId>
       <artifactId>tomlj</artifactId>
     </dependency>
+    <dependency>
+      <!-- OpenPGP signatures of vendor downloads (Temurin, Microsoft): the lightweight API, no JCA provider -->
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpg-jdk18on</artifactId>
+    </dependency>
   </dependencies>
 </project>

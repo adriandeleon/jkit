@@ -130,6 +130,16 @@ public final class Store {
         };
     }
 
+    /** Whose OpenPGP signature the download was checked against, or null: none, or installed before jkit checked them. */
+    public static String signedBy(Path dir) {
+        try {
+            String who = load(dir.resolve(MARKER)).getProperty("signedBy");
+            return who == null || !who.matches("[A-Za-z][A-Za-z ]{0,40}") ? null : who;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     /** Whether the install was checked against a strong checksum; false for installs made before jkit recorded it. */
     public static boolean verified(Path dir) {
         Properties p;
@@ -142,6 +152,12 @@ public final class Store {
     }
 
     static void writeMarker(Path dir, Installed installed, String url, boolean verified) throws IOException {
+        writeMarker(dir, installed, url, verified, null);
+    }
+
+    /** @param signedBy whose signature was checked (Adoptium, Microsoft), or null */
+    static void writeMarker(Path dir, Installed installed, String url, boolean verified, String signedBy)
+            throws IOException {
         Properties p = new Properties();
         p.setProperty("tool", installed.tool().id());
         p.setProperty("version", installed.version().raw());
@@ -149,6 +165,9 @@ public final class Store {
         p.setProperty("fx", Boolean.toString(installed.fx()));
         p.setProperty("url", url);
         p.setProperty("verified", Boolean.toString(verified));
+        if (signedBy != null) {
+            p.setProperty("signedBy", signedBy);
+        }
         Path marker = dir.resolve(MARKER);
         // never through a link: an archive could ship one at this name pointing at a file of its own
         Files.deleteIfExists(marker);
