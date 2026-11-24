@@ -102,6 +102,9 @@ vendor = "graalvm-ce"     # default GraalVM vendor
 auto_switch = true        # switch to a project's versions on cd (jkit hook --install --auto-switch)
 ```
 
+`jkit config` lists each setting, its value and where it comes from; `jkit config set jdk.vendor zulu`
+and `jkit config unset jdk.vendor` change the file, keeping its comments.
+
 Environment variables: `JKIT_HOME`, `JKIT_JDK_VENDOR`, `JKIT_GRAALVM_VENDOR`, `JKIT_AUTO_SWITCH`
 (`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE` (`1`/`true`: like `--offline`),
 `HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT}_URL`
@@ -136,7 +139,7 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 ## Not yet
 
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
-completion, `prune`, a `config` command, self-update, vendor signature checks, and Windows on ARM
+completion, `prune`, self-update, vendor signature checks, and Windows on ARM
 natively.
 
 ## Build
