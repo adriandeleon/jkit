@@ -41,6 +41,12 @@ public final class JdkHttp implements Http {
     private final String userAgent;
     private final Duration idle;
     private final HttpClient client;
+    /** Builds a client with the same settings, for a download that starts again on a new connection. */
+    private final HttpClient.Builder builder;
+    /** When a download's speed is judged, once: long enough for a slow start to pick up. */
+    Duration slowAfter = Duration.ofSeconds(30);
+    /** A download that would still take longer than this at its speed then starts again on a new connection. */
+    Duration slowLeft = Duration.ofMinutes(10);
     /** Why the proxy setting can't be used; reported on the first request, so offline commands still work. */
     private final String proxyError;
 
@@ -88,6 +94,7 @@ public final class JdkHttp implements Http {
             }
         }
         this.proxyError = error;
+        this.builder = builder;
         this.client = builder.build();
     }
 
@@ -274,14 +281,43 @@ public final class JdkHttp implements Http {
         OutputStream open() throws IOException;
     }
 
+    /**
+     * A download far slower than the connection allows (a CDN edge trickling at 100 KB/s while
+     * another serves 50 MB/s) gives up after {@link #slowAfter} and starts again, once, on a new
+     * connection: the next one usually gets a fast server.
+     */
+    private static final class SlowDownload extends IOException {
+        SlowDownload(String why) {
+            super(why);
+        }
+    }
+
     private void fetch(URI uri, Sink sink, Progress progress, long max, boolean text) throws IOException {
         if (proxyError != null) {
             throw new JkitException(proxyError, "fix HTTPS_PROXY (or JKIT_NETWORK_PROXY), e.g. http://proxy.example.com:3128");
         }
+        try {
+            fetchTries(client, uri, sink, progress, max, text, true);
+        } catch (SlowDownload slow) {
+            progress.restarting(slow.getMessage());
+            HttpClient fresh;
+            synchronized (builder) {
+                fresh = builder.build(); // its own connections: a pooled HTTP/2 one would reach the same server
+            }
+            try {
+                fetchTries(fresh, uri, sink, progress, max, text, false);
+            } finally {
+                fresh.close();
+            }
+        }
+    }
+
+    private void fetchTries(HttpClient client, URI uri, Sink sink, Progress progress, long max, boolean text,
+                            boolean mayRestart) throws IOException {
         IOException last = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                fetchOnce(uri, sink, progress, max, text);
+                fetchOnce(client, uri, sink, progress, max, text, mayRestart);
                 return;
             } catch (HttpStatusException e) {
                 if (e.status() < 500 && e.status() != 429) {
@@ -306,7 +342,8 @@ public final class JdkHttp implements Http {
         throw last;
     }
 
-    private void fetchOnce(URI start, Sink sink, Progress progress, long max, boolean text) throws IOException {
+    private void fetchOnce(HttpClient client, URI start, Sink sink, Progress progress, long max, boolean text,
+                           boolean mayRestart) throws IOException {
         URI uri = start;
         long begun = System.nanoTime();
         for (int hop = 0; ; hop++) {
@@ -364,7 +401,7 @@ public final class JdkHttp implements Http {
                     throw tooBig(uri, max);
                 }
                 try (OutputStream out = sink.open()) {
-                    copyWithIdleTimeout(uri, in, out, total, progress, max, text, begun);
+                    copyWithIdleTimeout(uri, in, out, total, progress, max, text, begun, mayRestart);
                 }
                 return;
             }
@@ -389,7 +426,7 @@ public final class JdkHttp implements Http {
      * than {@link #TEXT_DEADLINE}: a server dripping a byte at a time can't hang jkit.
      */
     private void copyWithIdleTimeout(URI uri, InputStream in, OutputStream out, long total, Progress progress,
-                                     long max, boolean text, long begun) throws IOException {
+                                     long max, boolean text, long begun, boolean mayRestart) throws IOException {
         long started = System.nanoTime();
         AtomicLong lastData = new AtomicLong(started);
         AtomicLong received = new AtomicLong();
@@ -398,6 +435,10 @@ public final class JdkHttp implements Http {
         java.util.concurrent.atomic.AtomicReference<String> stalled = new java.util.concurrent.atomic.AtomicReference<>();
         // past a deadline or too slow on average: trying again would only multiply the time limit
         java.util.concurrent.atomic.AtomicBoolean final_ = new java.util.concurrent.atomic.AtomicBoolean();
+        // judged once, at slowAfter: too slow then, and the download starts again on a new connection
+        java.util.concurrent.atomic.AtomicBoolean judged = new java.util.concurrent.atomic.AtomicBoolean(
+                text || !mayRestart || total <= 0);
+        java.util.concurrent.atomic.AtomicBoolean slow = new java.util.concurrent.atomic.AtomicBoolean();
         ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "jkit-http-watchdog");
             t.setDaemon(true);
@@ -415,6 +456,18 @@ public final class JdkHttp implements Http {
             } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {
                 why = "not finished after " + DOWNLOAD_DEADLINE.toHours() + " hours";
                 final_.set(true);
+            } else if (!judged.get() && now - started > slowAfter.toNanos()) {
+                judged.set(true);
+                long got = received.get();
+                double seconds = (now - started) / 1e9;
+                double perSecond = got / seconds;
+                double leftSeconds = perSecond <= 0 ? Double.POSITIVE_INFINITY : (total - got) / perSecond;
+                if (leftSeconds > slowLeft.toSeconds()) {
+                    why = "slow download (" + Math.round(perSecond / 1024) + " KB/s, "
+                            + (Double.isInfinite(leftSeconds) ? "no end in sight"
+                                    : "about " + Math.round(Math.ceil(leftSeconds / 60)) + " min to go") + ")";
+                    slow.set(true);
+                }
             } else if (!text && now - started > AVERAGE_GRACE.toNanos()
                     && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
                 // a server can stay above the per-window minimum and still take months for 2 GB
@@ -463,6 +516,9 @@ public final class JdkHttp implements Http {
         } catch (LocalWriteException e) {
             throw new IOException("cannot write the download: " + e.getMessage(), e.getCause());
         } catch (IOException e) {
+            if (slow.get() && stalled.get() != null && stalled.get().startsWith("slow download")) {
+                throw new SlowDownload(stalled.get());
+            }
             if (stalled.get() != null) {
                 throw new NetworkException(uri, new IOException(stalled.get()), final_.get());
             }

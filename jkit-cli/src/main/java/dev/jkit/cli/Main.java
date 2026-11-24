@@ -79,6 +79,7 @@ public final class Main implements Runnable {
             hookEnv.shell = args.length == 2 ? args[1] : null;
             System.exit(hookEnv.call());
         }
+        cleanUpOnSignals();
         int code;
         try {
             code = run(args);
@@ -93,6 +94,49 @@ public final class Main implements Runnable {
             code = 1;
         }
         System.exit(code);
+    }
+
+    /**
+     * The message with the home folder shortened to ~, as the rest of jkit's output shows paths:
+     * only where a path starts (after a space, a parenthesis or the start), and only the whole folder.
+     */
+    static String homeAsTilde(String message, String home) {
+        if (message == null || home == null || home.isEmpty() || home.equals(java.io.File.separator)) {
+            return message;
+        }
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(^|[\\s(])" + java.util.regex.Pattern.quote(home)
+                + "(?=[" + java.util.regex.Pattern.quote(java.io.File.separator) + "\\s:;,)]|$)");
+        return p.matcher(message).replaceAll(m -> java.util.regex.Matcher.quoteReplacement(m.group(1) + "~"));
+    }
+
+    /**
+     * Ctrl-C (SIGINT), SIGTERM and SIGHUP stop jkit as before, but first delete the folder an
+     * install is downloading into. jkit exec puts its own handlers in place while its command runs.
+     * A signal the shell set to be ignored (a background job's SIGINT) stays ignored.
+     */
+    private static void cleanUpOnSignals() {
+        for (String name : java.util.List.of("INT", "TERM", "HUP")) {
+            java.util.List<Signals.Saved> saved = Signals.handle(() -> {
+                java.util.List<java.nio.file.Path> deleted = dev.jkit.core.WorkDirs.deleteAll();
+                if (!deleted.isEmpty()) {
+                    System.err.println();
+                    System.err.println("interrupted: nothing was installed; deleted the partial download in "
+                            + Changes.tilde(deleted.getFirst().toString()));
+                }
+                System.exit(128 + signalNumber(name));
+            }, name);
+            if (!saved.isEmpty() && saved.getFirst().previous() == sun.misc.SignalHandler.SIG_IGN) {
+                Signals.restore(saved);
+            }
+        }
+    }
+
+    private static int signalNumber(String name) {
+        return switch (name) {
+            case "HUP" -> 1;
+            case "INT" -> 2;
+            default -> 15; // TERM
+        };
     }
 
     private static boolean cwdExists() {
@@ -181,7 +225,9 @@ public final class Main implements Runnable {
     }
 
     private static void printError(JkitException e) {
-        System.err.println("error: " + dev.jkit.model.Visible.of(Errors.capped(e.getMessage())));
+        System.err.println("error: " + homeAsTilde(dev.jkit.model.Visible.of(Errors.capped(e.getMessage())),
+                System.getProperty("user.home")));
+        // hints keep full paths: they can be commands, where a quoted ~ isn't expanded
         for (String hint : e.hints()) {
             System.err.println("  " + dev.jkit.model.Visible.of(Errors.capped(hint)));
         }

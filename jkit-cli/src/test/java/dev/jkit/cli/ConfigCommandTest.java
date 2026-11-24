@@ -131,6 +131,11 @@ class ConfigCommandTest {
                 .hasMessageContaining("true or false");
         assertThatThrownBy(() -> set("jdk.vendor", "../evil")).isInstanceOf(JkitException.class)
                 .hasMessageContaining("isn't a vendor name");
+        // every one is a bad argument, like an unknown vendor: exit 2
+        for (String[] bad : new String[][] {{"jdk.vendr", "zulu"}, {"shell.auto_switch", "maybe"}, {"jdk.vendor", "../evil"}}) {
+            assertThatThrownBy(() -> set(bad[0], bad[1]))
+                    .satisfies(e -> assertThat(((JkitException) e).exitCode()).isEqualTo(2));
+        }
     }
 
     @Test

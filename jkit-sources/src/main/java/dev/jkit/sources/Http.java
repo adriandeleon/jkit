@@ -74,5 +74,8 @@ public interface Http {
 
         /** {@code total} is -1 when the server sends no length. */
         void update(long done, long total);
+
+        /** The download starts again, on a new connection, because of {@code why}. */
+        default void restarting(String why) { }
     }
 }

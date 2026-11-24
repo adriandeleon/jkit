@@ -117,6 +117,90 @@ class HttpTest {
         }
     }
 
+    /** Serves {@code size} bytes: slowly (a few KB per 100 ms) to the first {@code slowRequests} requests. */
+    private static HttpServer sizedServer(int size, int slowRequests, java.util.concurrent.atomic.AtomicInteger calls)
+            throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.createContext("/", exchange -> {
+            boolean slow = calls.incrementAndGet() <= slowRequests;
+            byte[] body = new byte[size];
+            java.util.Arrays.fill(body, (byte) 'x');
+            exchange.sendResponseHeaders(200, size);
+            try (OutputStream out = exchange.getResponseBody()) {
+                if (!slow) {
+                    out.write(body);
+                    return;
+                }
+                for (int i = 0; i < size; i += 4096) {
+                    out.write(body, i, Math.min(4096, size - i));
+                    out.flush();
+                    Thread.sleep(100); // 40 KB/s: well above the stall limits, far too slow for the size
+                }
+            } catch (InterruptedException | IOException ignored) {
+                // jkit closed the connection, or the server is stopping
+            }
+        });
+        server.start();
+        return server;
+    }
+
+    @Test
+    void aFarTooSlowDownloadStartsAgainOnceOnANewConnection() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = sizedServer(8 << 20, 1, calls);
+        try {
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
+            http.slowAfter = Duration.ofSeconds(1);
+            http.slowLeft = Duration.ofSeconds(5); // 8 MB at 40 KB/s: minutes
+            List<String> restarts = new ArrayList<>();
+            Path target = tmp.resolve("big");
+            http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/big"), target,
+                    new Http.Progress() {
+                        @Override
+                        public void update(long done, long total) { }
+
+                        @Override
+                        public void restarting(String why) {
+                            restarts.add(why);
+                        }
+                    });
+            assertThat(restarts).singleElement().asString().startsWith("slow download (").contains("KB/s");
+            assertThat(calls.get()).isEqualTo(2);
+            assertThat(Files.size(target)).isEqualTo(8 << 20); // the restart wrote the file from scratch
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aDownloadThatIsSlowButWillFinishSoonIsLeftAlone() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = sizedServer(80 << 10, 1, calls); // 80 KB at 40 KB/s: two seconds
+        try {
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
+            http.slowAfter = Duration.ofSeconds(1);
+            http.slowLeft = Duration.ofSeconds(30);
+            List<String> restarts = new ArrayList<>();
+            Path target = tmp.resolve("small");
+            http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/small"), target,
+                    new Http.Progress() {
+                        @Override
+                        public void update(long done, long total) { }
+
+                        @Override
+                        public void restarting(String why) {
+                            restarts.add(why);
+                        }
+                    });
+            assertThat(restarts).isEmpty();
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(Files.size(target)).isEqualTo(80 << 10);
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test
     void stalledBodyTimesOut() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

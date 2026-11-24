@@ -88,6 +88,7 @@ public final class Installer {
             dev.jkit.model.Perms.mkdirs(home.tmp());
             List<Path> removed = removeLeftovers(home.tmp());
             Path work = Files.createTempDirectory(home.tmp(), "install-");
+            WorkDirs.add(work); // Ctrl-C deletes it (jkit's signal handler)
             IOException failure = null;
             try {
                 Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
@@ -144,6 +145,8 @@ public final class Installer {
                         failure.addSuppressed(e);
                     }
                     // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
+                } finally {
+                    WorkDirs.remove(work);
                 }
             }
         }

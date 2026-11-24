@@ -73,4 +73,44 @@ class ResolveTest {
                 .satisfies(e -> assertThat(((JkitException) e).hints())
                         .anySatisfy(h -> assertThat(h).contains("jkit install jdk@21 zulu --fx")));
     }
+
+    /** Caches foojay's list of releases (27, 25, 21) the way search leaves it. */
+    private void cacheMajors() throws Exception {
+        String majors = """
+                {"result":[{"major_version":27,"term_of_support":"STS","maintained":true},
+                {"major_version":25,"term_of_support":"LTS","maintained":true},
+                {"major_version":21,"term_of_support":"LTS","maintained":true}]}""";
+        dev.jkit.sources.Http answer = new dev.jkit.sources.Http() {
+            @Override
+            public String get(java.net.URI uri) {
+                return majors;
+            }
+
+            @Override
+            public void download(java.net.URI uri, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        new dev.jkit.sources.FoojaySource(new dev.jkit.sources.CachingHttp(answer, home.resolve("index"),
+                java.time.Duration.ofHours(24), java.time.Clock.systemUTC(), false, false),
+                dev.jkit.sources.FoojaySource.DEFAULT_BASE).majors();
+    }
+
+    @Test
+    void aMajorThatIsNoReleaseIsNotSuggestedForInstall() throws Exception {
+        // nothing cached: the install hint as always
+        assertThatThrownBy(() -> installed("jdk@99", false))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).anyMatch(h -> h.contains("jkit install jdk@99")));
+        cacheMajors();
+        assertThatThrownBy(() -> installed("jdk@99", false))
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .noneMatch(h -> h.contains("jkit install"))
+                        .anyMatch(h -> h.contains("there is no JDK 99 release yet (the newest is 27)")));
+        assertThatThrownBy(() -> installed("jdk@22", false))
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .anyMatch(h -> h.contains("there is no JDK 22 release")));
+        // a real release that isn't installed
+        assertThatThrownBy(() -> installed("jdk@25", false))
+                .satisfies(e -> assertThat(((JkitException) e).hints()).anyMatch(h -> h.contains("jkit install jdk@25")));
+    }
 }

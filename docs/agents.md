@@ -6,8 +6,10 @@ Aider, …) and CI. The rules an agent needs:
 - **Each agent command runs in a new shell**, so `jkit use` without `--global` can't stick (it
   needs the shell hook, and the next command would lose it anyway). Run things through
   **`jkit exec`** instead.
-- **Nothing asks a question.** No command prompts or reads stdin; the download progress bar is off
-  when jkit isn't attached to a terminal.
+- **Nothing asks a question.** No command prompts or reads stdin. Without a terminal, download
+  progress is a plain line on stderr at each quarter and at least every 30 seconds.
+- **Stopping it is safe.** Ctrl-C or SIGTERM during an install deletes the partial download and
+  exits 130 or 143; nothing half-installed is left.
 - **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `pin`,
   `unpin`, `sync`, `remove`, `prune`, `config` and `self-update` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
   list of commands to try. Shapes: [json.md](json.md).

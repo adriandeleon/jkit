@@ -170,6 +170,29 @@ final class Context {
         return new FoojaySource(http(), url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
     }
 
+    /**
+     * foojay answered from the cache alone, however old, for commands that never use the network:
+     * nothing is fetched or written. Null when there is no cache yet.
+     */
+    FoojaySource cachedFoojay() {
+        if (!java.nio.file.Files.isDirectory(home.index())) {
+            return null;
+        }
+        Http none = new Http() {
+            @Override
+            public String get(URI uri) throws java.io.IOException {
+                throw new java.io.IOException("not cached");
+            }
+
+            @Override
+            public void download(URI uri, java.nio.file.Path target, Progress progress) throws java.io.IOException {
+                throw new java.io.IOException("offline");
+            }
+        };
+        return new FoojaySource(new CachingHttp(none, home.index(), Duration.ofHours(24), Clock.systemUTC(), false, true),
+                url("JKIT_SOURCES_FOOJAY_URL", FoojaySource.DEFAULT_BASE));
+    }
+
     GradleSource gradle() {
         return new GradleSource(http(), url("JKIT_SOURCES_GRADLE_URL", GradleSource.DEFAULT_BASE));
     }

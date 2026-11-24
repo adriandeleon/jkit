@@ -5,6 +5,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.sources.FoojaySource;
 import java.io.IOException;
 import java.util.List;
 import java.util.TreeSet;
@@ -147,7 +148,10 @@ final class Resolve {
                 : typedVendor == null ? " from " + vendor + " (default vendor)" : " " + vendor);
         String install = "jkit install " + spec + (typedVendor == null ? "" : " " + typedVendor) + (fx ? " --fx" : "");
         List<String> hints = new java.util.ArrayList<>();
-        if (!command.equals("remove")) {
+        String unreleased = unreleased(ctx, spec);
+        if (unreleased != null) {
+            hints.add(unreleased);
+        } else if (!command.equals("remove")) {
             hints.add("install it:          " + install);
         }
         if (vendor != null) {
@@ -165,6 +169,36 @@ final class Resolve {
         }
         throw new JkitException(JkitException.NOT_INSTALLED,
                 "no installed " + what + " matches " + versionText + vendorText, hints.toArray(String[]::new));
+    }
+
+    /**
+     * For a JDK major that foojay's cached list of releases doesn't have (jdk@99), what to say
+     * instead of an install command that can't work; null when it's a release, or nothing is cached.
+     */
+    static String unreleased(Context ctx, ToolSpec spec) {
+        if ((spec.tool() != Tool.JDK && spec.tool() != Tool.GRAALVM) || spec.version() == null
+                || !dev.jkit.model.Version.looksLikeVersion(spec.version())) {
+            return null;
+        }
+        FoojaySource cached = ctx.cachedFoojay();
+        if (cached == null) {
+            return null;
+        }
+        List<FoojaySource.Major> majors;
+        try {
+            majors = cached.majors();
+        } catch (IOException | RuntimeException e) {
+            return null; // not cached: say what we always said
+        }
+        int major = spec.major();
+        if (majors.isEmpty() || majors.stream().anyMatch(m -> m.major() == major)) {
+            return null;
+        }
+        int newest = majors.stream().mapToInt(FoojaySource.Major::major).max().orElse(0);
+        return major > newest
+                ? "there is no JDK " + major + " release yet (the newest is " + newest + "); early-access builds: jkit search jdk@"
+                        + major + " --pre"
+                : "there is no JDK " + major + " release; see them all: jkit search jdk";
     }
 
     /**
