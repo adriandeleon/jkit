@@ -17,7 +17,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "use", description = {"Activates an installed version for this shell, or globally with --global.",
+@Command(name = "use", description = {"Activates an installed version for this shell, or with --global.",
         "This shell needs the jkit hook (jkit hook --install); --global works without it.",
         "",
         "  jkit use jdk@21 --global         the default for new shells",

@@ -194,7 +194,8 @@ public final class FoojaySource {
             Pkg next = candidates.get(MAX_LOOKUPS);
             throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download, nor do the next "
                     + (MAX_LOOKUPS - 1) + " builds", "an older build may have one: jkit install " + tool.id() + "@"
-                    + next.version().raw() + " " + next.vendor().name(),
+                    + next.version().raw() + " " + next.vendor().name() + (fx ? " --fx" : "")
+                    + (pre && next.version().isPreRelease() ? " --pre" : ""),
                     "or download it from the vendor's site, or pick another vendor");
         }
         throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download"

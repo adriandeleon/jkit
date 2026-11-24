@@ -39,7 +39,8 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 @Command(name = "doctor",
-        description = {"Checks your setup for problems and says how to fix them. Changes nothing.",
+        description = {"Checks your setup for problems and says how to fix them.",
+                "Changes nothing.",
                 "Exits 1 when a check fails. Uses the network only with --network."})
 final class DoctorCommand implements Callable<Integer> {
 

@@ -21,7 +21,8 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 @Command(name = "exec",
-        description = {"Runs one command with the versions jkit picks; no shell is changed.",
+        description = {"Runs one command with the versions jkit picks.",
+                "No shell is changed.",
                 "For scripts, CI and AI agents, where each command starts in a new shell.",
                 "Starts from what jkit env gives (global versions, overridden by the project",
                 "file); tools named before -- override that.",

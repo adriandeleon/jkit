@@ -20,7 +20,7 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 @Command(name = "sync",
-        description = {"Installs what the project file asks for, then switches this shell to it.",
+        description = {"Installs the project file's pins and switches this shell to them.",
                 "Reads jkit.toml (or .sdkmanrc, .tool-versions, .java-version) here or above.",
                 "A tool chosen in this shell with jkit use keeps winning until jkit reset.",
                 "Without the shell hook it only installs; then use jkit exec, or",

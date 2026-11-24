@@ -305,7 +305,7 @@ jobs:
           if [ -z "$CERT_P12" ] || [ -z "$CERT_PASSWORD" ] || [ -z "$API_KEY_P8" ] || [ -z "$API_KEY_ID" ] \
              || [ -z "$API_ISSUER_ID" ]; then
             case "$GITHUB_REF_NAME" in
-              *-*) echo "::warning::signing secrets are not set; this pre-release ships unsigned for macOS"
+              *-*) echo "::warning::signing secrets are not set; this pre-release ships ad-hoc signed (no Developer ID, not notarized) for macOS"
                    codesign --force --sign - "$bin"   # ad-hoc, so macos-pack's codesign --verify passes
                    exit 0 ;;
               *)   echo "::error::signing secrets are not set; a release needs a notarized macOS binary"
