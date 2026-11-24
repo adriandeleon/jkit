@@ -355,6 +355,25 @@ latest release (`jkit pin jdk@latest`, written as `jdk = "latest"`). With the sh
 `installed` is null in a dry run. `changes` lists new install folders and, with the shell hook active, the variables of this
 shell that now follow the project; without the hook `notes` says the shell is unchanged.
 
+## `jkit config [list] --json`
+
+```json
+{ "schemaVersion": 1, "file": "/home/me/.jkit/config.toml",
+  "settings": [
+    { "key": "jdk.vendor", "value": "zulu", "source": "file", "file": "zulu", "env": null,
+      "envVariable": "JKIT_JDK_VENDOR", "default": "temurin",
+      "description": "the vendor jdk@… uses when none is named" }
+  ] }
+```
+
+`value` is what jkit uses; `source` says where it came from: `env` (the variable named by
+`envVariable`, which wins), `file` (config.toml) or `default`. `file` and `env` are the raw values
+each place holds, null where unset. Keys: `jdk.vendor`, `graalvm.vendor`, `shell.auto_switch`
+(`value` `"true"` or `"false"`).
+
+`jkit config get <key> --json` prints one of those objects as the document. `jkit config set <key>
+<value> --json` and `jkit config unset <key> --json` print it as it is after the change, plus
+`changed` (false when the file already said so), `changes` and `notes`.
 ## `jkit prune [--dry-run] --json`
 
 ```json
@@ -370,6 +389,18 @@ shell that now follow the project; without the hook `notes` says the shell is un
 global one, one this shell uses, or one the project here pins. `leftovers` are folders interrupted
 installs and removals left; `cache` the cached version lists older than 30 days. `bytes` is the
 space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
+## `jkit self-update [--check] --json`
+
+```json
+{ "schemaVersion": 1, "current": "0.3.0", "latest": "0.4.0", "status": "managed",
+  "installedWith": "homebrew", "binary": "/opt/homebrew/Cellar/jkit/0.3.0/bin/jkit",
+  "command": "brew upgrade jkit", "changes": [], "notes": [] }
+```
+
+`status`: `up-to-date`, `available` (with `--check`), `updated` (a release-archive install,
+replaced in place: `changes` names the binary), or `managed` (installed with a package manager,
+left alone: `command` is what updates it). `installedWith`: `homebrew`, `deb`, `rpm`, `winget` or
+`archive`. `latest` is the newest stable release; pre-releases are on the releases page only.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 

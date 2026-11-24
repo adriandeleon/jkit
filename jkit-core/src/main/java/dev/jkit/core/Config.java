@@ -52,14 +52,73 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
         graalvm = valueOr(env.get("JKIT_GRAALVM_VENDOR"), graalvm);
         String autoEnv = env.get(AUTO_SWITCH_ENV);
         if (autoEnv != null && !autoEnv.isBlank()) {
-            autoSwitch = switch (autoEnv.trim().toLowerCase(java.util.Locale.ROOT)) {
-                case "1", "true", "yes", "on" -> true;
-                case "0", "false", "no", "off" -> false;
-                default -> throw new JkitException(AUTO_SWITCH_ENV + "=" + autoEnv + " isn't 1 or 0",
+            Boolean parsed = parseSwitch(autoEnv);
+            if (parsed == null) {
+                throw new JkitException(AUTO_SWITCH_ENV + "=" + autoEnv + " isn't 1 or 0",
                         "set it to 1 to switch versions on cd, 0 to turn that off");
-            };
+            }
+            autoSwitch = parsed;
         }
         return new Config(jdk, graalvm, autoSwitch);
+    }
+
+    /** 1/true/yes/on or 0/false/no/off, any case; null for anything else. */
+    public static Boolean parseSwitch(String text) {
+        return switch (text.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "1", "true", "yes", "on" -> true;
+            case "0", "false", "no", "off" -> false;
+            default -> null;
+        };
+    }
+
+    /** The settings config.toml holds, for {@code jkit config}. */
+    public enum Setting {
+        JDK_VENDOR("jdk", "vendor", "JKIT_JDK_VENDOR", "temurin", "the vendor jdk@… uses when none is named"),
+        GRAALVM_VENDOR("graalvm", "vendor", "JKIT_GRAALVM_VENDOR", "graalvm-ce",
+                "the vendor graalvm@… uses when none is named"),
+        AUTO_SWITCH("shell", "auto_switch", AUTO_SWITCH_ENV, "false", "switch to a project's versions on cd");
+
+        public final String table;
+        public final String name;
+        public final String env;
+        public final String fallback;
+        public final String description;
+
+        Setting(String table, String name, String env, String fallback, String description) {
+            this.table = table;
+            this.name = name;
+            this.env = env;
+            this.fallback = fallback;
+            this.description = description;
+        }
+
+        /** {@code table.name}, as typed: {@code jdk.vendor}. */
+        public String key() {
+            return table + "." + name;
+        }
+
+        public boolean isSwitch() {
+            return this == AUTO_SWITCH;
+        }
+
+        /** The setting for a typed key; null when there is none. */
+        public static Setting of(String key) {
+            for (Setting s : values()) {
+                if (s.key().equals(key.trim().toLowerCase(java.util.Locale.ROOT))) {
+                    return s;
+                }
+            }
+            return null;
+        }
+
+        /** Its value in {@code config}, as text. */
+        public String value(Config config) {
+            return switch (this) {
+                case JDK_VENDOR -> config.jdkVendor();
+                case GRAALVM_VENDOR -> config.graalvmVendor();
+                case AUTO_SWITCH -> Boolean.toString(config.autoSwitch());
+            };
+        }
     }
 
     private static String string(TomlParseResult toml, String key, JkitHome home) {

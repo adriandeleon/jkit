@@ -65,6 +65,11 @@ matters:
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
     installs it, counted as verified, and a signature jkit can't fetch or check refuses it, the
     same as a download with no checksum, unless you pass `--allow-unverified`.
+- `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
+  against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
+  version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same
+  place as the archive; the release's build attestation is not checked (`gh attestation verify`
+  does that by hand). A jkit installed with Homebrew, apt, dnf or winget is left to that tool.
 
 ## Project files
 
