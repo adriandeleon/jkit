@@ -385,6 +385,18 @@ each place holds, null where unset. Keys: `jdk.vendor`, `graalvm.vendor`, `shell
 global one, one this shell uses, or one the project here pins. `leftovers` are folders interrupted
 installs and removals left; `cache` the cached version lists older than 30 days. `bytes` is the
 space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
+## `jkit self-update [--check] --json`
+
+```json
+{ "schemaVersion": 1, "current": "0.3.0", "latest": "0.4.0", "status": "managed",
+  "installedWith": "homebrew", "binary": "/opt/homebrew/Cellar/jkit/0.3.0/bin/jkit",
+  "command": "brew upgrade jkit", "changes": [], "notes": [] }
+```
+
+`status`: `up-to-date`, `available` (with `--check`), `updated` (a release-archive install,
+replaced in place: `changes` names the binary), or `managed` (installed with a package manager,
+left alone: `command` is what updates it). `installedWith`: `homebrew`, `deb`, `rpm`, `winget` or
+`archive`. `latest` is the newest stable release; pre-releases are on the releases page only.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 

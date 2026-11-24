@@ -27,6 +27,7 @@ import picocli.CommandLine.Command;
             RemoveCommand.class,
             PruneCommand.class,
             ConfigCommand.class,
+            SelfUpdateCommand.class,
             HookCommand.class,
             CompletionCommand.class,
             CopyrightCommand.class,

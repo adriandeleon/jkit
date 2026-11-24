@@ -44,6 +44,11 @@ matters:
     the checksum as the only check, and the install says so.
   - Other vendors, Maven, Gradle and sbt: no signatures are checked yet (foojay lists none for the
     other vendors). Signatures are checked as well as checksums, never instead of them.
+- `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
+  against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
+  version before it replaces the old one. Like the other checksums, `SHA256SUMS` comes from the same
+  place as the archive; the release's build attestation is not checked (`gh attestation verify`
+  does that by hand). A jkit installed with Homebrew, apt, dnf or winget is left to that tool.
 
 ## Project files
 
