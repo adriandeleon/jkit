@@ -361,23 +361,53 @@ public final class Installer {
     /**
      * For a JDK checked by its signature alone (Corretto): the publisher's signature covers the
      * file, not its name, so any build it signed would pass, an older one included. The unpacked
-     * JDK's {@code release} file must report the version jkit asked for.
+     * JDK's {@code release} file must report the version jkit asked for. Corretto 8 has no
+     * {@code release} file; its {@code version.txt} says the same thing.
      */
     static void requireReleaseVersion(Path jdkHome, Artifact artifact) {
         String found = ToolStates.releaseVersion(jdkHome);
+        String compared = found == null ? null : dev.jkit.model.Version.fromLegacyJava(found);
+        if (found == null) {
+            found = correttoVersionTxt(jdkHome);
+            compared = found == null ? null : fromCorrettoEight(found);
+        }
         dev.jkit.model.Version wanted = artifact.version();
-        dev.jkit.model.Version got = found == null ? null
-                : dev.jkit.model.Version.parse(dev.jkit.model.Version.fromLegacyJava(found));
+        dev.jkit.model.Version got = compared == null ? null : dev.jkit.model.Version.parse(compared);
         boolean same = got != null && got.partCount() > 0;
         for (int i = 0; same && i < 3; i++) {
             same = got.part(i) == wanted.part(i);
         }
         if (!same) {
             throw new JkitException("the download for " + artifact.label() + " is signed, but it is "
-                    + (found == null ? "a JDK whose release file names no version" : "JDK " + found)
+                    + (found == null ? "a JDK that names its version in neither a release file nor version.txt"
+                            : "JDK " + found)
                     + "; nothing was installed",
-                    "the source served a different build than it listed: try again later, or pick another vendor");
+                    found == null ? "jkit can't tell which build it is: pick another version or vendor"
+                            : "the source served a different build than it listed: try again later, or pick another vendor");
         }
+    }
+
+    /** The first line of Corretto's {@code version.txt}, e.g. {@code 8.514.01.1}; null when there is none. */
+    static String correttoVersionTxt(Path jdkHome) {
+        Path file = jdkHome.resolve("version.txt");
+        try {
+            if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.size(file) > 1024) {
+                return null;
+            }
+            String line = Files.readString(file).lines().findFirst().orElse("").trim();
+            return dev.jkit.model.Version.isSafeText(line) && dev.jkit.model.Version.looksLikeVersion(line) ? line : null;
+        } catch (IOException | java.io.UncheckedIOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Corretto 8 numbers its builds {@code 8.<update>.<build>.<revision>} (8.514.01.1 is 8u514),
+     * where everything else says 8.0.514; later Corretto releases already use 11.0.33.1.1.
+     */
+    static String fromCorrettoEight(String text) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)").matcher(text);
+        return m.matches() ? "8.0." + m.group(1) + m.group(2) : text;
     }
 
     private static void requireExecutable(Tool tool, Path toolHome, String label) {
