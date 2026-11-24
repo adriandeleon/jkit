@@ -35,7 +35,7 @@ jkit upgrade                           # newest build within each installed rele
 | Platform | |
 | --- | --- |
 | macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
-| Debian, Ubuntu (x64, arm64) | the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
+| Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository, so `apt upgrade` keeps it current ([setup](https://jkit-project.dev/install/#apt)); or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
 | Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
 | Anything else | a `.tar.gz` or `.zip` from the releases |
