@@ -3,7 +3,7 @@ name: Release
 # Push a tag like v0.1.0 to publish a release. Each platform builds the native binary with GraalVM
 # Community Edition (Liberica NIK, also GPLv2 with the Classpath Exception, on macOS x64, which
 # Community Edition doesn't ship for) and runs the tests, then packs it with LICENSE and
-# THIRD-PARTY-NOTICES as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and an
+# THIRD-PARTY-NOTICES (and on Windows the Visual C++ runtime DLLs it links) as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and an
 # .rpm and makes the CycloneDX SBOM, and the macOS binaries (arm64 and x64) are signed and
 # notarized (macos-sign: tag runs only, in a job that runs no build code). The release job
 # attaches them all with a SHA256SUMS file and a build provenance attestation (check one with
@@ -226,8 +226,51 @@ jobs:
             otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
           fi
 
+      # jkit.exe links the Visual C++ runtime (VCRUNTIME140.dll and VCRUNTIME140_1.dll), which
+      # Windows doesn't include. The .zip carries Microsoft's redistributable copies next to it
+      # ("app-local"), so it runs without the Visual C++ Redistributable installed. They come from
+      # the runner's Visual Studio and must be signed by Microsoft; the binary must need exactly
+      # these two from the Visual C++ runtime (MSVCP140.dll, say, would have to be bundled too).
+      - name: Bundle the Visual C++ runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = 'vcruntime140.dll', 'vcruntime140_1.dll'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'no Visual Studio with the C++ tools on this runner' }
+          $msvc = Get-ChildItem "$vs\VC\Redist\MSVC" -Directory | Where-Object Name -match '^\d+\.\d+\.\d+$' |
+            Sort-Object { [version]$_.Name } | Select-Object -Last 1
+          $crt = Get-ChildItem "$($msvc.FullName)\x64" -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          if (-not $crt) { throw "no x64 CRT folder in $($msvc.FullName)" }
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Where-Object Name -match '^\d+\.\d+\.\d+$' |
+            Sort-Object { [version]$_.Name } | Select-Object -Last 1
+          $dumpbin = "$($tools.FullName)\bin\Hostx64\x64\dumpbin.exe"
+          $imports = & $dumpbin /nologo /dependents jkit-cli\target\jkit.exe |
+            ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -match '\.dll$' }
+          # ucrtbase and the api-ms-win-crt-* DLLs are the Universal CRT, which Windows 10 and 11 include
+          $vcrt = @($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|vcomp)' } | Sort-Object -Unique)
+          if ($vcrt.Count -eq 0 -or (Compare-Object $vcrt $bundle)) {
+            throw "jkit.exe imports $($vcrt -join ', ') from the Visual C++ runtime; the bundle is $($bundle -join ', ')"
+          }
+          $out = New-Item -ItemType Directory "$env:RUNNER_TEMP\vcruntime"
+          foreach ($name in $bundle) {
+            $dll = Copy-Item "$($crt.FullName)\$name" $out -PassThru
+            $sig = Get-AuthenticodeSignature $dll
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+              throw "$name isn't signed by Microsoft ($($sig.Status): $($sig.SignerCertificate.Subject))"
+            }
+            "$name $($dll.VersionInfo.FileVersion) from $($crt.FullName), signed: $($sig.SignerCertificate.Subject)"
+          }
+          # the binary runs with the bundled copies (Windows loads DLLs beside the .exe first)
+          Copy-Item jkit-cli\target\jkit.exe $out
+          & "$out\jkit.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'jkit.exe --version failed next to the bundled runtime' }
+          Remove-Item "$out\jkit.exe"
+
       # Each archive holds, at its root, the binary (jkit, or jkit.exe on Windows), LICENSE and
-      # THIRD-PARTY-NOTICES. On Linux the archives are reproducible: fixed order, owner and
+      # THIRD-PARTY-NOTICES, and on Windows the two Visual C++ runtime DLLs. On Linux the archives are reproducible: fixed order, owner and
       # timestamps (the tagged commit's). macOS binaries are packed by macos-pack, after signing.
       - name: Collect the files
         run: |
@@ -238,6 +281,8 @@ jobs:
           chmod 755 "stage/jkit${{ matrix.exe }}"
           chmod 644 stage/LICENSE stage/THIRD-PARTY-NOTICES
           if [ "$RUNNER_OS" = Windows ]; then
+            cp "$RUNNER_TEMP"/vcruntime/vcruntime140.dll "$RUNNER_TEMP"/vcruntime/vcruntime140_1.dll stage/
+            files+=(vcruntime140.dll vcruntime140_1.dll)
             (cd stage && 7z a -tzip -bso0 "../dist/$base.zip" "${files[@]}")
           elif [ "$RUNNER_OS" = Linux ]; then
             epoch=$(git log -1 --format=%ct)
