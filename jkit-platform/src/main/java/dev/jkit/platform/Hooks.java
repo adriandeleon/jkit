@@ -194,7 +194,37 @@ final class Hooks {
                 $global:__jkit_bin = %2$s
                 $global:__jkit_root = %3$s
                 function jkit {
-                  # dot-sourcing needs a .ps1 extension
+                  # PowerShell drops the first bare -- from a function's arguments, and jkit exec
+                  # needs it: put it back where the command line has it. Only when every word
+                  # before it is one argument; otherwise the arguments go on as they came.
+                  $a = @($args)
+                  $line = $MyInvocation.Line
+                  $at = $MyInvocation.OffsetInLine
+                  if ($line -and $line.Contains('--')) {
+                    $call = [Management.Automation.Language.Parser]::ParseInput($line, [ref]$null, [ref]$null).Find({
+                      param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.StartLineNumber -eq 1 -and $n.Extent.StartColumnNumber -eq $at
+                    }, $true)
+                    if ($call) {
+                      $i = 0
+                      foreach ($w in @($call.CommandElements | Select-Object -Skip 1)) {
+                        if ($w -is [Management.Automation.Language.CommandParameterAst] -and $w.Extent.Text -eq '--') {
+                          if ($i -le $a.Count) {
+                            $l = New-Object Collections.Generic.List[object]
+                            foreach ($x in $a) { $l.Add($x) }
+                            $l.Insert($i, '--')
+                            $a = $l.ToArray()
+                          }
+                          break
+                        }
+                        $one = ($w -is [Management.Automation.Language.StringConstantExpressionAst]) -or
+                          ($w -is [Management.Automation.Language.ExpandableStringExpressionAst]) -or
+                          ($w -is [Management.Automation.Language.VariableExpressionAst] -and -not $w.Splatted) -or
+                          ($w -is [Management.Automation.Language.CommandParameterAst] -and -not $w.Argument)
+                        if (-not $one) { break }
+                        $i++
+                      }
+                    }
+                  }
                   $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
                   $env:JKIT_ENV_FILE = $envFile
                   try {
@@ -206,7 +236,7 @@ final class Hooks {
                         Select-Object -First 1 -ExpandProperty Source
                     }
                     if ($global:__jkit_bin) {
-                      & $global:__jkit_bin @args
+                      & $global:__jkit_bin @a
                       $rc = $LASTEXITCODE
                     } else {
                       [Console]::Error.WriteLine('jkit: not found on PATH')
@@ -216,7 +246,12 @@ final class Hooks {
                     # also after Ctrl-C: later jkit runs outside this function must not write to it
                     Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
                   }
-                  if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) { . $envFile }
+                  # a script block, not the file: the execution policy (Restricted by default in
+                  # Windows PowerShell) blocks dot-sourcing a .ps1, and jkit would have reported
+                  # changes this shell never got
+                  if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) {
+                    . ([scriptblock]::Create([IO.File]::ReadAllText($envFile)))
+                  }
                   Remove-Item $envFile -ErrorAction SilentlyContinue
                   $global:LASTEXITCODE = $rc
                 }

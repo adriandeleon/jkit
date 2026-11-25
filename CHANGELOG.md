@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`jkit use`, `reset`, `pin` and `sync` change a Windows PowerShell shell again.** The PowerShell
+  hook applied their changes by running a script file, which Windows PowerShell's default
+  execution policy blocks, so jkit reported changes the shell never got. It no longer runs a file.
+  The README now says how to let Windows PowerShell load the hook from `$PROFILE`.
+- **`jkit exec … -- <command>` works in PowerShell with the hook loaded.** PowerShell drops a bare
+  `--` from a function's arguments, so jkit saw `jkit exec jdk@21 java -version` and failed with
+  `Unknown option: '-version'`. The hook puts the `--` back.
 - **The Windows zip starts without the Visual C++ Redistributable.** It now ships Microsoft's
   `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` next to `jkit.exe`. `jkit self-update` replaces
   DLLs already there, and never adds them to a folder without them.

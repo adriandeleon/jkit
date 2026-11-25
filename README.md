@@ -73,6 +73,8 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 
 - Add the hook to your PowerShell profile by hand (`jkit hook --install` doesn't do PowerShell
   yet): `notepad $PROFILE`, then add `jkit hook pwsh | Out-String | Invoke-Expression`.
+  Windows PowerShell (5.1, the one Windows comes with) runs no profile until scripts are allowed:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7 allows them already.
 - `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. Programs started
   outside a hooked PowerShell (cmd.exe, IDEs) see it only if you set `JAVA_HOME` to that folder
   once, and add `%JAVA_HOME%\bin` to your user `PATH`.
