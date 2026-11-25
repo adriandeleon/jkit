@@ -140,6 +140,9 @@ and with auto-switch on, bash, zsh and fish switch on `cd`. See
 - [docs/troubleshooting.md](docs/troubleshooting.md): `status`, `doctor` and `env`.
 - [docs/agents.md](docs/agents.md): using jkit from scripts, CI and AI agents (`jkit exec`).
 - [docs/json.md](docs/json.md): `--json` output for editors and tools.
+- Editors: [Editora](https://editora-project.dev/) 0.29.0 and later drive jkit for every command:
+  project pins, installs, `sync`, `status`, `doctor`, `prune`, settings and the shell hook. See
+  [Editora's jkit docs](https://editora-project.dev/docs/build-tools/#jkit).
 - `jkit <command> --help` for every option. Tab completion comes with the hook (bash, and zsh
   through bashcompinit).
 

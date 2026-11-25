@@ -4,6 +4,9 @@ For editors, IDEs and scripts that drive jkit. With `--json`, a command prints *
 document on stdout**, also when it fails. Progress, download bars and messages go to stderr, so a
 program can read stdout whole and show stderr lines as progress.
 
+[Editora](https://editora-project.dev/) 0.29.0 and later use this output to drive every jkit command;
+see [Editora's jkit docs](https://editora-project.dev/docs/build-tools/#jkit).
+
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
 `pin`, `unpin`, `sync`, `remove`, `prune`, `config` and `self-update`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout
 belongs to the command it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
