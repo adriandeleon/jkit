@@ -48,9 +48,9 @@ jkit self-update                       # jkit itself (or how to, for brew, apt, 
 | Anything else | a `.tar.gz` or `.zip` from the releases |
 
 Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
-anywhere on your `PATH`. The Windows `.zip` also holds `vcruntime140.dll` and
-`vcruntime140_1.dll`, the Visual C++ runtime `jkit.exe` needs: keep them next to it, in a folder of
-its own. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
+anywhere on your `PATH`. From the release after 0.4.0, the Windows `.zip` also holds
+`vcruntime140.dll` and `vcruntime140_1.dll`, the Visual C++ runtime `jkit.exe` needs: keep them
+next to it, in a folder of its own. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
 (Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04, RHEL 8 or Alpine);
 macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
 hyphen) are on the releases page only.
@@ -80,8 +80,10 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   once, and add `%JAVA_HOME%\bin` to your user `PATH`.
 - Switching on `cd` isn't available in PowerShell yet.
 - Windows on ARM runs the x64 build under emulation.
-- `jkit.exe` needs the Microsoft Visual C++ runtime. The `.zip` carries its two DLLs next to
-  `jkit.exe`, so it runs as is; `jkit self-update` keeps them up to date. winget installs the
+- `jkit.exe` needs the Microsoft Visual C++ runtime. From the release after 0.4.0, the `.zip`
+  carries its two DLLs next to `jkit.exe`, so it runs as is; `jkit self-update` keeps them up to
+  date. The 0.4.0 `.zip` and earlier don't: install the Microsoft Visual C++ Redistributable
+  (2015 or newer, x64) first. winget installs the
   Microsoft Visual C++ Redistributable (2015 or newer, x64) along with jkit instead. With the
   Redistributable installed you can delete the two DLLs: Windows Update then keeps the runtime
   patched.
