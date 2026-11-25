@@ -2,6 +2,7 @@ package dev.jkit.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -161,5 +162,60 @@ class HooksTest {
             assertThat(files.map(f -> f.getFileName().toString()).toList()).containsExactly("jdk"); // no temp links left
         }
         assertThat(os.hook("pwsh", tmp)).contains("PowerShell");
+    }
+
+    /**
+     * Runs the PowerShell hook under every PowerShell on this machine (Windows PowerShell 5.1 and
+     * pwsh 7), with the execution policy at Restricted, Windows PowerShell's default: jkit use must
+     * still change the shell, and a bare -- (which PowerShell drops from a function's arguments)
+     * must still reach jkit, so that jkit exec works.
+     */
+    @Test
+    void powershellHookPassesDashDashAndAppliesChangesUnderRestrictedPolicy() throws Exception {
+        boolean windows = File.separatorChar == '\\';
+        Path fake;
+        if (windows) {
+            fake = tmp.resolve("fakejkit.cmd");
+            Files.writeString(fake, "@echo off\r\necho argv: %*\r\n"
+                    + "if defined JKIT_ENV_FILE (echo $env:JAVA_HOME = 'C:\\x\\jdk17'>\"%JKIT_ENV_FILE%\")\r\n");
+        } else {
+            fake = tmp.resolve("fakejkit");
+            Files.writeString(fake, "#!/bin/sh\nprintf 'argv:'; for a in \"$@\"; do printf ' %s' \"$a\"; done; echo\n"
+                    + "[ -n \"$JKIT_ENV_FILE\" ] && echo \"\\$env:JAVA_HOME = '/x/jdk17'\" > \"$JKIT_ENV_FILE\"\nexit 0\n");
+            fake.toFile().setExecutable(true);
+        }
+        String script = Hooks.powershell(tmp.resolve("root"), fake.toString()) + """
+                jkit exec jdk@21 -- java -version
+                jkit exec --no-project jdk@17 zulu -- mvn -- x
+                $v = 'jdk@21'; jkit exec $v -- java
+                jkit exec jdk@21 '--' java
+                $s = 'exec', '--', 'x'; jkit @s
+                jkit use jdk@17; "home: $env:JAVA_HOME"
+                """;
+        String encoded = java.util.Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        int ran = 0;
+        for (String shell : new String[] {"powershell", "pwsh"}) {
+            ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                    "Restricted", "-EncodedCommand", encoded).redirectErrorStream(true);
+            withoutToolHomes(pb);
+            Process p;
+            try {
+                p = pb.start();
+            } catch (java.io.IOException notInstalled) {
+                continue;
+            }
+            ran++;
+            p.getOutputStream().close();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
+            assertThat(out).as(shell).contains(
+                    "argv: exec jdk@21 -- java -version",
+                    "argv: exec --no-project jdk@17 zulu -- mvn -- x",
+                    "argv: exec jdk@21 -- java",
+                    "argv: exec -- x",
+                    "home: " + (windows ? "C:\\x\\jdk17" : "/x/jdk17"));
+            assertThat(out).as(shell).doesNotContain("-- --");
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(ran > 0, "no PowerShell on this machine");
     }
 }
