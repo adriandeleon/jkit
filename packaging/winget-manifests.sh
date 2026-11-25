@@ -48,7 +48,10 @@ NestedInstallerFiles:
 Commands:
 - jkit
 ReleaseDate: $(date -u +%Y-%m-%d)
-# jkit.exe (a GraalVM native image) links the Visual C++ runtime: VCRUNTIME140.dll, VCRUNTIME140_1.dll
+# jkit.exe (a GraalVM native image) links the Visual C++ runtime: VCRUNTIME140.dll, VCRUNTIME140_1.dll.
+# The .zip carries both next to jkit.exe, but winget runs a portable package through a link in its
+# Links folder, and Windows may then look for DLLs next to the link rather than the file it points to: keep the
+# dependency, so winget installs the runtime system-wide.
 Dependencies:
   PackageDependencies:
   - PackageIdentifier: Microsoft.VCRedist.2015+.x64

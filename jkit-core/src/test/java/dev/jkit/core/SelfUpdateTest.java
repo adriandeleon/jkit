@@ -186,8 +186,36 @@ class SelfUpdateTest {
         Path old = SelfUpdate.replace(fresh, binary, true);
         assertThat(Files.readString(binary)).isEqualTo("new");
         assertThat(Files.readString(old)).isEqualTo("old");
-        assertThat(SelfUpdate.deleteOld(binary)).isTrue();
+        assertThat(SelfUpdate.deleteOld(binary)).containsExactly(old);
         assertThat(old).doesNotExist();
+        assertThat(SelfUpdate.deleteOld(binary)).isEmpty();
+    }
+
+    @Test
+    void windowsReplacesOnlyTheRuntimeDllsAlreadyBesideJkit() throws Exception {
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path binary = Files.writeString(bin.resolve("jkit.exe"), "old");
+        Files.writeString(bin.resolve("vcruntime140.dll"), "old runtime");
+        Path out = Files.createDirectories(tmp.resolve("out"));
+        Path fresh = Files.writeString(out.resolve("jkit.exe"), "new");
+        Files.writeString(out.resolve("vcruntime140.dll"), "new runtime");
+        Files.writeString(out.resolve("vcruntime140_1.dll"), "new runtime 1");
+
+        // vcruntime140_1.dll isn't beside jkit.exe: never added to a folder that didn't have it
+        assertThat(SelfUpdate.runtimeToReplace(fresh, binary)).containsExactly("vcruntime140.dll");
+        Path dll = bin.resolve("vcruntime140.dll");
+        Path oldDll = SelfUpdate.replace(out.resolve("vcruntime140.dll"), dll, true);
+        Path oldExe = SelfUpdate.replace(fresh, binary, true);
+        assertThat(Files.readString(dll)).isEqualTo("new runtime");
+        assertThat(bin.resolve("vcruntime140_1.dll")).doesNotExist();
+        assertThat(SelfUpdate.deleteOld(binary)).containsExactlyInAnyOrder(oldExe, oldDll);
+        try (var left = Files.list(bin)) {
+            assertThat(left.map(f -> f.getFileName().toString())).containsExactlyInAnyOrder("jkit.exe", "vcruntime140.dll");
+        }
+
+        // an archive without the DLLs (a release before they were bundled) replaces only jkit.exe
+        Path bare = Files.createDirectories(tmp.resolve("bare"));
+        assertThat(SelfUpdate.runtimeToReplace(Files.writeString(bare.resolve("jkit.exe"), "x"), binary)).isEmpty();
     }
 
     @Test

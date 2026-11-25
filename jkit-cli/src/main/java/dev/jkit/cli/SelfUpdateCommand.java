@@ -7,6 +7,8 @@ import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
@@ -51,8 +53,10 @@ final class SelfUpdateCommand implements Callable<Integer> {
         PrintStream say = json.json ? ctx.err : ctx.out;
         Changes report = new Changes(ctx);
         SelfUpdate.Kind kind = SelfUpdate.detect(binary, ctx.platform, Files::exists);
-        if (ctx.platform.isWindows() && kind == SelfUpdate.Kind.ARCHIVE && !check && SelfUpdate.deleteOld(binary)) {
-            report.fileDeleted(binary.resolveSibling(binary.getFileName() + ".old")); // left by the last update
+        if (ctx.platform.isWindows() && kind == SelfUpdate.Kind.ARCHIVE && !check) {
+            for (Path old : SelfUpdate.deleteOld(binary)) {
+                report.fileDeleted(old); // left by the last update
+            }
         }
         URI base = ctx.url("JKIT_SOURCES_RELEASES_URL", SelfUpdate.DEFAULT_BASE);
         String sums = ctx.http().getFresh(SelfUpdate.sumsUrl(base));
@@ -80,10 +84,15 @@ final class SelfUpdateCommand implements Callable<Integer> {
         } else {
             status = "updated";
             SelfUpdate.requireSigned(ctx.http(), base, latest, sums, sumsCheck);
-            Path old = update(ctx, base, latest, binary, report);
+            List<Path> olds = update(ctx, base, latest, binary, report);
             say.println("updated jkit " + current + " → " + latest.version() + " at " + Changes.tilde(binary.toString()));
-            if (old != null) {
-                report.note("the old binary is " + Changes.tilde(old.toString()) + " until the next self-update deletes it");
+            if (olds.size() == 1) {
+                report.note("the old binary is " + Changes.tilde(olds.get(0).toString())
+                        + " until the next self-update deletes it");
+            } else if (!olds.isEmpty()) {
+                report.note("the old files (" + olds.stream().map(o -> o.getFileName().toString())
+                        .collect(java.util.stream.Collectors.joining(", ")) + ") stay in "
+                        + Changes.tilde(binary.getParent().toString()) + " until the next self-update deletes them");
             }
         }
         report.print(say);
@@ -102,8 +111,12 @@ final class SelfUpdateCommand implements Callable<Integer> {
         return 0;
     }
 
-    /** Downloads, checks and puts the new binary in place; the .old file Windows leaves, or null. */
-    private static Path update(Context ctx, URI base, SelfUpdate.Release latest, Path binary, Changes report)
+    /**
+     * Downloads, checks and puts the new binary in place, after the runtime DLLs beside it on Windows
+     * (a newer runtime runs the old jkit.exe, an older one may not run the new); the .old files
+     * Windows leaves.
+     */
+    private static List<Path> update(Context ctx, URI base, SelfUpdate.Release latest, Path binary, Changes report)
             throws Exception {
         // under the install lock: an install clears tmp/install-* folders that no one holds
         try (AutoCloseable lock = ctx.store.lock()) {
@@ -112,12 +125,34 @@ final class SelfUpdateCommand implements Callable<Integer> {
             dev.jkit.core.WorkDirs.add(work);
             try {
                 Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
-                Path old = SelfUpdate.replace(fresh, binary, ctx.platform.isWindows());
+                List<Path> olds = new ArrayList<>();
+                if (ctx.platform.isWindows()) {
+                    for (String name : SelfUpdate.runtimeToReplace(fresh, binary)) {
+                        Path dll = binary.resolveSibling(name);
+                        Path old = SelfUpdate.replace(fresh.resolveSibling(name), dll, true);
+                        report.file(dll, false);
+                        report.file(old, true);
+                        olds.add(old);
+                    }
+                }
+                Path old;
+                try {
+                    old = SelfUpdate.replace(fresh, binary, ctx.platform.isWindows());
+                } catch (java.io.IOException | JkitException e) {
+                    if (olds.isEmpty()) {
+                        throw e;
+                    }
+                    // say what did change: the DLLs are newer, which the old jkit.exe runs with
+                    throw new JkitException("couldn't replace " + Changes.tilde(binary.toString()) + " (" + e.getMessage()
+                            + "); the Visual C++ runtime DLLs beside it were already updated, which the old jkit.exe also runs with",
+                            "run jkit self-update again");
+                }
                 report.file(binary, false);
                 if (old != null) {
                     report.file(old, true);
+                    olds.add(0, old);
                 }
-                return old;
+                return olds;
             } finally {
                 try {
                     Fs.deleteRecursively(work);

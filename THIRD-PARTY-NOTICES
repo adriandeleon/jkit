@@ -6,7 +6,8 @@ The jkit binary is compiled ahead of time with GraalVM Native Image. Besides jki
 parts of the Java runtime: the OpenJDK class library and GraalVM's Substrate VM, licensed under
 the GNU General Public License version 2 with the Classpath Exception (full text near the end),
 with the third-party code they carry (XML parser, Unicode data, zlib and others; see "Java
-runtime").
+runtime"). The Windows .zip also holds Microsoft's Visual C++ runtime DLLs, under Microsoft's
+terms (see "Microsoft Visual C++ runtime").
 
 The binaries are built with GraalVM Community Edition 25.0.5
 (https://github.com/graalvm/graalvm-ce-builds), except the macOS x64 binary, which is built with
@@ -2341,6 +2342,37 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ```
+
+==============================================================================
+Microsoft Visual C++ runtime (the Windows .zip only)
+==============================================================================
+
+The Windows .zip also holds two files that are not part of the jkit binary: vcruntime140.dll and
+vcruntime140_1.dll, the Microsoft Visual C++ runtime that jkit.exe uses. They are Microsoft's
+redistributable files, copied unchanged from Microsoft Visual Studio and signed by Microsoft.
+
+  Copyright (c) Microsoft Corporation. All rights reserved.
+
+They are not covered by jkit's MIT License or by any other license in this file. Microsoft allows
+them to be distributed with a program that uses them, under the "Distributable Code" terms of the
+Microsoft Software License Terms for Visual Studio (https://visualstudio.microsoft.com/license-terms/).
+Those terms carry over to anyone who distributes them further: if you pass these two files on, you
+must not
+
+- change them, or any copyright, trademark or patent notice in them;
+- use Microsoft's trademarks in your program's name, or in a way that suggests your program comes
+  from or is endorsed by Microsoft;
+- distribute them to run on anything other than Microsoft Windows;
+- include them in a malicious, deceptive or unlawful program; or
+- combine or distribute them so that any part of them becomes subject to a license that requires
+  source code to be disclosed, or that they be licensed for modification or distributed free.
+
+and you must require those you give them to to agree to terms that protect them at least as much
+as these.
+
+You don't need them if the Microsoft Visual C++ Redistributable (2015 or later, x64) is installed:
+delete both files and install it instead, with `winget install Microsoft.VCRedist.2015+.x64` or
+from https://aka.ms/vs/17/release/vc_redist.x64.exe. Windows Update then keeps it patched.
 
 ==============================================================================
 GNU General Public License, version 2, with the Classpath Exception (OpenJDK, GraalVM)

@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +28,12 @@ import java.util.regex.Pattern;
 public final class SelfUpdate {
     /** The releases page; {@code latest/download/SHA256SUMS} and {@code download/v<version>/<file>} under it. */
     public static final URI DEFAULT_BASE = URI.create("https://github.com/adriandeleon/jkit/releases/");
+
+    /**
+     * The Visual C++ runtime the Windows .zip ships next to jkit.exe (the native image links it, and
+     * Windows doesn't include it), so the .zip runs without the Visual C++ Redistributable.
+     */
+    public static final List<String> WINDOWS_RUNTIME = List.of("vcruntime140.dll", "vcruntime140_1.dll");
 
     private static final Pattern SUM_LINE = Pattern.compile("^([0-9a-fA-F]{64}) [ *](\\S+)$");
 
@@ -280,12 +288,43 @@ public final class SelfUpdate {
         }
     }
 
-    /** The jkit.exe.old an earlier self-update on Windows left; deleted when no longer running. */
-    public static boolean deleteOld(Path binary) {
-        try {
-            return Files.deleteIfExists(binary.resolveSibling(binary.getFileName() + ".old"));
-        } catch (IOException e) {
-            return false;
+    /**
+     * The runtime DLLs an update on Windows replaces along with {@code binary}: those next to it that
+     * the new archive (unpacked around {@code fresh}) has too. A DLL that isn't next to jkit.exe is
+     * never added: a folder jkit.exe shares with other programs would make them load it too, and a
+     * jkit that runs without the DLLs beside it has the runtime installed already.
+     */
+    public static List<String> runtimeToReplace(Path fresh, Path binary) {
+        List<String> names = new ArrayList<>();
+        for (String name : WINDOWS_RUNTIME) {
+            if (Files.isRegularFile(binary.resolveSibling(name), LinkOption.NOFOLLOW_LINKS)
+                    && Files.isRegularFile(fresh.resolveSibling(name), LinkOption.NOFOLLOW_LINKS)) {
+                names.add(name);
+            }
         }
+        return names;
+    }
+
+    /**
+     * The .old files an earlier self-update on Windows left (jkit.exe.old, and the runtime DLLs'),
+     * deleted once nothing has them open. Returns the ones deleted.
+     */
+    public static List<Path> deleteOld(Path binary) {
+        List<Path> names = new ArrayList<>();
+        names.add(binary.resolveSibling(binary.getFileName() + ".old"));
+        for (String name : WINDOWS_RUNTIME) {
+            names.add(binary.resolveSibling(name + ".old"));
+        }
+        List<Path> deleted = new ArrayList<>();
+        for (Path old : names) {
+            try {
+                if (Files.deleteIfExists(old)) {
+                    deleted.add(old);
+                }
+            } catch (IOException e) {
+                // still open (the jkit that left it is running): the next self-update tries again
+            }
+        }
+        return deleted;
     }
 }

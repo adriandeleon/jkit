@@ -87,7 +87,8 @@ The jkit binary is compiled ahead of time with GraalVM Native Image. Besides jki
 parts of the Java runtime: the OpenJDK class library and GraalVM's Substrate VM, licensed under
 the GNU General Public License version 2 with the Classpath Exception (full text near the end),
 with the third-party code they carry (XML parser, Unicode data, zlib and others; see "Java
-runtime").
+runtime"). The Windows .zip also holds Microsoft's Visual C++ runtime DLLs, under Microsoft's
+terms (see "Microsoft Visual C++ runtime").
 
 The binaries are built with GraalVM Community Edition 25.0.5
 (https://github.com/graalvm/graalvm-ce-builds), except the macOS x64 binary, which is built with
@@ -144,6 +145,12 @@ EOF
       "------------------------------------------------------------------------------"
     tr -d '\r' < "$root/packaging/third-party/jdk/$f"
   done
+
+  # the Visual C++ runtime DLLs the Windows .zip carries beside jkit.exe (release.yml bundles them)
+  printf '\n%s\nMicrosoft Visual C++ runtime (the Windows .zip only)\n%s\n\n' \
+    "==============================================================================" \
+    "=============================================================================="
+  tr -d '\r' < "$root/packaging/third-party/msvc-runtime.txt"
 
   printf '\n%s\nGNU General Public License, version 2, with the Classpath Exception (OpenJDK, GraalVM)\n%s\n\n' \
     "==============================================================================" \
