@@ -16,7 +16,7 @@ class ProgressBarTest {
     }
 
     private String said() {
-        return out.toString(StandardCharsets.UTF_8);
+        return out.toString(StandardCharsets.UTF_8).replace("\r\n", "\n"); // println's line ends are \r\n on Windows
     }
 
     @Test
