@@ -334,7 +334,8 @@ final class ConfigCommand implements Callable<Integer> {
                     : now.autoSwitch()
                     ? "new shells switch to a project's versions on cd (with the hook: " + Changes.HOOK_SETUP
                             + "); this shell doesn't until you open a new one"
-                    : "new shells no longer switch on cd; this shell still does until you open a new one");
+                    : "new shells no longer switch on cd; this shell still does until you open a new one"
+                            + " (or: export " + Config.AUTO_SWITCH_ENV + "=0)");
         }
     }
 
