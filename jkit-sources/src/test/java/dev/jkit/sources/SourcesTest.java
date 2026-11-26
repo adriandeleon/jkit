@@ -605,6 +605,63 @@ class SourcesTest {
     }
 
     @Test
+    void foojaysRealVendorListResolvesNamesSynonymsAndJkitsAliases() throws IOException {
+        // foojay's distributions answer, names and synonyms as it lists them
+        FoojaySource foojay = new FoojaySource(fake(Map.of("distributions", resource("foojay-distributions.json"))),
+                FoojaySource.DEFAULT_BASE);
+        Map<String, String> names = new java.util.LinkedHashMap<>();
+        for (String t : new String[] {"temurin", "Temurin", "adoptium", "ADOPTIUM"}) {
+            names.put(t, "temurin");
+        }
+        names.putAll(Map.of("zulu", "zulu", "Zulu Core", "zulu", "zulucore", "zulu", "corretto", "corretto",
+                "microsoft", "microsoft", "Microsoft Build of OpenJDK", "microsoft", "liberica", "liberica",
+                "liberica-nik", "liberica_native", "Liberica Native", "liberica_native", "kona", "kona"));
+        names.putAll(Map.of("sapmachine", "sap_machine", "SAP Machine", "sap_machine", "sap-machine", "sap_machine",
+                "openjdk", "oracle_open_jdk", "Oracle OpenJDK", "oracle_open_jdk", "graalvm-ce", "graalvm_community",
+                "GraalVM Community", "graalvm_community", "graalvm", "graalvm", "mandrel", "mandrel", "Red Hat", "redhat"));
+        for (Map.Entry<String, String> e : names.entrySet()) {
+            assertThat(foojay.requireKnown(Vendor.of(e.getKey()), e.getKey(), "").foojayName()).as(e.getKey())
+                    .isEqualTo(e.getValue());
+        }
+        assertThatThrownBy(() -> foojay.requireKnown(Vendor.of("aoj"), "aoj", "")).hasMessage("unknown JDK vendor 'aoj'");
+    }
+
+    @Test
+    void foojaysSynonymsCanAddNamesButNeverMoveOne() throws IOException {
+        // the vendor decides the signature check and the server pin: a list calling temurin, microsoft
+        // and corretto Zulu would install Zulu builds, from anywhere, without a signature
+        String poc = "{\"result\":[{\"api_parameter\":\"zulu\",\"synonyms\":[\"temurin\",\"microsoft\",\"corretto\"]}]}";
+        String hostile = """
+                {"result":[
+                  {"api_parameter":"zulu","synonyms":["zulu","Temurin","adoptium","Microsoft","corretto","sapmachine",
+                    "liberica","kona","zulucore","shared"]},
+                  {"api_parameter":"temurin","synonyms":["temurin"]},
+                  {"api_parameter":"liberica","synonyms":["liberica"]},
+                  {"api_parameter":"kona","synonyms":["kona","shared"]}]}""";
+        for (String list : new String[] {poc, hostile}) {
+            FoojaySource foojay = new FoojaySource(fake(Map.of("distributions", list)), FoojaySource.DEFAULT_BASE);
+            for (String signing : new String[] {"temurin", "Temurin", "adoptium", "microsoft", "corretto"}) {
+                assertThat(foojay.requireKnown(Vendor.of(signing), signing, "").foojayName()).as(signing)
+                        .isEqualTo(Vendor.of(signing).foojayName());
+            }
+            assertThat(foojay.requireKnown(Vendor.of("zulu"), "zulu", "").foojayName()).isEqualTo("zulu");
+        }
+        FoojaySource foojay = new FoojaySource(fake(Map.of("distributions", hostile)), FoojaySource.DEFAULT_BASE);
+        // a distribution's own name wins, and so does a name jkit reads as another vendor
+        assertThat(foojay.requireKnown(Vendor.of("liberica"), "liberica", "").foojayName()).isEqualTo("liberica");
+        assertThat(foojay.requireKnown(Vendor.of("kona"), "kona", "").foojayName()).isEqualTo("kona");
+        assertThatThrownBy(() -> foojay.requireKnown(Vendor.of("sapmachine"), "sapmachine", ""))
+                .hasMessage("unknown JDK vendor 'sapmachine'");
+        // a synonym two distributions claim means neither; one only Zulu claims still works
+        assertThatThrownBy(() -> foojay.requireKnown(Vendor.of("shared"), "shared", "")).hasMessage("unknown JDK vendor 'shared'");
+        assertThat(foojay.requireKnown(Vendor.of("ZuluCore"), "ZuluCore", "").foojayName()).isEqualTo("zulu");
+        // the vendors jkit has keys for need no list at all
+        FoojaySource none = new FoojaySource(fake(Map.of()), FoojaySource.DEFAULT_BASE);
+        assertThat(none.requireKnown(Vendor.of("adoptium"), "adoptium", "").foojayName()).isEqualTo("temurin");
+        assertThatThrownBy(() -> none.requireKnown(Vendor.of("zulu"), "zulu", "")).isInstanceOf(IOException.class);
+    }
+
+    @Test
     void mavenSkipsPreReleasesAndPointsToThem() throws IOException {
         String metadata = "<metadata><versioning><versions><version>3.9.11</version>"
                 + "<version>4.0.0-rc-7</version></versions></versioning></metadata>";

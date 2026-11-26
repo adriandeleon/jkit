@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -353,31 +354,62 @@ public final class FoojaySource {
      * Checks a vendor against foojay's distribution list (names and their synonyms, so "SAP
      * Machine" or "OpenJDK" work too) and returns it under foojay's name. An unknown name fails
      * with the closest match, before any version request can come back as a bare HTTP 400.
+     * <p>
+     * The vendor decides which key a signature must be made by and which server a download must
+     * come from, so foojay's synonyms can only add names, never move one: the vendors jkit has keys
+     * for are known without asking foojay; a distribution's own name, or a name jkit reads as
+     * another one (adoptium is temurin), always means that one; and a synonym two distributions
+     * both claim is ignored. Otherwise a list naming "temurin" a synonym of Zulu would make
+     * {@code jkit install jdk temurin} install Zulu builds without Temurin's signature.
      *
      * @param source how the name was given, for the message: "" when typed, else e.g. "your
      *               default vendor (jdk.vendor)"
      */
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
-        JsonNode root = Json.fetch(http, base.resolve(
-                "distributions?include_versions=false&include_synonyms=true"));
-        Map<String, String> bySynonym = new HashMap<>();
-        TreeSet<String> names = new TreeSet<>();
-        for (JsonNode d : root.path("result")) {
-            String param = Json.text(d, "api_parameter");
-            if (!Vendor.isSafeName(param)) {
-                continue;
-            }
-            Vendor known = Vendor.fromFoojay(param);
-            if (known.isRetired()) {
-                continue;
-            }
-            names.add(known.name());
-            bySynonym.put(param, param);
-            bySynonym.put(known.name(), param);
-            for (JsonNode syn : d.path("synonyms")) {
-                bySynonym.put(syn.asText().toLowerCase(Locale.ROOT), param);
+        Vendor typedVendor = Vendor.of(typed);
+        for (Vendor local : List.of(vendor, typedVendor)) {
+            if (SIGNING_VENDORS.contains(local.foojayName())) {
+                return Vendor.fromFoojay(local.foojayName());
             }
         }
+        JsonNode root = Json.fetch(http, base.resolve(
+                "distributions?include_versions=false&include_synonyms=true"));
+        Map<String, JsonNode> listed = new LinkedHashMap<>();
+        for (JsonNode d : root.path("result")) {
+            String param = Json.text(d, "api_parameter");
+            if (Vendor.isSafeName(param) && !Vendor.fromFoojay(param).isRetired()) {
+                listed.putIfAbsent(param, d);
+            }
+        }
+        TreeSet<String> names = new TreeSet<>();
+        for (String param : listed.keySet()) {
+            names.add(Vendor.fromFoojay(param).name());
+        }
+        // exact names first: foojay's own, and the name jkit reads the text as
+        for (Vendor local : List.of(vendor, typedVendor)) {
+            if (listed.containsKey(local.foojayName())) {
+                return Vendor.fromFoojay(local.foojayName());
+            }
+        }
+        Map<String, String> bySynonym = new HashMap<>();
+        Set<String> claimedTwice = new HashSet<>();
+        for (Map.Entry<String, JsonNode> d : listed.entrySet()) {
+            for (JsonNode syn : d.getValue().path("synonyms")) {
+                String name = syn.asText().toLowerCase(Locale.ROOT).trim();
+                // what jkit makes of the name by itself: an alias (adoptium, sapmachine) if it is one
+                String local = Vendor.of(name).foojayName();
+                boolean alias = !local.equals(name.replace('-', '_'));
+                if (name.isEmpty() || SIGNING_VENDORS.contains(local)
+                        || (alias || listed.containsKey(local)) && !local.equals(d.getKey())) {
+                    continue; // a name that already means a vendor: a synonym can't move it
+                }
+                String other = bySynonym.putIfAbsent(name, d.getKey());
+                if (other != null && !other.equals(d.getKey())) {
+                    claimedTwice.add(name);
+                }
+            }
+        }
+        bySynonym.keySet().removeAll(claimedTwice);
         String match = bySynonym.get(vendor.foojayName());
         if (match == null) {
             match = bySynonym.get(typed.toLowerCase(Locale.ROOT).trim());
