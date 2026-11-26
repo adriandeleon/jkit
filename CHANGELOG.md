@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`jkit env --install` (Windows) gives every program the global versions.** It sets
+  `JAVA_HOME` and the other `*_HOME` variables in your user environment to jkit's global links,
+  and puts their `bin` folders first on your user `PATH`, so cmd.exe, IDEs and programs started
+  from Explorer follow `jkit use … --global` too, not only a hooked PowerShell. Each change is
+  printed, a value it replaces included; the rest of `PATH` stays exactly as it was, `%VAR%`s
+  and all. `jkit env --uninstall` removes only what it set. `jkit doctor` says whether it's set
+  up, and warns about a `java` in the system `PATH`, which comes first; `jkit use … --global`
+  says whether programs outside PowerShell follow it.
+
 ### Changed
 
 - **Ctrl-C stops an install or self-update cleanly.** Ctrl-C, SIGTERM or SIGHUP during a download

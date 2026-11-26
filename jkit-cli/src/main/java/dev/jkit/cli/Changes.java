@@ -23,7 +23,8 @@ import java.util.Set;
  */
 final class Changes {
     /**
-     * {@code kind} env: {@code action} set, unset, add or remove (PATH entries). link: set or remove.
+     * {@code kind} env: {@code action} set, unset, add or remove (PATH entries); user-env: the same,
+     * for the user's own environment variables (Windows). link: set or remove.
      * folder: create or delete. file: a cached version list or checksum, create or update
      * ({@code value} is where its content came from), or a project file jkit wrote (no {@code value}).
      */
@@ -108,6 +109,15 @@ final class Changes {
         return this;
     }
 
+    /**
+     * A variable in the user's own environment (Windows, jkit env --install): {@code action} set,
+     * unset, add or remove (PATH entries), as for {@code env}.
+     */
+    Changes userEnv(String name, String action, String value) {
+        changes.add(new Change("user-env", name, action, value));
+        return this;
+    }
+
     /** A file this command deleted (jkit hook fish --uninstall). */
     Changes fileDeleted(Path file) {
         changes.add(new Change("file", file.toAbsolutePath().toString(), "delete", null));
@@ -144,6 +154,13 @@ final class Changes {
         String var = tool.homeVariable();
         note("new shells with the jkit hook: " + var + "=" + link
                 + (tool.onPath() ? ", PATH includes " + link + File.separator + "bin" : ""));
+        Boolean follows = UserEnvSetup.follows(ctx, tool); // null: not Windows
+        if (Boolean.TRUE.equals(follows)) {
+            note("programs started outside PowerShell (cmd.exe, IDEs) follow it too: your user environment's "
+                    + var + " names the link");
+        } else if (Boolean.FALSE.equals(follows)) {
+            note("for programs started outside PowerShell (cmd.exe, IDEs) too: jkit env --install");
+        }
         String shellChoice = ctx.env.get(ShellEnv.stateVariable(tool));
         String current = ctx.env.get(var);
         if (shellChoice != null && !shellChoice.isBlank()) {
@@ -194,6 +211,10 @@ final class Changes {
                 case "env unset" -> "unset  " + c.name();
                 case "env add" -> "PATH   + " + tilde(c.value());
                 case "env remove" -> "PATH   - " + tilde(c.value());
+                case "user-env set" -> "user   " + c.name() + "=" + tilde(c.value());
+                case "user-env unset" -> "user   " + c.name() + " removed";
+                case "user-env add" -> "user   PATH + " + tilde(c.value());
+                case "user-env remove" -> "user   PATH - " + tilde(c.value());
                 case "link set" -> "link   " + tilde(c.name()) + " → " + tilde(c.value());
                 case "link remove" -> "link   " + tilde(c.name()) + " removed";
                 case "folder create" -> "folder " + tilde(c.name()) + " created";

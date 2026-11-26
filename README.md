@@ -75,9 +75,13 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   yet): `notepad $PROFILE`, then add `jkit hook pwsh | Out-String | Invoke-Expression`.
   Windows PowerShell (5.1, the one Windows comes with) runs no profile until scripts are allowed:
   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7 allows them already.
-- `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. Programs started
-  outside a hooked PowerShell (cmd.exe, IDEs) see it only if you set `JAVA_HOME` to that folder
-  once, and add `%JAVA_HOME%\bin` to your user `PATH`.
+- `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. For programs
+  started outside a hooked PowerShell (cmd.exe, IDEs, Explorer) to follow it too, run
+  `jkit env --install` once: it sets `JAVA_HOME` and the other `*_HOME` variables in your user
+  environment to the global links, and puts their `bin` folders first on your user `PATH`, so
+  later `jkit use … --global` reaches them with no further change (programs pick it up when they
+  start). It prints each change; `jkit env --uninstall` takes out only what it set. A `java`
+  in the system `PATH` still comes first there; `jkit doctor` says if there is one.
 - Switching on `cd` isn't available in PowerShell yet.
 - Windows on ARM runs the x64 build under emulation.
 - `jkit.exe` needs the Microsoft Visual C++ runtime. The `.zip` carries its two DLLs next to

@@ -26,7 +26,12 @@ import picocli.CommandLine.Option;
         description = {"Prints the environment for a new process here.",
                 "Global versions, overridden by the project file. For CI, IDEs and scripts",
                 "without the hook: eval \"$(jkit env)\". Never uses the network.",
-                "To switch the current shell to the project's versions, use jkit sync."})
+                "To switch the current shell to the project's versions, use jkit sync.",
+                "",
+                "Windows: --install sets JAVA_HOME and the other *_HOME variables, and PATH, in",
+                "your user environment to jkit's global links, so cmd.exe, IDEs and programs",
+                "started from Explorer get the global versions; jkit use --global then reaches",
+                "them with no further change. --uninstall removes what --install set."})
 final class EnvCommand implements Callable<Integer> {
     static final List<String> SHELLS = List.of("bash", "zsh", "fish", "pwsh", "powershell"); // powershell: Windows PowerShell 5.1
 
@@ -43,6 +48,12 @@ final class EnvCommand implements Callable<Integer> {
 
     @Option(names = "--dir", paramLabel = "<path>", description = "The folder to look for a project file from (default: here).")
     Path dir;
+
+    @Option(names = "--install", description = "Windows: put the global versions in your user environment.")
+    boolean install;
+
+    @Option(names = "--uninstall", description = "Windows: take out what --install put there.")
+    boolean uninstall;
 
     @Mixin
     JsonOut.Flag json = new JsonOut.Flag();
@@ -76,6 +87,17 @@ final class EnvCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = Context.readOnly();
+        if (install || uninstall) {
+            if (install && uninstall) {
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "--install or --uninstall, not both");
+            }
+            if (shell != null || dir != null || noProject || global) {
+                throw new JkitException(picocli.CommandLine.ExitCode.USAGE,
+                        "--" + (install ? "install" : "uninstall") + " goes alone: it sets the global versions, "
+                                + "for every program, not one shell's or one project's");
+            }
+            return UserEnvSetup.run(ctx, install, json.json);
+        }
         String syntax = shell != null ? shell : defaultShell(ctx.env);
         if (!SHELLS.contains(syntax)) {
             if (!json.json) {

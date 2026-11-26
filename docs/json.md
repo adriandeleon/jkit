@@ -171,6 +171,29 @@ overridden by the project's pins (shell choices don't count).
   current PATH with old jkit install folders removed).
 - A pin with no matching install is an error document with exit code 3.
 
+## `jkit env --install --json`, `jkit env --uninstall --json`
+
+Windows only (elsewhere an error document). Writes the user's own environment variables
+(`HKCU\Environment`): `--install` sets each `*_HOME` of a tool with a global version to its
+global link and puts the links' `bin` folders first on the user `PATH`; `--uninstall` removes only
+what `--install` set. The message goes to stderr.
+
+```json
+{
+  "action": "install",
+  "changed": true,
+  "changes": [
+    { "kind": "user-env", "name": "JAVA_HOME", "action": "set", "value": "C:\\Users\\me\\.jkit\\global\\jdk" },
+    { "kind": "user-env", "name": "PATH", "action": "add", "value": "C:\\Users\\me\\.jkit\\global\\jdk\\bin" }
+  ],
+  "notes": ["programs started from now on get them (a new terminal, an IDE you restart); running ones, this shell included, keep what they have"]
+}
+```
+
+- `changed` is false when there was nothing to do; `changes` is then empty.
+- `user-env` changes have the actions of `env` ones: `set`, `unset`, and `add` / `remove` for
+  `PATH` entries.
+
 ## `jkit doctor [--network] --json`
 
 Exit code 1 when any check has level `fail`, 0 otherwise; the document is printed either way.
@@ -189,7 +212,7 @@ Exit code 1 when any check has level `fail`, 0 otherwise; the document is printe
 
 - `level` is `ok`, `info`, `warn` or `fail`; `fix` is null when there is nothing to do.
 - A check can report several lines (one per broken link, say). The ids are stable:
-  `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `store`,
+  `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `user-env`, `store`,
   `project`, `index`, `java-runs`, and `network` (only with `--network`).
 - Messages and fixes are for people and may change; filter on `id` and `level`.
 
@@ -234,7 +257,7 @@ and not cached); `verifiable` is also `null` when the build isn't downloadable.
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
 prints a line for each change under its own message, and with `--json` lists them in `changes`
 (`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`,
-`prune`, `config set` and `config unset`, `self-update`).
+`prune`, `config set` and `config unset`, `self-update`, `env --install` and `env --uninstall`).
 The `cd` hook (`shell.auto_switch`) follows the same rule: whenever it switches versions it prints
 the same lines on stderr, under a `jkit: using …` or `jkit: left the project …` line.
 
@@ -257,9 +280,12 @@ the same lines on stderr, under a `jkit: using …` or `jkit: left the project �
 - `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
   is reported per entry, with `action` `add` or `remove`.
+- `kind: user-env`: a variable of the user's own environment (Windows, `env --install` and
+  `--uninstall`), with the same actions as `env`.
 
-`list`, `status`, `env`, `exec` and `doctor` never change anything; nor does `hook` without
-`--install` or `--uninstall` (those edit your shell's startup file and `config.toml`).
+`list`, `status`, `env`, `exec` and `doctor` never change anything; nor do `hook` and `env`
+without `--install` or `--uninstall` (`hook`'s edit your shell's startup file and `config.toml`;
+`env`'s, the user's environment variables on Windows).
 
 ## `jkit install <tool>@<version> [vendor] --json`
 
