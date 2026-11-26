@@ -105,6 +105,56 @@ class ProjectFileTest {
     }
 
     @Test
+    void aWholeNumberIsAVersionButADecimalIsRefused() throws IOException {
+        Path file = write("home/p/jkit.toml", """
+                [tools]
+                jdk = 21
+                maven = 3.10
+                gradle = { version = 8 }
+                sbt = { version = 1.10 }
+                """);
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.get(Tool.JDK).version()).isEqualTo("21");
+        assertThat(spec.get(Tool.GRADLE).version()).isEqualTo("8");
+        assertThat(spec.tools()).doesNotContainKeys(Tool.MAVEN, Tool.SBT);
+        assertThat(spec.skipped()).containsExactlyInAnyOrder(Tool.MAVEN, Tool.SBT);
+        assertThat(spec.warnings()).containsExactly(
+                file + ":3: maven = 3.10 is a TOML number, which drops trailing zeros (3.10 reads as 3.1); "
+                        + "quote it: maven = \"3.10\", skipped maven",
+                file + ":5: sbt.version = 1.10 is a TOML number, which drops trailing zeros (3.10 reads as 3.1); "
+                        + "quote it: version = \"1.10\", skipped sbt");
+    }
+
+    @Test
+    void aPinItCannotReadIsSkippedButAnUnknownToolIsNot() throws IOException {
+        write("home/p/jkit.toml", "[tools]\nkotlin = \"2.1\"\ngradle = \"eight\"\njdk = true\n");
+        assertThat(find("home/p").skipped()).containsExactlyInAnyOrder(Tool.GRADLE, Tool.JDK);
+        write("home/q/.tool-versions", "java system\nnodejs 20\n");
+        assertThat(find("home/q").skipped()).containsExactly(Tool.JDK);
+        write("home/r/.java-version", "system\n");
+        assertThat(find("home/r").skipped()).containsExactly(Tool.JDK);
+    }
+
+    @Test
+    void eachPinNamesTheFileThatSetIt() throws IOException {
+        write("home/p/.sdkmanrc", "java=21.0.5-tem\n");
+        write("home/p/.tool-versions", "java temurin-17\nmaven 3.9.9\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.source()).isEqualTo(".sdkmanrc, .tool-versions");
+        assertThat(spec.source(Tool.JDK)).isEqualTo(".sdkmanrc");
+        assertThat(spec.source(Tool.MAVEN)).isEqualTo(".tool-versions");
+    }
+
+    @Test
+    void toolVersionsNotesWhereThePinDiffersFromTheFile() throws IOException {
+        Path file = write("home/p/.tool-versions", "java temurin-jre-21.0.5+11.0.LTS\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "21.0.5+11.0.LTS", Vendor.of("temurin"), false));
+        assertThat(spec.warnings()).containsExactly(file + ":1: 'temurin-jre-21.0.5+11.0.LTS' is a JRE; "
+                + "jkit installs full JDKs, pinned as the temurin JDK");
+    }
+
+    @Test
     void brokenTomlIsAnErrorWithTheLine() throws IOException {
         Path file = write("home/p/jkit.toml", "[tools]\njdk = \n");
         assertThatThrownBy(() -> find("home/p"))

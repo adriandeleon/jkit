@@ -260,6 +260,20 @@ class PinSyncTest {
     }
 
     @Test
+    void syncReadsABareNumberAndFailsOnAPinItCannotRead() throws Exception {
+        env.put("JKIT_ENV_FILE", envFile.toString());
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = 21\n");
+        assertThat(new SyncCommand().run(ctx(), project)).isZero();
+        assertThat(output()).contains("jdk 21: 21.0.9+10 temurin (installed)").doesNotContain("pins no tools");
+
+        // TOML reads 3.10 as 3.1: the pin is skipped, and sync must not pass as if nothing were pinned
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\nmaven = 3.10\n");
+        assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("jkit.toml pins maven, but jkit can't read that pin (see the warning above); nothing was installed");
+    }
+
+    @Test
     void syncWithoutAProjectFileFails() {
         assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
                 .isInstanceOf(JkitException.class).hasMessageStartingWith("no jkit.toml");
