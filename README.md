@@ -91,7 +91,10 @@ that replaces it).
 To check a download: `sha256sum -c SHA256SUMS --ignore-missing` (from 0.4.0, `gpg --verify
 SHA256SUMS.asc SHA256SUMS` checks that file against jkit's release key, in
 [SECURITY.md](SECURITY.md)), and for where it was built,
-`gh attestation verify <file> --repo adriandeleon/jkit`. Each release also has a CycloneDX SBOM,
+`gh attestation verify <file> --repo adriandeleon/jkit`. From the release after 0.4.0, the `.deb`
+and `.rpm` are also signed with the Vitrina repository's key: after
+`sudo rpm --import https://vitrina-project.dev/vitrina.asc`, `rpm -K` checks an `.rpm`, and so does
+`dnf` when it installs one. Each release also has a CycloneDX SBOM,
 made from the Linux x64 build: the other builds compile in the same libraries, and the macOS x64
 binary is built with Liberica NIK instead of GraalVM CE.
 
