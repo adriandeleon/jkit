@@ -131,7 +131,8 @@ class DoctorTest {
         Files.createSymbolicLink(tmp.resolve("user/.bashrc"), Files.writeString(dotfiles.resolve("bashrc"), ""));
         Path left = Files.writeString(dotfiles.resolve(".bashrc.81.jkit-tmp"), "half");
         assertThat(of(run(), "temp-files")).extracting(Finding::message)
-                .containsExactly("a temporary file an interrupted jkit write left: " + Changes.tilde(left.toString()));
+                // the link's target is found by its real path (on macOS, /var is a link to /private/var)
+                .containsExactly("a temporary file an interrupted jkit write left: " + Changes.tilde(left.toRealPath().toString()));
     }
 
     @Test

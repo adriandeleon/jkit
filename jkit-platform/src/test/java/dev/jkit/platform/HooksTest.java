@@ -91,12 +91,16 @@ class HooksTest {
     @Test
     void powershellHookDropsATrailingSlashFromTheUsersJavaHome() throws Exception {
         Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
-        String script = Hooks.powershell(tmp.resolve("root"), null) + "\n$env:PATH\n";
+        // PowerShell can write a progress record ("Preparing modules for first use") on its first
+        // run: it is turned off, and only stdout is read, so PATH is the whole output
+        String script = "$ProgressPreference = 'SilentlyContinue'\n" + Hooks.powershell(tmp.resolve("root"), null)
+                + "\n$env:PATH\n";
         String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         int ran = 0;
         for (String shell : new String[] {"powershell", "pwsh"}) {
+            Path err = tmp.resolve(shell + ".err");
             ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
-                    .redirectErrorStream(true);
+                    .redirectError(err.toFile());
             withoutToolHomes(pb);
             pb.environment().put("JAVA_HOME", mine + File.separator);
             Process p;
@@ -109,9 +113,17 @@ class HooksTest {
             p.getOutputStream().close();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
-            assertThat(out).as(shell).startsWith(mine.resolve("bin") + File.pathSeparator);
+            assertThat(out).as(() -> shell + ", stderr: " + read(err)).startsWith(mine.resolve("bin") + File.pathSeparator);
         }
         assumeTrue(ran > 0, "no PowerShell on this machine");
+    }
+
+    private static String read(Path file) {
+        try {
+            return Files.exists(file) ? Files.readString(file) : "";
+        } catch (IOException e) {
+            return e.toString();
+        }
     }
 
     private static void withoutToolHomes(ProcessBuilder pb) {
