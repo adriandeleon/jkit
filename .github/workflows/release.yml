@@ -15,8 +15,8 @@ name: Release
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
 # publishing anything: signing, release, homebrew and winget only run for a pushed tag, so the
 # macOS archives of a manual run are unsigned. Every push to main and every pull request that
-# changes the build or the packaging gets the same dry run, so a native-image regression or a
-# plugin bump fails there and not on the release tag.
+# changes the build or the packaging gets the same dry run (a push that only changes docs
+# doesn't), so a native-image regression or a plugin bump fails there and not on the release tag.
 #
 # If homebrew or winget fails after the release is published (a missing token, an outage), fix
 # the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
@@ -27,6 +27,10 @@ on:
   push:
     tags: ['v*']
     branches: [main]   # a dry run: the native binaries of what was merged
+    # not for a merge that only changes docs. Path filters apply to the branch push only: GitHub
+    # doesn't evaluate them for tag pushes, so every v* tag still builds and releases.
+    paths-ignore: ['**.md', 'docs/**', 'branding/**', '.github/ISSUE_TEMPLATE/**',
+                   '.github/workflows/ci.yml', '.github/workflows/notify-vitrina.yml']
   workflow_dispatch:
   pull_request:
     # also the native-image metadata (the JVM tests in ci.yml don't exercise it) and what the packages ship
@@ -269,10 +273,18 @@ jobs:
           "$python" -m http.server "$port" --bind 127.0.0.1 --directory "$mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
           server=$!
           trap 'kill "$server" 2> /dev/null || true' EXIT
+          up=false
           for _ in $(seq 50); do
-            if curl -fs -o /dev/null "http://127.0.0.1:$port/good/org/apache/maven/apache-maven/maven-metadata.xml"; then break; fi
+            if curl -fs -o /dev/null "http://127.0.0.1:$port/good/org/apache/maven/apache-maven/maven-metadata.xml"; then
+              up=true; break
+            fi
             sleep 0.2
           done
+          if [ "$up" != true ]; then
+            cat "$RUNNER_TEMP/mirror.log"
+            echo "::error::local mirror didn't start"
+            exit 1
+          fi
 
           export JKIT_SOURCES_MAVEN_URL="http://127.0.0.1:$port/good/"
           export JKIT_HOME="$RUNNER_TEMP/jkit-mirror-good"
