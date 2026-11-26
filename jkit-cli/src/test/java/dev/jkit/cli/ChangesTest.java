@@ -13,6 +13,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class ChangesTest {
@@ -129,6 +131,7 @@ class ChangesTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "jkit doesn't inspect PowerShell profiles: Windows always gets the $PROFILE hint")
     void withTheHookInstalledButNotLoadedTheHintIsANewShell() throws Exception {
         Path user = Files.createDirectories(home.resolve("user"));
         Context ctx = context(Map.of("HOME", user.toString(), "SHELL", "/bin/bash"));
