@@ -35,6 +35,15 @@ public interface OsServices {
         return Hooks.autoSwitch(shell, self);
     }
 
+    /**
+     * The user's own environment variables, which programs started outside a shell (an IDE, a
+     * Start-menu shortcut) get; null where there is no such thing, and the shell's startup file
+     * is the place (macOS, Linux).
+     */
+    default UserEnv userEnv() {
+        return null;
+    }
+
     static OsServices current() {
         return Platform.current().isWindows() ? new WindowsOs() : new UnixOs();
     }

@@ -17,6 +17,11 @@ import java.nio.file.Path;
 final class WindowsOs implements OsServices {
 
     @Override
+    public UserEnv userEnv() {
+        return new WindowsUserEnv();
+    }
+
+    @Override
     public void pointLink(Path link, Path target) throws IOException {
         Files.createDirectories(link.getParent());
         // the new junction first, under a name of its own; the old one goes only once it exists

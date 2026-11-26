@@ -143,6 +143,7 @@ ok    active jdk runs: openjdk 21.0.9 (x64)
 | `binary` | more than one `jkit` on PATH, or the hook's `jkit` isn't the first one | warn |
 | `outside-vars` | `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME`, `GRAALVM_HOME` point outside `~/.jkit` while jkit has a choice for that tool (same rule as `Changes.globalEffect`) | warn |
 | `path-order` | `java`, `mvn`, `gradle`, `sbt` on PATH resolve to the active jkit tool's `bin` | warn |
+| `user-env` | Windows: the user's own `*_HOME` variables name jkit's global links, for each tool with a global version (`jkit env --install`); folders in the system PATH holding `java.exe`, `mvn.cmd`, `gradle.bat` or `sbt.bat`, which win over the user PATH | info when none are set, warn when some are, or for a system PATH folder |
 | `links` | global links and `JKIT_SHELL_*` point at installs that still exist | fail |
 | `store` | install folders without a marker (interrupted install); leftovers in `~/.jkit/tmp` with their size | warn |
 | `config` | `config.toml` parses; default vendors are known (cached index only) | fail / warn |
