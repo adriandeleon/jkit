@@ -3,8 +3,9 @@ name: CI
 # Builds and tests every pull request and every push to main on Linux, macOS and Windows, on the
 # JVM (the native binary is built by release.yml). Linux also checks that THIRD-PARTY-NOTICES
 # matches the libraries the binary bundles, and dry-runs the packaging scripts. The workflows job
-# lints the workflow files; a pull request that changes the build or packaging also gets
-# release.yml's dry run, which builds the native binary and the packages.
+# lints the workflow files. release.yml's dry run, which builds the native binaries and the
+# packages and smoke-tests them, runs on every push to main and on pull requests that change the
+# build or the packaging.
 
 on:
   pull_request:

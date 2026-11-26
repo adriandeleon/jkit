@@ -12,7 +12,9 @@ import java.nio.file.Path;
  * Windows: directory junctions, which need no admin rights or Developer Mode. Java has no API to
  * create one, so this runs {@code cmd /c mklink /J}. A junction whose target is gone can't be
  * read back through Java, so each one has a {@code .<name>.target} file beside it naming its
- * target. Untested in the prototype (built on Linux).
+ * target. ci.yml runs the JVM tests on Windows Server 2025, and release.yml builds the native
+ * {@code jkit.exe} there and smoke-tests it (the read-only commands, a Maven install, the
+ * PowerShell hook); linking and unlinking a junction itself has no test of its own yet.
  */
 final class WindowsOs implements OsServices {
 

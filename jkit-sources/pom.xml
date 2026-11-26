@@ -11,7 +11,7 @@
   </parent>
 
   <artifactId>jkit-sources</artifactId>
-  <description>foojay, Gradle and Maven Central clients.</description>
+  <description>foojay, Gradle, Maven Central and sbt clients.</description>
 
   <dependencies>
     <dependency>
