@@ -38,8 +38,27 @@ final class Resolve {
      * exec, remove, upgrade), the newest LTS release installed. Any other spec is returned as is.
      */
     static ToolSpec lts(Context ctx, ToolSpec spec, boolean online) throws Exception {
+        return lts(ctx, spec, online, null, false);
+    }
+
+    /**
+     * {@link #lts(Context, ToolSpec, boolean)}; online with a {@code vendor}, the newest LTS release
+     * that vendor has a GA build of for this platform (and {@code fx}): a vendor that hasn't
+     * shipped the newest LTS yet gets its own newest, not an install that can't work.
+     */
+    static ToolSpec lts(Context ctx, ToolSpec spec, boolean online, Vendor vendor, boolean fx) throws Exception {
         if (spec == null || !spec.isLts()) {
             return spec;
+        }
+        if (online && vendor != null) {
+            // one request, cached and the same that install makes for a version-less spec
+            Integer major = newestLts(ctx.foojay().newestPerVendorAndMajor(ctx.platform, fx), vendor);
+            if (major == null) {
+                throw new JkitException(vendor + " has no LTS " + spec.tool() + (fx ? " with JavaFX" : "")
+                        + " build for " + ctx.platform, "see what it has: jkit search " + spec.tool().id() + " "
+                        + vendor.name() + (fx ? " --fx" : ""));
+            }
+            return new ToolSpec(spec.tool(), String.valueOf(major));
         }
         if (online) {
             for (dev.jkit.sources.FoojaySource.Major m : ctx.foojay().majors()) {
@@ -50,6 +69,22 @@ final class Resolve {
             throw new JkitException("foojay lists no LTS release");
         }
         return lts(ctx, spec, null, false);
+    }
+
+    /**
+     * The newest LTS major among {@code vendor}'s GA builds, by foojay's term of support (the
+     * usual LTS majors when it gives none); null when it has none.
+     */
+    static Integer newestLts(List<FoojaySource.Pkg> builds, Vendor vendor) {
+        Integer newest = null;
+        for (FoojaySource.Pkg p : builds) {
+            String term = p.termOfSupport() == null ? "" : p.termOfSupport();
+            boolean lts = term.isEmpty() ? ToolSpec.isLtsMajor(p.major()) : term.equalsIgnoreCase("lts");
+            if (p.vendor().equals(vendor) && lts && !p.version().isPreRelease() && (newest == null || p.major() > newest)) {
+                newest = p.major();
+            }
+        }
+        return newest;
     }
 
     /**
