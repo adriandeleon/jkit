@@ -5,6 +5,7 @@ import dev.jkit.core.JkitHome;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ShellRc;
 import dev.jkit.model.Envs;
+import dev.jkit.model.Platform;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
@@ -180,7 +181,7 @@ final class Changes {
      * How to load the hook in new shells. On Windows it is the line to add to the PowerShell
      * profile by hand, since hook --install doesn't edit PowerShell profiles.
      */
-    static final String HOOK_SETUP = File.separatorChar == '\\'
+    static final String HOOK_SETUP = Platform.hostIsWindows()
             ? "add to your PowerShell $PROFILE: jkit hook pwsh | Out-String | Invoke-Expression"
             : "jkit hook --install";
 

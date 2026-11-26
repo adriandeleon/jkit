@@ -40,6 +40,18 @@ import java.util.concurrent.atomic.AtomicReference;
  * with a 5xx are tried again (three tries by default). Closing it closes its connections.
  */
 public final class JdkHttp implements Http, AutoCloseable {
+    static {
+        // HttpClient leaves out Basic authentication to the proxy of an https request unless this
+        // is cleared, so a proxy with a user and password in HTTPS_PROXY would refuse jkit with 407.
+        // java.net.http reads it once, when its implementation classes initialise (the first
+        // HttpClient built), so it is set here, before this class builds one, rather than in a
+        // constructor, where a client built earlier would already have read the old value. It
+        // only matters with credentials, which jkit gives only to a proxy that has them in its
+        // URL. A value set on the command line is left alone.
+        if (System.getProperty("jdk.http.auth.tunneling.disabledSchemes") == null) {
+            System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
+        }
+    }
     /** When a download's speed is judged, once: long enough for a slow start to pick up. */
     static final Duration SLOW_AFTER = Duration.ofSeconds(30);
     /** A download that would still take longer than this at its speed then starts again on a new connection. */
@@ -94,8 +106,6 @@ public final class JdkHttp implements Http, AutoCloseable {
                 builder.proxy(new NoProxySelector(proxy.address(),
                         firstNonBlank(env, "NO_PROXY", "no_proxy")));
                 if (proxy.user() != null) {
-                    // HttpClient leaves out Basic for proxies of https requests unless this is cleared
-                    System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
                     builder.authenticator(new Authenticator() {
                         @Override
                         protected PasswordAuthentication getPasswordAuthentication() {
@@ -485,7 +495,7 @@ public final class JdkHttp implements Http, AutoCloseable {
         AtomicLong windowBytes = new AtomicLong();
         AtomicReference<String> stalled = new AtomicReference<>();
         // past a deadline or too slow on average: trying again would only multiply the time limit
-        AtomicBoolean final_ = new AtomicBoolean();
+        AtomicBoolean gaveUp = new AtomicBoolean();
         // judged once, at slowAfter: too slow then, and the download starts again on a new connection
         AtomicBoolean judged = new AtomicBoolean(
                 text || !mayRestart || total <= 0);
@@ -503,10 +513,10 @@ public final class JdkHttp implements Http, AutoCloseable {
                 why = "no data for " + idle.toSeconds() + " s";
             } else if (text && now - begun > TEXT_DEADLINE.toNanos()) {
                 why = "no complete answer within " + TEXT_DEADLINE.toSeconds() + " s";
-                final_.set(true);
+                gaveUp.set(true);
             } else if (!text && now - started > DOWNLOAD_DEADLINE.toNanos()) {
                 why = "not finished after " + DOWNLOAD_DEADLINE.toHours() + " hours";
-                final_.set(true);
+                gaveUp.set(true);
             } else if (!judged.get() && now - started > slowAfter.toNanos()) {
                 judged.set(true);
                 long got = received.get();
@@ -523,7 +533,7 @@ public final class JdkHttp implements Http, AutoCloseable {
                     && received.get() < MIN_AVERAGE_BYTES_PER_SECOND * ((now - started) / 1_000_000_000L)) {
                 // a server can stay above the per-window minimum and still take months for 2 GB
                 why = "under " + MIN_AVERAGE_BYTES_PER_SECOND / 1024 + " KB/s on average";
-                final_.set(true);
+                gaveUp.set(true);
             } else if (!text && now - windowStart.get() > idle.toNanos()) {
                 if (received.get() - windowBytes.get() < MIN_BYTES_PER_WINDOW) {
                     why = "under " + MIN_BYTES_PER_WINDOW / 1024 + " KB in " + idle.toSeconds() + " s";
@@ -571,7 +581,7 @@ public final class JdkHttp implements Http, AutoCloseable {
                 throw new SlowDownload(stalled.get());
             }
             if (stalled.get() != null) {
-                throw new NetworkException(uri, new IOException(stalled.get()), final_.get());
+                throw new NetworkException(uri, new IOException(stalled.get()), gaveUp.get());
             }
             throw new NetworkException(uri, e);
         } finally {

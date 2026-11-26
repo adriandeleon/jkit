@@ -1,7 +1,7 @@
 package dev.jkit.core;
 
 import dev.jkit.model.Perms;
-import java.io.File;
+import dev.jkit.model.Platform;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -47,7 +47,7 @@ public final class AtomicFile {
      * Returns the file written.
      */
     public static Path write(Path file, String text, Charset charset, boolean followLinks) throws IOException {
-        boolean windows = File.separatorChar == '\\';
+        boolean windows = Platform.hostIsWindows();
         Path target = followLinks ? resolve(file) : file;
         Path dir = target.toAbsolutePath().getParent();
         byte[] bytes = encode(text, charset);
