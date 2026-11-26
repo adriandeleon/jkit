@@ -21,6 +21,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -387,10 +393,13 @@ public final class FoojaySource {
         } else {
             major = Version.parse(versionSpec).part(0);
         }
-        List<Pkg> candidates = builds(major, vendor, platform, fx, pre).stream()
-                .filter(p -> p.version().matches(versionSpec))
-                .filter(p -> pre || !p.version().isPreRelease())
-                .toList();
+        List<Pkg> candidates = offlineCandidates(tool, versionSpec, vendor, platform, fx, pre, major);
+        if (candidates == null) {
+            candidates = builds(major, vendor, platform, fx, pre).stream()
+                    .filter(p -> p.version().matches(versionSpec))
+                    .filter(p -> pre || !p.version().isPreRelease())
+                    .toList();
+        }
         if (candidates.isEmpty()) {
             throw noMatch(tool, versionSpec, vendor, platform, fx, major);
         }
@@ -432,6 +441,39 @@ public final class FoojaySource {
         throw new JkitException(newest.vendor() + " " + newest.version() + " has no direct download"
                 + (candidates.size() > 1 ? ", nor does any other matching build" : ""),
                 "download it from the vendor's site, or pick another vendor");
+    }
+
+    /**
+     * Offline, when the vendor's list of builds for {@code major} isn't cached: the vendor's newest
+     * build of it from the list of each vendor's newest builds, which {@code jkit search} caches,
+     * if that one matches. Null online, or when the vendor's list is cached: then the caller asks
+     * for that list as usual.
+     */
+    private List<Pkg> offlineCandidates(Tool tool, String versionSpec, Vendor vendor, Platform platform, boolean fx,
+                                        boolean pre, int major) throws IOException {
+        if (!http.offline()) {
+            return null;
+        }
+        try {
+            builds(major, vendor, platform, fx, pre);
+            return null; // cached
+        } catch (IOException | JkitException notCached) {
+            List<Pkg> newest;
+            try {
+                newest = newestPerVendorAndMajor(platform, fx, pre).stream()
+                        .filter(p -> p.vendor().foojayName().equals(vendor.foojayName()) && p.major() == major)
+                        .filter(p -> p.version().matches(versionSpec) && (pre || !p.version().isPreRelease()))
+                        .toList();
+            } catch (IOException | JkitException e) {
+                newest = List.of();
+            }
+            if (newest.isEmpty()) {
+                throw new JkitException("--offline, but the list of " + vendor + " " + major + " builds isn't cached",
+                        "fill the cache: jkit search " + tool.id() + "@" + major + " " + vendor.name()
+                                + (fx ? " --fx" : "") + (pre ? " --pre" : "") + " (without --offline)");
+            }
+            return newest;
+        }
     }
 
     /**
@@ -481,15 +523,27 @@ public final class FoojaySource {
         return Availability.NONE;
     }
 
+    /** How many vendors' build lists a "no build matching" hint asks for at once. */
+    static final int NO_MATCH_THREADS = 4;
+
+    /**
+     * The error for a version {@code vendor} doesn't have, with a hint: the other vendors that have
+     * it, or, when every vendor was asked and none has it, what the newest build of the major is.
+     * A vendor whose list couldn't be asked (offline and not cached, a failed request, or past
+     * {@link #MAX_LOOKUPS}) is unknown, not "doesn't have it": then the hint names the vendors
+     * with builds of the major instead of claiming nobody has the version.
+     */
     private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,
                                   boolean fx, int major) {
         String what = tool.id() + (spec == null ? "" : "@" + spec);
         String message = vendor + " has no build matching " + what + " for " + platform;
         try {
             TreeSet<String> others = new TreeSet<>();
+            TreeSet<String> withMajor = new TreeSet<>();
             Version newest = null;
             TreeSet<String> newestFrom = new TreeSet<>();
-            int lookups = 0;
+            List<Pkg> toAsk = new ArrayList<>();
+            boolean unknown = false;
             for (Pkg p : newestPerVendorAndMajor(platform, fx)) {
                 if (p.major() != major || (tool == Tool.GRAALVM && !p.vendor().isGraalVmBased())) {
                     continue;
@@ -505,33 +559,137 @@ public final class FoojaySource {
                 if (p.vendor().equals(vendor)) {
                     continue;
                 }
+                withMajor.add(p.vendor().name());
                 // the list has each vendor's newest build only: one whose newest is past the spec
                 // (21.0.9 for jdk@21.0.5) may still have a matching older build, which takes a lookup
-                boolean has = p.version().matches(spec);
-                if (!has && spec != null && p.version().compareTo(Version.parse(spec)) > 0 && lookups++ < MAX_LOOKUPS) {
-                    try {
-                        has = builds(major, p.vendor(), platform, fx, false).stream().anyMatch(b -> b.version().matches(spec));
-                    } catch (IOException | JkitException e) {
-                        // that vendor's list failed: leave it out rather than claim it has the build
+                if (p.version().matches(spec)) {
+                    others.add(p.vendor().name());
+                } else if (spec != null && p.version().compareTo(Version.parse(spec)) > 0) {
+                    if (http.offline() || toAsk.size() >= MAX_LOOKUPS) {
+                        unknown = true; // not asked: offline, extra lookups are skipped
+                    } else {
+                        toAsk.add(p);
                     }
                 }
-                if (has) {
-                    others.add(p.vendor().name());
-                }
             }
+            unknown |= ask(toAsk, major, platform, fx, spec, others);
             if (!others.isEmpty()) {
                 return new JkitException(message, "available from: " + String.join(", ", others));
             }
-            if (newest != null && spec != null) {
+            if (newest != null && spec != null && !unknown) {
                 // nobody has it, so a list of vendors would mislead: say what the newest build is
                 return new JkitException(message, "no other vendor has " + what + " either; the newest "
                         + tool + " " + major + " is " + newest + " (" + String.join(", ", newestFrom) + ")",
                         "see them all: jkit search " + tool.id() + "@" + major);
             }
-        } catch (IOException ignored) {
+            if (!withMajor.isEmpty() && spec != null) {
+                // some vendors couldn't be asked: name who has the major, not who has the version
+                return new JkitException(message, "other vendors with " + (tool == Tool.GRAALVM ? "GraalVM " : "JDK ")
+                        + major + ": " + String.join(", ", withMajor), "see them all: jkit search " + tool.id() + "@" + major);
+            }
+        } catch (IOException | JkitException ignored) {
             // fall through to the plain message
         }
-        return new JkitException(vendor + " has no build matching " + what + " for " + platform);
+        return new JkitException(message);
+    }
+
+    /**
+     * Asks each of {@code vendors} for its builds of {@code major}, {@link #NO_MATCH_THREADS} at a
+     * time, adding those with a build matching {@code spec} to {@code have}. Returns whether any
+     * couldn't be asked.
+     */
+    private boolean ask(List<Pkg> vendors, int major, Platform platform, boolean fx, String spec, Set<String> have) {
+        if (vendors.isEmpty()) {
+            return false;
+        }
+        Set<String> found = ConcurrentHashMap.newKeySet();
+        AtomicBoolean failed = new AtomicBoolean();
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(NO_MATCH_THREADS, vendors.size()), r -> {
+            Thread t = new Thread(r, "jkit-vendor-lookup");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+            for (Pkg p : vendors) {
+                futures.add(pool.submit(() -> {
+                    try {
+                        if (builds(major, p.vendor(), platform, fx, false).stream().anyMatch(b -> b.version().matches(spec))) {
+                            found.add(p.vendor().name());
+                        }
+                    } catch (IOException | RuntimeException e) {
+                        failed.set(true); // that vendor's list failed: unknown, not "doesn't have it"
+                    }
+                }));
+            }
+            for (Future<?> f : futures) {
+                try {
+                    f.get();
+                } catch (ExecutionException e) {
+                    failed.set(true);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    failed.set(true);
+                    break;
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        have.addAll(found);
+        return failed.get();
+    }
+
+    /**
+     * How far a vendor's newest build of a major lags the newest of that major elsewhere.
+     *
+     * @param newest  the newest build of the major any vendor has
+     * @param vendors the vendors that have it, by name
+     */
+    public record Behind(Version newest, List<String> vendors) { }
+
+    /** How many updates a vendor's newest build must lag to count as {@link Behind}. */
+    static final int BEHIND_UPDATES = 2;
+
+    /**
+     * The builds of {@code index} (each vendor's newest per major, {@link #newestPerVendorAndMajor})
+     * that are at least {@link #BEHIND_UPDATES} updates older than the newest release of their
+     * major from another vendor: a vendor that stopped updating that release, such as openjdk
+     * (Oracle's jdk.java.net builds), which publishes only the first updates of each release. A
+     * vendor a single update behind is likely just later with the newest one. Pre-releases, and
+     * Mandrel, whose versions carry only the feature number ({@link #version}), don't count.
+     */
+    public static Map<Pkg, Behind> behind(List<Pkg> index) {
+        Map<Integer, Pkg> newest = new HashMap<>();
+        for (Pkg p : index) {
+            if (comparable(p)) {
+                newest.merge(p.major(), p, (a, b) -> update(b) > update(a) ? b : a);
+            }
+        }
+        Map<Pkg, Behind> out = new HashMap<>();
+        for (Pkg p : index) {
+            Pkg top = newest.get(p.major());
+            if (top == null || !comparable(p) || update(top) - update(p) < BEHIND_UPDATES) {
+                continue;
+            }
+            TreeSet<String> from = new TreeSet<>();
+            for (Pkg q : index) {
+                if (q.major() == p.major() && comparable(q) && update(q) == update(top)) {
+                    from.add(q.vendor().name());
+                }
+            }
+            out.put(p, new Behind(top.version(), List.copyOf(from)));
+        }
+        return out;
+    }
+
+    private static boolean comparable(Pkg p) {
+        return !p.version().isPreRelease() && !p.vendor().foojayName().equals("mandrel");
+    }
+
+    /** The interim and update numbers of a build as one number: 21.0.9 is 9, 8.0.462 is 462. */
+    private static long update(Pkg p) {
+        return (long) p.version().part(1) * 100_000 + p.version().part(2);
     }
 
     /**

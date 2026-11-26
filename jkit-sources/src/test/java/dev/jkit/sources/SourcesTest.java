@@ -386,6 +386,103 @@ class SourcesTest {
                         "see them all: jkit search jdk@21"));
     }
 
+    /** {@link #fake}, offline: what a CachingHttp with --offline does with what it has cached. */
+    static Http offline(Map<String, String> cached) {
+        Http fake = fake(cached);
+        return new Http() {
+            @Override
+            public String get(URI uri) throws IOException {
+                return fake.get(uri);
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean offline() {
+                return true;
+            }
+        };
+    }
+
+    @Test
+    void noMatchDoesNotClaimNobodyHasItWhenAVendorCouldNotBeAsked() {
+        String index = "{\"result\":[" + String.join(",",
+                pkg("t", "temurin", 21, "21.0.5+11", "glibc", ""),
+                pkg("z", "zulu", 21, "21.0.5+11", "glibc", ""),
+                pkg("c", "corretto", 21, "21.0.5+11", "glibc", "")) + "]}";
+        String corretto = "{\"result\":[" + pkg("c", "corretto", 21, "21.0.5+11", "glibc", "") + "]}";
+        // zulu's list fails (404 here): it may have 21.0.3, so "no other vendor has it" would be a guess
+        Map<String, String> routes = Map.of("latest=available", index, "distribution=temurin", "{\"result\":[]}",
+                "distribution=corretto", corretto);
+        for (Http http : List.of(fake(routes), offline(routes))) {
+            FoojaySource foojay = new FoojaySource(http, FoojaySource.DEFAULT_BASE);
+            assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21.0.3", Vendor.of("temurin"), Platform.LINUX_X64,
+                    false, false))
+                    .hasMessageContaining("temurin has no build matching jdk@21.0.3")
+                    .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                            "other vendors with JDK 21: corretto, zulu", "see them all: jkit search jdk@21"));
+        }
+        // offline, no vendor's list is asked for at all, cached or not
+        List<String> asked = new ArrayList<>();
+        Http counting = new Http() {
+            @Override
+            public String get(URI uri) throws IOException {
+                asked.add(uri.toString());
+                return SourcesTest.offline(routes).get(uri);
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean offline() {
+                return true;
+            }
+        };
+        assertThatThrownBy(() -> new FoojaySource(counting, FoojaySource.DEFAULT_BASE)
+                .resolve(Tool.JDK, "21.0.3", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(JkitException.class);
+        assertThat(asked).noneMatch(u -> u.contains("distribution=corretto") || u.contains("distribution=zulu"));
+    }
+
+    @Test
+    void offlineAnInstallUsesTheNewestBuildsSearchCached() throws IOException {
+        // jkit search jdk@17 caches each vendor's newest builds and the lookup of each; not temurin's 17 list
+        String index = "{\"result\":[" + pkg("b", "temurin", 21, "21.0.13+9", "glibc", "") + "]}";
+        Map<String, String> cached = Map.of("latest=available", index, "ids/b", INFO);
+        FoojaySource foojay = new FoojaySource(offline(cached), FoojaySource.DEFAULT_BASE);
+        Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
+        assertThat(a.version()).isEqualTo(Version.parse("21.0.13+9"));
+        // a version the cached newest builds can't answer: say which command fills the cache
+        assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21.0.5", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("--offline, but the list of temurin 21 builds isn't cached")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                        "fill the cache: jkit search jdk@21 temurin (without --offline)"));
+    }
+
+    @Test
+    void aVendorTwoUpdatesBehindTheNewestOfItsMajorIsBehind() {
+        List<Pkg> index = List.of(
+                new Pkg("o", Vendor.of("openjdk"), 21, Version.parse("21.0.2+13"), "o.tar.gz", "tar.gz", "lts", true),
+                new Pkg("t", Vendor.of("temurin"), 21, Version.parse("21.0.9+10"), "t.tar.gz", "tar.gz", "lts", true),
+                new Pkg("z", Vendor.of("zulu"), 21, Version.parse("21.0.9+10"), "z.tar.gz", "tar.gz", "lts", true),
+                // one update behind: likely just later with it
+                new Pkg("l", Vendor.of("liberica"), 21, Version.parse("21.0.8+12"), "l.tar.gz", "tar.gz", "lts", true),
+                new Pkg("m", Vendor.of("mandrel"), 21, Version.parse("21+23.1.5"), "m.tar.gz", "tar.gz", "lts", true),
+                new Pkg("o25", Vendor.of("openjdk"), 25, Version.parse("25.0.1+8"), "o25.tar.gz", "tar.gz", "lts", true),
+                new Pkg("e", Vendor.of("temurin"), 25, Version.parse("25.0.3-ea+1"), "e.tar.gz", "tar.gz", "lts", true));
+        Map<Pkg, FoojaySource.Behind> behind = FoojaySource.behind(index);
+        assertThat(behind).containsOnlyKeys(index.getFirst());
+        assertThat(behind.get(index.getFirst())).isEqualTo(
+                new FoojaySource.Behind(Version.parse("21.0.9+10"), List.of("temurin", "zulu")));
+    }
+
     @Test
     void noMatchNamesVendorsThatHaveTheMajor() {
         String index = "{\"result\":[" + pkg("z", "zulu", 22, "22.0.2+9", "glibc", "") + "]}";
