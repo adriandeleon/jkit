@@ -183,6 +183,14 @@ class DoctorTest {
         assertThat(store).extracting(Finding::message).containsExactly(
                 "unfinished install (no jkit-install.properties): " + half,
                 "2 KB left in " + home.resolve("tmp") + " by interrupted downloads");
+        // prune deletes what interrupted installs left and keeps a folder a running one uses; a
+        // file in tmp/ that no install made is named for rm
+        assertThat(store.get(1).fix()).startsWith("delete it: jkit prune (")
+                .endsWith("; the rest: rm -rf " + home.resolve("tmp/download.part"));
+        Files.delete(home.resolve("tmp/download.part"));
+        Files.write(Files.createDirectories(home.resolve("tmp/install-1")).resolve("jdk.tar.gz"), new byte[3000]);
+        assertThat(of(run(), "store").get(1).fix()).isEqualTo(
+                "delete it: jkit prune (which also removes builds a newer one replaced; --dry-run shows what)");
     }
 
     @Test

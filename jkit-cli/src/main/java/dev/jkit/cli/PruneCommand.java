@@ -325,13 +325,18 @@ final class PruneCommand implements Callable<Integer> {
      */
     static List<Path> leftovers(Context ctx) throws IOException {
         List<Path> found = new ArrayList<>();
-        collect(ctx.home.tmp(), name -> name.startsWith("install-") || name.startsWith("remove-"), found);
+        collect(ctx.home.tmp(), PruneCommand::workFolder, found);
         found.removeIf(WorkDirs::inUse);
         for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             collect(ctx.home.tools(tool), name -> name.startsWith(".remove-")
                     || name.startsWith(".") && name.endsWith(".partial"), found);
         }
         return found;
+    }
+
+    /** The name of a folder an install, a removal or self-update works in, in tmp/. */
+    static boolean workFolder(String name) {
+        return name.startsWith("install-") || name.startsWith("remove-");
     }
 
     private static void collect(Path dir, Predicate<String> match, List<Path> into)
