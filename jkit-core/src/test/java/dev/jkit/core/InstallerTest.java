@@ -259,6 +259,37 @@ class InstallerTest {
     }
 
     @Test
+    void aSignatureThatRefusesTheInstallDoesSoBeforeTheDownload() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] retired;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("corretto-11.0.4.11.1.sig")) {
+            retired = in.readAllBytes();
+        }
+        // none published, junk, a retired key and another vendor's key: all known from the .sig alone
+        for (byte[] sig : new byte[][] {null, "<html>".getBytes(), retired, realTemurinSignature()}) {
+            java.util.List<URI> fetched = new java.util.ArrayList<>();
+            Http http = withSignature(archive, sig);
+            Http counting = new Http() {
+                @Override
+                public String get(URI uri) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public void download(URI uri, Path target, Progress progress) throws IOException {
+                    fetched.add(uri);
+                    http.download(uri, target, progress);
+                }
+            };
+            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), Http.Progress.NONE, true))
+                    .isInstanceOf(Installer.SignatureRequired.class);
+            assertThat(fetched).as("only the signature").containsExactly(corretto().signature());
+        }
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
     void aSignedJdkMustBeTheVersionAskedFor() throws Exception {
         Path jdk = Files.createDirectories(tmp.resolve("jdk"));
         // what amazon-corretto-21.0.13.1.2-linux-x64.tar.gz says

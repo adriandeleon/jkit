@@ -114,6 +114,15 @@ public final class Installer {
         }
         IOException failure = null;
         try {
+            List<String> notes = new ArrayList<>();
+            boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
+            if (signatureRequired && !signable) {
+                throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
+                        + " check; nothing was installed");
+            }
+            // the signature first: a few hundred bytes that may already refuse the install (none
+            // published, or made with a key jkit doesn't have), which then doesn't wait for the download
+            byte[] signature = signable ? fetchSignature(artifact, work, notes, signatureRequired) : null;
             Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
             http.download(artifact.url(), archive, progress);
             boolean verified = false;
@@ -122,13 +131,8 @@ public final class Installer {
                 Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
                 verified = Checksums.strong(artifact.checksumAlgorithm());
             }
-            List<String> notes = new ArrayList<>();
-            boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
-            if (signatureRequired && !signable) {
-                throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
-                        + " check; nothing was installed");
-            }
-            String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
+            String signedBy = signature != null ? checkSignature(artifact, archive, signature, notes, signatureRequired)
+                    : null;
             if (artifact.signature() == null && artifact.checksum() != null
                     && Signatures.covers(artifact.tool(), artifact.vendor())) {
                 // Temurin before mid-2022, Maven before 3.9.0: said, so the user knows what was checked
@@ -206,18 +210,13 @@ public final class Installer {
     }
 
     /**
-     * Fetches the publisher's signature and checks the archive with it. A signature that doesn't
-     * match refuses the install; one jkit can't fetch or check refuses it too when {@code required},
-     * otherwise leaves the checksum as the only check and says so in {@code notes}. Returns who
-     * signed it, or null.
+     * Fetches the publisher's signature and looks at what can be told of it without the download:
+     * who made it, and whether it is of a kind jkit accepts. Returns it when checking the download
+     * decides. One jkit can't fetch or check refuses the install when {@code required}; otherwise
+     * the checksum is the only check, {@code notes} says so, and this returns null.
      */
-    private String checkSignature(Artifact artifact, Path archive, Path work, List<String> notes, boolean required)
+    private byte[] fetchSignature(Artifact artifact, Path work, List<String> notes, boolean required)
             throws IOException {
-        String label = artifact.label();
-        String unchecked = artifact.checksum() == null ? "; installed unchecked (--allow-unverified)"
-                : "; installed with only its checksum checked";
-        String refused = artifact.checksum() == null ? ", and it has no published checksum; nothing was installed"
-                : "; nothing was installed";
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
@@ -225,37 +224,66 @@ public final class Installer {
             http.download(artifact.signature(), file, Http.Progress.NONE, Signatures.MAX_SIGNATURE);
             bytes = Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
-            String why = "couldn't fetch the signature of " + label + " ("
+            String why = "couldn't fetch the signature of " + artifact.label() + " ("
                     + Visible.of(String.valueOf(e.getMessage())) + ")";
             if (required) {
-                throw new SignatureRequired(why + refused);
+                throw new SignatureRequired(why + refused(artifact));
             }
-            notes.add("warning: " + why + unchecked);
+            notes.add("warning: " + why + unchecked(artifact));
             return null;
         }
-        Signatures.Result result = Signatures.verify(archive, bytes, artifact.tool(), artifact.vendor());
+        Signatures.Result early = Signatures.precheck(bytes, artifact.tool(), artifact.vendor());
+        if (early == null) {
+            return bytes;
+        }
+        uncheckable(artifact, early, notes, required);
+        return null;
+    }
+
+    /**
+     * Checks the archive with the signature {@link #fetchSignature} returned. One that doesn't
+     * match refuses the install. Returns who signed it, or null.
+     */
+    private static String checkSignature(Artifact artifact, Path archive, byte[] signature, List<String> notes,
+                                         boolean required) throws IOException {
+        Signatures.Result result = Signatures.verify(archive, signature, artifact.tool(), artifact.vendor());
         switch (result.outcome()) {
             case GOOD -> {
                 notes.add("signature checked: signed by " + result.detail());
                 return result.signer();
             }
-            case BAD -> throw new JkitException("the signature of " + label + " doesn't match the download ("
+            case BAD -> throw new JkitException("the signature of " + artifact.label() + " doesn't match the download ("
                     + result.detail() + "); nothing was installed",
                     "try again; if it keeps happening, the download or the signature is wrong at the source: "
                             + "pick another build or vendor");
             default -> {
-                String why = "couldn't check the signature of " + label + ": " + result.detail();
-                // a key jkit doesn't know may be the publisher's new one; a retired one stays unknown
-                String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
-                        ? " (a newer jkit may know a new key: jkit self-update)"
-                        : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
-                if (required) {
-                    throw new SignatureRequired(why + newer + refused);
-                }
-                notes.add("warning: " + why + newer + unchecked);
+                uncheckable(artifact, result, notes, required);
                 return null;
             }
         }
+    }
+
+    /** A signature jkit can't check: refuses the install when {@code required}, else a warning in {@code notes}. */
+    private static void uncheckable(Artifact artifact, Signatures.Result result, List<String> notes, boolean required) {
+        String why = "couldn't check the signature of " + artifact.label() + ": " + result.detail();
+        // a key jkit doesn't know may be the publisher's new one; a retired one stays unknown
+        String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
+                ? " (a newer jkit may know a new key: jkit self-update)"
+                : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
+        if (required) {
+            throw new SignatureRequired(why + newer + refused(artifact));
+        }
+        notes.add("warning: " + why + newer + unchecked(artifact));
+    }
+
+    private static String unchecked(Artifact artifact) {
+        return artifact.checksum() == null ? "; installed unchecked (--allow-unverified)"
+                : "; installed with only its checksum checked";
+    }
+
+    private static String refused(Artifact artifact) {
+        return artifact.checksum() == null ? ", and it has no published checksum; nothing was installed"
+                : "; nothing was installed";
     }
 
     /**
