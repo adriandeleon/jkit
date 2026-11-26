@@ -6,8 +6,10 @@ import dev.jkit.model.Visible;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -47,9 +49,12 @@ public final class Archives {
             this.entries = entryLimit;
         }
 
-        void entry() {
+        void entry() throws IOException {
             if (--entries < 0) {
                 throw unsafe("more than " + entryLimit + " entries");
+            }
+            if (WorkDirs.interrupted()) {
+                throw new InterruptedIOException("interrupted"); // Ctrl-C is deleting the folder
             }
         }
 
@@ -233,10 +238,26 @@ public final class Archives {
         }
     }
 
-    /** createDirectories that refuses to go through a symlink an earlier entry made. */
+    /**
+     * createDirectories that refuses to go through a symlink an earlier entry made, and makes the
+     * folders below {@code target} one at a time, each in one that exists: should Ctrl-C delete the
+     * work folder halfway, the next entry fails instead of making it again, to be left behind.
+     */
     private static void createDirectories(Path target, Path dir) throws IOException {
         noLinksBetween(target, dir, dir.toString());
-        Files.createDirectories(dir);
+        Path p = target;
+        for (Path name : target.relativize(dir)) {
+            p = p.resolve(name.toString());
+            if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                try {
+                    Files.createDirectory(p);
+                } catch (FileAlreadyExistsException e) {
+                    if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                        throw e;
+                    }
+                }
+            }
+        }
     }
 
     /** Refuses a path below {@code target} with a symlink anywhere on the way (the path itself included). */

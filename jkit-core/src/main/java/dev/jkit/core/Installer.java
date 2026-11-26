@@ -143,7 +143,8 @@ public final class Installer {
             // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
             // whoever can replace the download can usually replace its checksum too
             verified = signedBy != null || (verified && !signable);
-            Path out = work.resolve("out");
+            // made here, not by extract with its parents: once Ctrl-C has deleted the work folder this fails
+            Path out = Files.createDirectory(work.resolve("out"));
             try {
                 Archives.extract(archive, out, artifact.archiveType());
             } catch (IOException e) {
@@ -381,7 +382,7 @@ public final class Installer {
         boolean windows = File.separatorChar == '\\';
         for (int attempt = 1; ; attempt++) {
             try {
-                Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+                WorkDirs.moveIn(() -> Files.move(from, to, StandardCopyOption.ATOMIC_MOVE), from);
                 return;
             } catch (AtomicMoveNotSupportedException e) {
                 copyAcross(from, to, Fs::copyTree);
@@ -417,7 +418,7 @@ public final class Installer {
         WorkDirs.add(partial);
         try {
             copy.copy(from, partial);
-            Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
+            WorkDirs.moveIn(() -> Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE), from, partial);
         } catch (IOException | RuntimeException e) {
             try {
                 Fs.deleteRecursively(partial);

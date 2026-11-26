@@ -2,6 +2,7 @@ package dev.jkit.core;
 
 import dev.jkit.model.Perms;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
@@ -33,6 +34,14 @@ public final class WorkDirs {
     /** Each folder in use, with the lock on its {@value #LOCK} file when {@link #create} made it. */
     private static final Map<Path, Optional<FileChannel>> ACTIVE = new ConcurrentHashMap<>();
 
+    /** Folders whose install is in tools/ already: deleted on Ctrl-C all the same, but not reported. */
+    private static final Set<Path> DONE = ConcurrentHashMap.newKeySet();
+
+    /** Held by {@link #moveIn} and {@link #deleteAll}, so an install never moves while Ctrl-C deletes. */
+    private static final Object MOVING = new Object();
+
+    private static volatile boolean interrupted;
+
     private WorkDirs() { }
 
     /** A folder another lock already keeps others from deleting (self-update holds the install lock). */
@@ -60,6 +69,7 @@ public final class WorkDirs {
 
     /** The folder is done with (deleted, or about to be by this process): lets go of its lock. */
     public static void remove(Path dir) {
+        DONE.remove(key(dir));
         Optional<FileChannel> channel = ACTIVE.remove(key(dir));
         if (channel != null) { // null once Ctrl-C's deleteAll took it
             channel.ifPresent(WorkDirs::close);
@@ -92,22 +102,91 @@ public final class WorkDirs {
         }
     }
 
-    /** Deletes every folder still in use, as far as it can; returns the ones it deleted. */
-    public static List<Path> deleteAll() {
-        List<Path> deleted = new ArrayList<>();
-        for (Path dir : List.copyOf(ACTIVE.keySet())) {
-            Optional<FileChannel> channel = ACTIVE.remove(dir);
-            if (channel != null) {
-                channel.ifPresent(WorkDirs::close); // first: Windows doesn't delete an open file
+    /**
+     * Ctrl-C or a signal is ending jkit, from its handler, before {@link #deleteAll}: from then on
+     * no install moves into tools/ ({@link #moveIn}), and jkit's main thread leaves ending the
+     * process to the handler ({@link #interrupted}).
+     */
+    public static void interrupt() {
+        interrupted = true;
+    }
+
+    /** Whether {@link #interrupt} was called: jkit is being ended by a signal. */
+    public static boolean interrupted() {
+        return interrupted;
+    }
+
+    /** An install's move into tools/: a rename, quick. */
+    @FunctionalInterface
+    public interface Move {
+        void run() throws IOException;
+    }
+
+    /**
+     * Runs {@code move}, which moves an install into tools/ from {@code moved} (a folder in a work
+     * folder, or a copy next to tools/); then the folders they are in hold nothing a Ctrl-C needs
+     * to report. Not once jkit is being interrupted, and never while {@link #deleteAll} runs:
+     * deleting the folder halfway through a move would leave a partial install with its marker in
+     * tools/, after saying nothing was installed.
+     */
+    public static void moveIn(Move move, Path... moved) throws IOException {
+        synchronized (MOVING) {
+            if (interrupted) {
+                throw new InterruptedIOException("interrupted");
             }
-            try {
-                Fs.deleteRecursively(dir);
-                deleted.add(dir);
-            } catch (IOException | RuntimeException e) {
-                // the next install or jkit prune clears what's left
+            move.run();
+            for (Path from : moved) {
+                for (Path dir : ACTIVE.keySet()) {
+                    if (key(from).startsWith(dir)) {
+                        DONE.add(dir);
+                    }
+                }
             }
         }
-        return deleted;
+    }
+
+    /**
+     * Deletes every folder still in use, as far as it can, after any move into tools/ under way;
+     * returns the ones it deleted, not counting those whose install was moved into tools/.
+     */
+    public static List<Path> deleteAll() {
+        synchronized (MOVING) {
+            List<Path> deleted = new ArrayList<>();
+            for (Path dir : List.copyOf(ACTIVE.keySet())) {
+                Optional<FileChannel> channel = ACTIVE.remove(dir);
+                if (channel != null) {
+                    channel.ifPresent(WorkDirs::close); // first: Windows doesn't delete an open file
+                }
+                if (delete(dir) && !DONE.remove(dir)) {
+                    deleted.add(dir);
+                }
+            }
+            return deleted;
+        }
+    }
+
+    /**
+     * Deletes {@code dir}, trying again for a moment: the install may still be unpacking into a
+     * part of it not deleted yet, until its next file finds its folder gone (or it sees it is
+     * {@link #interrupted}), and a folder that gains a file while it is deleted isn't empty.
+     */
+    private static boolean delete(Path dir) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Fs.deleteRecursively(dir);
+                return true;
+            } catch (IOException | RuntimeException e) {
+                if (attempt >= 20) {
+                    return false; // the next install or jkit prune clears what's left
+                }
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
     }
 
     private static Path key(Path dir) {

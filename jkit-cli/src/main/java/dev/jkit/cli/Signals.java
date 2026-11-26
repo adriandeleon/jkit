@@ -80,6 +80,24 @@ final class Signals {
         };
     }
 
+    /**
+     * Once a signal handler of jkit's runs ({@link WorkDirs#interrupted}), waits for it to end jkit
+     * instead of returning: the main thread would otherwise print an error the handler's deletion
+     * caused ("file not found" in the folder it was unpacking into) and exit 1 before the handler
+     * ends jkit from SIGINT, and a shell running jkit wouldn't stop. Returns at once otherwise, and
+     * after half a minute in any case.
+     */
+    static void awaitHandler() {
+        if (!WorkDirs.interrupted()) {
+            return;
+        }
+        try {
+            Thread.sleep(30_000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     /** Whether jkit itself got a SIGINT while it ignored it (Ctrl-C reaches the whole process group). */
     static boolean gotInt() {
         return gotInt;
