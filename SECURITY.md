@@ -78,24 +78,40 @@ matters:
     Temurin build from before Adoptium signed, a signature link foojay lists is used if it is
     HTTPS; over plain http it is refused, not ignored. It takes only builds foojay lists under the vendor and major version you asked for,
     so an answer can't call a Temurin build "Zulu", or a Temurin 21 build 17.0.3, to have it
-    installed without the signature check. And a build of these three vendors must download from
-    the vendor's own server, at a link of the vendor's own shape ending in the build's file name,
+    installed without the signature check. Vendor names are checked against foojay's list of
+    distributions, but foojay's synonyms can only add names: Temurin (and `adoptium`), Microsoft
+    and Corretto are known without asking foojay, a distribution's own name or a name jkit reads
+    as an alias always means that vendor, and a synonym two distributions claim is ignored. And a
+    build of these three vendors, or of Zulu, Liberica, SapMachine, Semeru, Oracle, GraalVM CE,
+    Oracle GraalVM or Mandrel, must download from the vendor's own server, at a link of the vendor's own shape ending in the build's file name,
     or it is refused: a release asset of Adoptium's `temurin<N>-binaries` repositories
     (`github.com/adoptium/temurin<N>-binaries/releases/download/<tag>/<file>`; GitHub serves a
-    fork's commits from the original repository's other paths), `aka.ms/download-jdk/<file>`, and
+    fork's commits from the original repository's other paths), `aka.ms/download-jdk/<file>`,
     `corretto.aws/downloads/resources/<version>/<file>` (or `d3pxv6yz143wms.cloudfront.net/<version>/<file>`,
-    where Amazon still serves its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
+    where Amazon still serves its 2019 builds), `cdn.azul.com/zulu/bin/<file>` (or
+    `zulu-embedded/bin/`), a release asset of `bell-sw/Liberica`, `SAP/SapMachine`,
+    `ibmruntimes/semeru<N>-binaries` (or `-certified-binaries`), `graalvm/graalvm-ce-builds` or
+    `graalvm/mandrel` on GitHub, `download.oracle.com/java/` and `/graalvm/`, and Oracle's
+    `gds.oracle.com/api/<date>/artifacts/<id>/content`. That is where foojay lists every one of them; jkit checks the address foojay
     names, and the redirects the vendor's server answers with are checked only to stay on HTTPS.
     A foojay mirror of your own (`JKIT_SOURCES_FOOJAY_URL`) may serve the builds these vendors
     signed itself, with each `.sig` next to its file: the signature, which is still required, and
     the version check after it are what make those safe, not the host. It must keep the vendor's
-    links for the builds they didn't sign (Temurin before July 2022). A mirror on this machine
+    links for the builds they didn't sign (Temurin before July 2022, and every build of the other vendors above). A mirror on this machine
     (`http://localhost`) may serve those too.
   - What that leaves a compromised foojay: it can choose which build of the vendor and major you
     asked for is installed, an older one included (with no version given, also which major), and
     for a Temurin build from before July 2022 it supplies the checksum. Such a build still comes
     from Adoptium's GitHub releases, but only its checksum is checked, and jkit can't tell which
-    of Adoptium's builds it is. For a signed build it can only make the install fail.
+    of Adoptium's builds it is. For a signed build it can only make the install fail. For Zulu,
+    Liberica, SapMachine, Semeru, Oracle, GraalVM CE, Oracle GraalVM and Mandrel it also supplies
+    the checksum, but the file still comes from the vendor's server. For other vendors (Kona,
+    Dragonwell, JetBrains, Liberica NIK, jdk.java.net's OpenJDK and the rest) it chooses the link
+    and the checksum: install those only if you trust foojay as much as the vendor.
+  - When a lookup fails (the server is down, answers 5xx or 429, or a captive portal answers),
+    jkit uses its cached answer only if it is at most 7 days old; an older one fails, and
+    `--offline` uses it on purpose. So a network that only blocks foojay can't keep jkit on an
+    old version list for long.
   - Where there is a checksum, the signature is checked as well, never instead of it. Corretto
     publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
@@ -113,8 +129,13 @@ matters:
   jkit's release key, built into jkit (`A944 4E8F 5048 FEBC B942 E110 FC89 EBE6 8C45 39E6`, in
   `jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc`):
   someone who could replace the files on the releases page couldn't sign them. A release without
-  a good signature is refused. Releases before 0.4.0 have no `SHA256SUMS.asc`. `--check`, and the
-  upgrade command printed for Homebrew, apt, dnf and winget, download nothing, so they don't need it. Each release also
+  a good signature is refused. Releases before 0.4.0 have no `SHA256SUMS.asc`. The command
+  printed for Homebrew, the apt repository and winget downloads nothing, so it doesn't need it. For
+  an `.rpm` or a `.deb` installed from a file (dnf and apt don't check those packages'
+  signatures), self-update and `--check` check `SHA256SUMS.asc` first and print a command that
+  downloads the package into a new `mktemp -d` folder and installs it only if `sha256sum -c`
+  matches the SHA-256 the signed `SHA256SUMS` lists. A pre-release replaces only a pre-release,
+  even if it is marked as the latest release. Each release also
   has a build attestation (`gh attestation verify <file> --repo adriandeleon/jkit`). A jkit
   installed with Homebrew, apt, dnf or winget is left to that tool. On Windows, the Visual C++
   runtime DLLs next to `jkit.exe` are replaced from the same checked archive; a folder without
@@ -123,7 +144,8 @@ matters:
   Vitrina apt repository signs its index with (`8486 A7AF 4FC8 FEE9 3D83 CDB4 EA5F A138 C2C0 9C4A`,
   in `packaging/linux/signing-key.asc` and at https://vitrina-project.dev/vitrina.asc), so apt
   and dnf users trust one key. After `sudo rpm --import https://vitrina-project.dev/vitrina.asc`,
-  `rpm -K` checks an `.rpm` and `dnf` checks it when it installs. The `.deb`'s signature is a
+  `rpm -K` checks an `.rpm`; `dnf` checks it when it installs from a repository, but by default
+  not a package given as a file or URL (`localpkg_gpgcheck`). The `.deb`'s signature is a
   `_gpgorigin` member, which `debsig-verify` checks; apt and dpkg don't check a downloaded `.deb`.
 - From 0.5.0, the Windows `.zip` carries Microsoft's `vcruntime140.dll` and `vcruntime140_1.dll`, which Windows
   loads before any system-wide copy. The release workflow takes them from the build machine's
@@ -238,7 +260,9 @@ sudo rpm --import https://vitrina-project.dev/vitrina.asc
 rpm -K jkit-*.rpm                           # digests signatures OK
 ```
 
-`dnf` checks it the same way when it installs one once the key is imported. A `.deb` carries its
+`dnf` checks it the same way when it installs one from a repository once the key is imported,
+but by default not a package given as a file or URL (`localpkg_gpgcheck=0`), so run `rpm -K`
+first. A `.deb` carries its
 signature as a `_gpgorigin` member, which `debsig-verify` checks; apt and dpkg don't check a
 downloaded `.deb`. Both are also listed in `SHA256SUMS`, so the steps above work for them too.
 

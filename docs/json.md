@@ -256,8 +256,10 @@ the build it would download has no published checksum and no signature jkit chec
 refuses it unless `--allow-unverified`). Either is `null` when jkit couldn't look it up (offline
 and not cached); `verifiable` is also `null` when the build isn't downloadable.
 
-`behind` is set on a vendor's newest build of a release when the vendor stopped updating it: two
-or more updates behind another vendor's newest. It is `{"newest": "21.0.9+10", "vendors":
+`behind` is set on a vendor's newest build of a release when the vendor stopped updating it: its
+newest build of that release is two or more updates behind the newest update at least two vendors
+have (20 update numbers for JDK 8, whose numbers move by about 10 a quarter). Only OpenJDK update
+numbers count, and GraalVM-based distributions don't set the newest. It is `{"newest": "21.0.9+10", "vendors":
 ["temurin", "zulu"]}` (the newest build of that release, and who has it), and `null` otherwise or
 when jkit couldn't compare (offline and not cached).
 
