@@ -8,6 +8,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Iterator;
@@ -16,6 +19,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.bouncycastle.bcpg.HashAlgorithmTags;
+import org.bouncycastle.bcpg.PublicKeyAlgorithmTags;
+import org.bouncycastle.bcpg.SignatureSubpacketTags;
+import org.bouncycastle.bcpg.sig.KeyFlags;
 import org.bouncycastle.openpgp.PGPCompressedData;
 import org.bouncycastle.openpgp.PGPException;
 import org.bouncycastle.openpgp.PGPPublicKey;
@@ -23,6 +29,7 @@ import org.bouncycastle.openpgp.PGPPublicKeyRing;
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection;
 import org.bouncycastle.openpgp.PGPSignature;
 import org.bouncycastle.openpgp.PGPSignatureList;
+import org.bouncycastle.openpgp.PGPSignatureSubpacketVector;
 import org.bouncycastle.openpgp.PGPUtil;
 import org.bouncycastle.openpgp.bc.BcPGPObjectFactory;
 import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator;
@@ -135,7 +142,10 @@ public final class Signatures {
         UNKNOWN_KEY,
         /** Made by one of the publisher's {@link #RETIRED} keys, which jkit doesn't have. Only the checksum counts. */
         RETIRED_KEY,
-        /** Not a signature jkit can check (damaged, or a weak hash). Only the checksum counts. */
+        /**
+         * Not a signature jkit can check (damaged, a weak hash, or made with a weak key or one not
+         * for signing). Only the checksum counts.
+         */
         UNREADABLE
     }
 
@@ -241,6 +251,15 @@ public final class Signatures {
             if (signer.hasRevocation() || primary.hasRevocation()) {
                 return new Result(Outcome.UNKNOWN_KEY, null, whose + " is revoked");
             }
+            String unfit = unfit(signer, primary, whose);
+            if (unfit != null) {
+                return new Result(Outcome.UNREADABLE, null, unfit);
+            }
+            // An expired key may have been extended since, which a newer jkit knows: an unknown key.
+            String expired = expired(signer, primary, sig, whose);
+            if (expired != null) {
+                return new Result(Outcome.UNKNOWN_KEY, null, expired);
+            }
             if (data == null) {
                 return null;
             }
@@ -265,6 +284,81 @@ public final class Signatures {
         }
         return retired != null ? new Result(Outcome.RETIRED_KEY, null, retired)
                 : new Result(Outcome.UNKNOWN_KEY, null, others);
+    }
+
+    /**
+     * Why {@code signer} may not sign, or null when it may: its newest self-signature (for a
+     * subkey, its newest binding signature) must mark it for signing, and it must be RSA of at
+     * least 2048 bits, EdDSA, or ECDSA of at least 256 bits. The rings jkit has hold encryption
+     * subkeys too, and Guillaume Nodet's DSA-1024 primary key, which signed his Maven releases
+     * before 3.9.0: a signature by one of those doesn't count.
+     */
+    static String unfit(PGPPublicKey signer, PGPPublicKey primary, String whose) {
+        String which = signer.getKeyID() == primary.getKeyID() ? whose : whose + "'s subkey " + longId(fingerprint(signer));
+        PGPSignatureSubpacketVector hashed = selfSigned(signer, primary);
+        if (hashed == null || !hashed.hasSubpacket(SignatureSubpacketTags.KEY_FLAGS)
+                || (hashed.getKeyFlags() & KeyFlags.SIGN_DATA) == 0) {
+            return "it is made with " + which + ", which isn't a signing key";
+        }
+        int bits = signer.getBitStrength();
+        boolean strong = switch (signer.getAlgorithm()) {
+            case PublicKeyAlgorithmTags.RSA_GENERAL, PublicKeyAlgorithmTags.RSA_SIGN -> bits >= 2048;
+            case PublicKeyAlgorithmTags.EDDSA_LEGACY, PublicKeyAlgorithmTags.Ed25519, PublicKeyAlgorithmTags.Ed448 -> true;
+            case PublicKeyAlgorithmTags.ECDSA -> bits >= 256;
+            default -> false;
+        };
+        return strong ? null : "it is made with " + which + ", a " + algorithm(signer.getAlgorithm()) + "-" + bits
+                + " key, which jkit doesn't accept";
+    }
+
+    /** Why {@code sig} was made after {@code signer}, or the primary key it belongs to, expired; null if it wasn't. */
+    private static String expired(PGPPublicKey signer, PGPPublicKey primary, PGPSignature sig, String whose) {
+        Instant made = sig.getCreationTime().toInstant();
+        for (PGPPublicKey k : signer.getKeyID() == primary.getKeyID() ? List.of(signer) : List.of(signer, primary)) {
+            PGPSignatureSubpacketVector hashed = selfSigned(k, primary);
+            long seconds = hashed == null ? 0 : hashed.getKeyExpirationTime();
+            Instant end = k.getCreationTime().toInstant().plusSeconds(seconds);
+            if (seconds > 0 && made.isAfter(end)) {
+                String which = k.getKeyID() == primary.getKeyID() ? whose : whose + "'s subkey " + longId(fingerprint(k));
+                return "it was made on " + LocalDate.ofInstant(made, ZoneOffset.UTC) + ", after " + which
+                        + " expired on " + LocalDate.ofInstant(end, ZoneOffset.UTC);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The hashed subpackets of the newest self-signature that says what {@code key} is for: for a
+     * primary key, its certification of a user ID or a direct-key signature; for a subkey, the
+     * primary key's binding signature. Null if it has none.
+     */
+    private static PGPSignatureSubpacketVector selfSigned(PGPPublicKey key, PGPPublicKey primary) {
+        PGPSignature newest = null;
+        for (Iterator<PGPSignature> it = key.getSignatures(); it.hasNext(); ) {
+            PGPSignature s = it.next();
+            int type = s.getSignatureType();
+            boolean fits = key.getKeyID() == primary.getKeyID()
+                    ? type == PGPSignature.DEFAULT_CERTIFICATION || type == PGPSignature.NO_CERTIFICATION
+                            || type == PGPSignature.CASUAL_CERTIFICATION || type == PGPSignature.POSITIVE_CERTIFICATION
+                            || type == PGPSignature.DIRECT_KEY
+                    : type == PGPSignature.SUBKEY_BINDING;
+            if (fits && s.getKeyID() == primary.getKeyID()
+                    && (newest == null || s.getCreationTime().after(newest.getCreationTime()))) {
+                newest = s;
+            }
+        }
+        return newest == null ? null : newest.getHashedSubPackets();
+    }
+
+    private static String algorithm(int tag) {
+        return switch (tag) {
+            case PublicKeyAlgorithmTags.RSA_GENERAL, PublicKeyAlgorithmTags.RSA_SIGN, PublicKeyAlgorithmTags.RSA_ENCRYPT -> "RSA";
+            case PublicKeyAlgorithmTags.DSA -> "DSA";
+            case PublicKeyAlgorithmTags.ELGAMAL_ENCRYPT, PublicKeyAlgorithmTags.ELGAMAL_GENERAL -> "ElGamal";
+            case PublicKeyAlgorithmTags.ECDH -> "ECDH";
+            case PublicKeyAlgorithmTags.X25519 -> "X25519";
+            default -> "type " + tag;
+        };
     }
 
     private static PGPSignatureList signatures(byte[] signature) throws IOException {
