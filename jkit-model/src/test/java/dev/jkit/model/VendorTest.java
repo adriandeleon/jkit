@@ -29,4 +29,10 @@ class VendorTest {
         assertThat(Platform.of("Mac OS X", "aarch64")).isEqualTo(Platform.MACOS_AARCH64);
         assertThat(Platform.of("Windows 11", "amd64")).isEqualTo(Platform.WINDOWS_X64);
     }
+
+    @Test
+    void darwinIsMacNotWindows() {
+        assertThat(Platform.of("Darwin", "aarch64")).isEqualTo(Platform.MACOS_AARCH64);
+        assertThat(Platform.of("Windows 11", "amd64")).isEqualTo(Platform.WINDOWS_X64);
+    }
 }

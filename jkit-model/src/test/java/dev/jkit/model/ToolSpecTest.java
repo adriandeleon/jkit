@@ -63,4 +63,22 @@ class ToolSpecTest {
         assertThat(Tool.GRAALVM.onPath()).isFalse();
         assertThat(Tool.GRAALVM.homeVariable()).isEqualTo("GRAALVM_HOME");
     }
+
+    @Test
+    void javaEightCanBeWrittenTheOldWay() {
+        assertThat(ToolSpec.parse("jdk@1.8").version()).isEqualTo("8");
+        assertThat(ToolSpec.parse("jdk@1.8").major()).isEqualTo(8);
+        assertThat(ToolSpec.parse("jdk@1.8.0_432").version()).isEqualTo("8.0_432");
+        assertThat(Version.parse("8.0.432+6").matches("8.0_432")).isTrue();
+        assertThat(ToolSpec.parse("gradle@1.8").version()).isEqualTo("1.8"); // a real Gradle version
+        assertThat(new PinnedTool(Tool.JDK, "1.8", null, false).version()).isEqualTo("8");
+    }
+
+    @Test
+    void specsAreTrimmedAndChecked() {
+        assertThat(ToolSpec.parse(" jdk@21").tool()).isEqualTo(Tool.JDK);
+        assertThatThrownBy(() -> ToolSpec.parse("jdk@abc"))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("is not a version");
+    }
 }
