@@ -57,6 +57,31 @@ class ChangesTest {
     }
 
     @Test
+    void anEntryThatMovesIsReportedWithWhatItPassed() {
+        // PATH=/usr/bin:$PATH, then jkit use puts the maven bin back first: which mvn runs changes
+        String mvn = "/j/tools/maven/3.9.6/bin";
+        Context ctx = context(Map.of("PATH", String.join(File.pathSeparator, "/usr/bin", mvn, "/bin")));
+        Map<String, String> updates = Map.of("PATH", String.join(File.pathSeparator, mvn, "/usr/bin", "/bin"));
+        Changes changes = new Changes(ctx).env(updates);
+        assertThat(print(changes)).isEqualTo("  PATH   moved " + mvn + " ahead of /usr/bin\n");
+        assertThat(changes.json()).singleElement().asString().contains("action=move").contains("value=" + mvn);
+        assertThat(changes.isEmpty()).isFalse();
+
+        Context behind = context(Map.of("PATH", String.join(File.pathSeparator, mvn, "/usr/bin", "/bin")));
+        assertThat(print(new Changes(behind).env(Map.of("PATH", String.join(File.pathSeparator, "/usr/bin", "/bin", mvn)))))
+                .isEqualTo("  PATH   moved " + mvn + " behind /bin\n");
+    }
+
+    @Test
+    void anEmptyEntryIsAnEntryToo() {
+        Context ctx = context(Map.of("PATH", "/usr/bin" + File.pathSeparator));
+        assertThat(print(new Changes(ctx).env(Map.of("PATH", "/usr/bin"))))
+                .isEqualTo("  PATH   - the empty entry (the current folder)\n");
+        assertThat(print(new Changes(context(Map.of("PATH", ""))).env(Map.of("PATH", "/usr/bin"))))
+                .isEqualTo("  PATH   + /usr/bin\n");
+    }
+
+    @Test
     void unsetIsReportedWhenTheVariableWasSet() {
         Context ctx = context(Map.of("GRADLE_HOME", "/g"));
         Map<String, String> updates = new HashMap<>();

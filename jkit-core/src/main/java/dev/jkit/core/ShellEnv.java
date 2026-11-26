@@ -196,8 +196,8 @@ public final class ShellEnv {
                 entries.add(homes.get(t).resolve("bin").toString());
             }
         }
-        for (String entry : env.getOrDefault("PATH", "").split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !underTools(entry, home) && !entries.contains(entry)) {
+        for (String entry : userEntries(env)) {
+            if (entry.isEmpty() || !underTools(entry, home) && !entries.contains(entry)) {
                 entries.add(entry);
             }
         }
@@ -372,13 +372,21 @@ public final class ShellEnv {
                 }
             }
         }
-        String current = env.getOrDefault("PATH", "");
-        for (String entry : current.split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !underTools(entry, home) && dropped.stream().noneMatch(d -> samePathEntry(entry, d))) {
+        for (String entry : userEntries(env)) {
+            if (entry.isEmpty() || !underTools(entry, home) && dropped.stream().noneMatch(d -> samePathEntry(entry, d))) {
                 entries.add(entry);
             }
         }
         return String.join(File.pathSeparator, entries);
+    }
+
+    /**
+     * This shell's PATH entries in order, empty ones included: an empty entry means the current
+     * folder, and it is the user's to keep or drop, not jkit's. None for an empty PATH.
+     */
+    private static List<String> userEntries(Map<String, String> env) {
+        String current = env.getOrDefault("PATH", "");
+        return current.isEmpty() ? List.of() : List.of(current.split(File.pathSeparator, -1));
     }
 
     private static boolean onPath(Map<String, String> env, String entry) {

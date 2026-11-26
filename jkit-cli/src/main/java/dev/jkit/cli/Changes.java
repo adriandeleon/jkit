@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,7 @@ final class Changes {
     /**
      * One change. The {@code kind}s and their {@code action}s:
      * <ul>
-     *   <li>env: set, unset, or add/remove for PATH entries;</li>
+     *   <li>env: set, unset, or add/remove/move for PATH entries;</li>
      *   <li>user-env: the same, for the user's persistent environment variables on Windows;</li>
      *   <li>link: set or remove;</li>
      *   <li>folder: create or delete;</li>
@@ -46,6 +47,8 @@ final class Changes {
     private final Context ctx;
     private final List<Change> changes = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
+    /** For each PATH entry that moved, what it moved past ("ahead of /usr/bin"), for the text. */
+    private final Map<Change, String> moves = new HashMap<>();
     /** A folder the command's own message names; "created" lines for it and its parents are skipped. */
     private Path named;
     /** Whether to skip the line about cached version lists and checksums. */
@@ -106,9 +109,14 @@ final class Changes {
         return this;
     }
 
+    /**
+     * PATH entries added, removed, and moved: an entry that now comes before (or after) one it
+     * didn't changes which program runs, as for {@code PATH=/usr/bin:$PATH} and a jkit use whose bin
+     * was further back. An empty entry (the current folder) counts like any other.
+     */
     private void path(String before, String after) {
-        Set<String> old = entries(before);
-        Set<String> now = entries(after);
+        List<String> old = entries(before);
+        List<String> now = entries(after);
         for (String entry : now) {
             if (!old.contains(entry)) {
                 changes.add(new Change("env", "PATH", "add", entry));
@@ -119,12 +127,70 @@ final class Changes {
                 changes.add(new Change("env", "PATH", "remove", entry));
             }
         }
+        List<String> oldOrder = old.stream().filter(now::contains).toList();
+        List<String> newOrder = now.stream().filter(old::contains).toList();
+        Set<String> kept = longestCommon(oldOrder, newOrder);
+        for (String entry : newOrder) {
+            if (kept.contains(entry)) {
+                continue;
+            }
+            // the first entry it passed, else the first that passed it
+            int was = oldOrder.indexOf(entry);
+            int is = newOrder.indexOf(entry);
+            String detail = null;
+            for (String other : newOrder) {
+                int otherWas = oldOrder.indexOf(other);
+                int otherIs = newOrder.indexOf(other);
+                if (otherIs > is && otherWas < was) {
+                    detail = "ahead of " + shownEntry(other);
+                    break;
+                }
+            }
+            for (int i = newOrder.size() - 1; detail == null && i >= 0; i--) {
+                String other = newOrder.get(i);
+                if (i < is && oldOrder.indexOf(other) > was) {
+                    detail = "behind " + shownEntry(other);
+                }
+            }
+            Change move = new Change("env", "PATH", "move", entry);
+            changes.add(move);
+            moves.put(move, detail);
+        }
     }
 
-    private static Set<String> entries(String path) {
-        Set<String> set = new LinkedHashSet<>(Arrays.asList((path == null ? "" : path).split(File.pathSeparator)));
-        set.remove("");
-        return set;
+    /** The entries that keep their order: a longest common subsequence of two orders of the same entries. */
+    private static Set<String> longestCommon(List<String> a, List<String> b) {
+        int[][] len = new int[a.size() + 1][b.size() + 1];
+        for (int i = a.size() - 1; i >= 0; i--) {
+            for (int j = b.size() - 1; j >= 0; j--) {
+                len[i][j] = a.get(i).equals(b.get(j)) ? len[i + 1][j + 1] + 1 : Math.max(len[i + 1][j], len[i][j + 1]);
+            }
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (int i = 0, j = 0; i < a.size() && j < b.size(); ) {
+            if (a.get(i).equals(b.get(j))) {
+                out.add(a.get(i));
+                i++;
+                j++;
+            } else if (len[i + 1][j] > len[i][j + 1]) { // on a tie the entry now further front is the one that moved
+                i++;
+            } else {
+                j++;
+            }
+        }
+        return out;
+    }
+
+    /** PATH entries in order, each once, empty ones (the current folder) included; none for an empty PATH. */
+    private static List<String> entries(String path) {
+        if (path == null || path.isEmpty()) {
+            return List.of();
+        }
+        return List.copyOf(new LinkedHashSet<>(Arrays.asList(path.split(File.pathSeparator, -1))));
+    }
+
+    private static String shownEntry(String entry) {
+        return entry.isEmpty() ? "the empty entry (the current folder)" : tilde(entry);
     }
 
     /** A global link now points at {@code target}, or was removed (null). */
@@ -345,8 +411,10 @@ final class Changes {
             out.println("  " + switch (c.kind() + " " + c.action()) {
                 case "env set" -> "set    " + c.name() + "=" + tilde(c.value());
                 case "env unset" -> "unset  " + c.name();
-                case "env add" -> "PATH   + " + tilde(c.value());
-                case "env remove" -> "PATH   - " + tilde(c.value());
+                case "env add" -> "PATH   + " + shownEntry(c.value());
+                case "env remove" -> "PATH   - " + shownEntry(c.value());
+                case "env move" -> "PATH   moved " + shownEntry(c.value())
+                        + (moves.get(c) == null ? "" : " " + moves.get(c));
                 case "user-env set" -> "user   " + c.name() + "=" + tilde(c.value());
                 case "user-env unset" -> "user   " + c.name() + " removed";
                 case "user-env add" -> "user   PATH + " + tilde(c.value());
