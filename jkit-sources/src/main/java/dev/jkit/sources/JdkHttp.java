@@ -316,7 +316,12 @@ public final class JdkHttp implements Http, AutoCloseable {
 
     @Override
     public void download(URI uri, Path target, Progress progress) throws IOException {
-        fetch(uri, () -> Files.newOutputStream(target), progress, MAX_DOWNLOAD, false);
+        download(uri, target, progress, MAX_DOWNLOAD);
+    }
+
+    @Override
+    public void download(URI uri, Path target, Progress progress, long max) throws IOException {
+        fetch(uri, () -> Files.newOutputStream(target), progress, Math.min(max, MAX_DOWNLOAD), false);
     }
 
     @FunctionalInterface
@@ -452,8 +457,7 @@ public final class JdkHttp implements Http, AutoCloseable {
     }
 
     private static JkitException tooBig(URI uri, long max) {
-        return new JkitException(uri.getHost() + " sent more than " + (max >> 20) + " MB for " + uri.getPath()
-                + "; refusing it", "a broken or hostile server or mirror: check JKIT_SOURCES_*_URL and the network");
+        return Http.tooBig(uri, max);
     }
 
     /** Writing the download failed on this machine (disk full): not a network error, so not retried. */

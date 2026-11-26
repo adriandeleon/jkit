@@ -168,9 +168,9 @@ public final class Installer {
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
-            http.download(artifact.signature(), file, Http.Progress.NONE);
-            bytes = Files.size(file) > Signatures.MAX_SIGNATURE ? new byte[Signatures.MAX_SIGNATURE + 1]
-                    : Files.readAllBytes(file);
+            // stopped at the limit: a signature link that serves a JDK's worth of data isn't read whole
+            http.download(artifact.signature(), file, Http.Progress.NONE, Signatures.MAX_SIGNATURE);
+            bytes = Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
             String why = "couldn't fetch the signature of " + label + " ("
                     + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")";

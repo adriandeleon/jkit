@@ -61,6 +61,40 @@ class HttpTest {
     }
 
     @Test
+    void aSmallFileIsCutOffAtItsLimit() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = sizedServer(1 << 20, 0, calls);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1)) {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/x.sig");
+            assertThatThrownBy(() -> http.download(uri, tmp.resolve("sig"), Http.Progress.NONE, 64 * 1024))
+                    .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 64 KB for /x.sig");
+            http.download(uri, tmp.resolve("whole"), Http.Progress.NONE, 1 << 20);
+            assertThat(Files.size(tmp.resolve("whole"))).isEqualTo(1 << 20);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void theDefaultBoundedDownloadChecksTheSizeAfterwards() throws Exception {
+        Http fake = new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                Files.write(target, new byte[100]);
+            }
+        };
+        URI uri = URI.create("https://example.invalid/x.sig");
+        assertThatThrownBy(() -> fake.download(uri, tmp.resolve("a"), Http.Progress.NONE, 99))
+                .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 99 bytes");
+        fake.download(uri, tmp.resolve("b"), Http.Progress.NONE, 100);
+    }
+
+    @Test
     void badProxyFailsOnlyWhenTheNetworkIsUsed() {
         JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
         assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
