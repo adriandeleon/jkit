@@ -356,13 +356,7 @@ public final class Installer {
                 Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
                 return;
             } catch (AtomicMoveNotSupportedException e) {
-                // tools/ is on another disk than tmp/ (a link to it): copy next to the destination,
-                // then rename there, so the install still appears in one step
-                Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
-                Fs.deleteRecursively(partial);
-                Fs.copyTree(from, partial);
-                Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
-                Fs.deleteRecursively(from);
+                copyAcross(from, to, Fs::copyTree);
                 return;
             } catch (AccessDeniedException e) {
                 if (!windows || attempt >= 10) {
@@ -376,6 +370,37 @@ public final class Installer {
                 }
             }
         }
+    }
+
+    /** How {@link #copyAcross} copies a folder: {@link Fs#copyTree}, or a test's stand-in. */
+    @FunctionalInterface
+    interface Copy {
+        void copy(Path from, Path to) throws IOException;
+    }
+
+    /**
+     * tools/ is on another disk than tmp/ (a link to it): copy next to the destination, then
+     * rename there, so the install still appears in one step. The copy, {@code .<name>.partial},
+     * is deleted if it fails, and by Ctrl-C (WorkDirs) while it runs.
+     */
+    static void copyAcross(Path from, Path to, Copy copy) throws IOException {
+        Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
+        Fs.deleteRecursively(partial);
+        WorkDirs.add(partial);
+        try {
+            copy.copy(from, partial);
+            Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException | RuntimeException e) {
+            try {
+                Fs.deleteRecursively(partial);
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed); // jkit prune and doctor find what is left
+            }
+            throw e;
+        } finally {
+            WorkDirs.remove(partial);
+        }
+        Fs.deleteRecursively(from);
     }
 
     /** The store lock, held until closed. */

@@ -561,6 +561,33 @@ class InstallerTest {
     }
 
     @Test
+    void aCopyToAnotherDiskIsDeletedByCtrlCOrWhenItFails() throws Exception {
+        Path from = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9").resolveSibling("unpacked");
+        Files.createDirectories(from.resolve("bin"));
+        Path to = Files.createDirectories(tmp.resolve("tools")).resolve("21.0.13+9-temurin");
+        Path partial = to.resolveSibling(".21.0.13+9-temurin.partial");
+        // Ctrl-C halfway through the copy: jkit's signal handler deletes what is in WorkDirs
+        assertThatThrownBy(() -> Installer.copyAcross(from, to, (a, b) -> {
+            Fs.copyTree(a, b);
+            assertThat(WorkDirs.deleteAll()).contains(b);
+            throw new IOException("interrupted");
+        })).hasMessage("interrupted");
+        assertThat(partial).doesNotExist();
+        // a copy that fails is deleted too, and isn't left for the signal handler
+        assertThatThrownBy(() -> Installer.copyAcross(from, to, (a, b) -> {
+            Fs.copyTree(a, b);
+            throw new IOException("disk full");
+        })).hasMessage("disk full");
+        assertThat(partial).doesNotExist();
+        assertThat(WorkDirs.deleteAll()).doesNotContain(partial);
+        // one that works ends as the install, in one rename
+        Installer.copyAcross(from, to, Fs::copyTree);
+        assertThat(to.resolve("bin")).isDirectory();
+        assertThat(partial).doesNotExist();
+        assertThat(from).doesNotExist();
+    }
+
+    @Test
     void theInstallLockIsNotHeldDuringTheDownload() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
