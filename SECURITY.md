@@ -91,6 +91,12 @@ matters:
   installed with Homebrew, apt, dnf or winget is left to that tool. On Windows, the Visual C++
   runtime DLLs next to `jkit.exe` are replaced from the same checked archive; a folder without
   them doesn't get them.
+- From the release after 0.4.0, the `.deb` and `.rpm` are signed with the Linux release key the
+  Vitrina apt repository signs its index with (`8486 A7AF 4FC8 FEE9 3D83 CDB4 EA5F A138 C2C0 9C4A`,
+  in `packaging/linux/signing-key.asc` and at https://vitrina-project.dev/vitrina.asc), so apt
+  and dnf users trust one key. After `sudo rpm --import https://vitrina-project.dev/vitrina.asc`,
+  `rpm -K` checks an `.rpm` and `dnf` checks it when it installs. The `.deb`'s signature is a
+  `_gpgorigin` member, which `debsig-verify` checks; apt and dpkg don't check a downloaded `.deb`.
 - From the release after 0.4.0, the Windows `.zip` carries Microsoft's `vcruntime140.dll` and `vcruntime140_1.dll`, which Windows
   loads before any system-wide copy. The release workflow takes them from the build machine's
   Visual Studio and checks they are signed by Microsoft. Windows Update doesn't patch a copy next to

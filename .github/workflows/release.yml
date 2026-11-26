@@ -7,6 +7,7 @@ name: Release
 # .rpm and makes the CycloneDX SBOM, and builds a second, static binary against musl for Alpine
 # (linux-x64-musl, linux-aarch64-musl: archives only), and the macOS binaries (arm64 and x64) are signed and
 # notarized (macos-sign: tag runs only, in a job that runs no build code). The release job
+# signs the .deb and .rpm with the Linux release key shared with Vitrina, then
 # attaches them all with a SHA256SUMS file and a build provenance attestation (check one with
 # `gh attestation verify FILE --repo adriandeleon/jkit`), then the homebrew job updates the
 # formula in adriandeleon/homebrew-tap and the winget job opens a pull request on
@@ -208,6 +209,7 @@ jobs:
           # allows no "-" in a version (sed: macOS's bash 3.2 keeps the backslash in ${VERSION/-/\~})
           echo "PKG_VERSION=$(printf '%s' "$VERSION" | sed 's/-/~/')" >> "$GITHUB_ENV"
           # file times in the jars and the .deb: the tagged commit's, so a rebuild gives the same files
+          # (the published .deb and .rpm then differ by the signature the release job adds)
           echo "BUILD_TIME=$(git log -1 --format=%cI)" >> "$GITHUB_ENV"
           ./mvnw -B -C -q org.codehaus.mojo:versions-maven-plugin:2.25.2:set \
             -DnewVersion="$VERSION" -DgenerateBackupPoms=false
@@ -736,6 +738,26 @@ jobs:
           python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]; print(len(sys.argv) - 1, "manifests parse")' \
             "$RUNNER_TEMP"/manifests/*.yaml
 
+      # The release job signs the .deb and .rpm with the real key; this runs the same two scripts
+      # with a key made for the run, on copies, so a broken signing step fails here and not on a tag
+      - name: Sign the .deb and .rpm with a throwaway key
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm debsig-verify
+          mkdir "$RUNNER_TEMP/pkgs"
+          cp dist/*.deb dist/*.rpm "$RUNNER_TEMP/pkgs/"
+          export GNUPGHOME="$RUNNER_TEMP/throwaway-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --pinentry-mode loopback --passphrase dry-run \
+            --quick-gen-key 'jkit dry run <dry-run@jkit.invalid>' rsa4096 sign 1d
+          LINUX_GPG_KEY=$(gpg --batch --pinentry-mode loopback --passphrase dry-run --armor --export-secret-keys)
+          gpg --batch --armor --export > "$RUNNER_TEMP/throwaway.asc"
+          unset GNUPGHOME
+          export LINUX_GPG_KEY LINUX_GPG_PASSPHRASE=dry-run
+          bash packaging/sign-linux-packages.sh "$RUNNER_TEMP/pkgs"
+          bash packaging/check-linux-signatures.sh "$RUNNER_TEMP/throwaway.asc" "$RUNNER_TEMP/pkgs"
+
   release:
     needs: [build, macos-sign, macos-pack, packaging-check]
     if: >-
@@ -763,20 +785,49 @@ jobs:
           pattern: jkit-*   # not the unsigned-/signed- macOS binaries
           merge-multiple: true
 
+      # Only the file that says which key jkit trusts and the two package-signing scripts with the
+      # key they must sign with: the release job runs no build code
+      - name: Check out the release keys and signing scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+          sparse-checkout: |
+            jkit-core/src/main/java/dev/jkit/core/Signatures.java
+            packaging/sign-linux-packages.sh
+            packaging/check-linux-signatures.sh
+            packaging/linux/signing-key.asc
+          sparse-checkout-cone-mode: false
+
+      # The .deb and .rpm are signed with the Linux release key Editora and the Vitrina apt
+      # repository share (https://vitrina-project.dev/vitrina.asc), so apt and dnf users trust one
+      # key. Needs LINUX_GPG_KEY (gpg --armor --export-secret-keys 8486A7AF4FC8FEE93D83CDB4EA5FA138C2C09C4A)
+      # and LINUX_GPG_PASSPHRASE in this environment. Without the key a pre-release ships its
+      # packages unsigned, with a warning; a release fails. Before the checksums: signing changes the files.
+      - name: Sign the .deb and .rpm
+        env:
+          LINUX_GPG_KEY: ${{ secrets.LINUX_GPG_KEY }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$LINUX_GPG_KEY" ]; then
+            case "$GITHUB_REF_NAME" in
+              *-*) echo "::warning::LINUX_GPG_KEY isn't set; this pre-release ships its .deb and .rpm unsigned"
+                   exit 0 ;;
+              *)   echo "::error::LINUX_GPG_KEY isn't set; a release needs signed .deb and .rpm packages"
+                   exit 1 ;;
+            esac
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm debsig-verify
+          export LINUX_GPG_EXPECTED_KEY=src/packaging/linux/signing-key.asc
+          bash src/packaging/sign-linux-packages.sh dist
+          bash src/packaging/check-linux-signatures.sh "$LINUX_GPG_EXPECTED_KEY" dist
+
       - name: Checksums
         run: |
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
-
-      # Only the file that says which key jkit trusts: the release job runs no build code
-      - name: Check out jkit's release key fingerprint
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: src
-          persist-credentials: false
-          sparse-checkout: jkit-core/src/main/java/dev/jkit/core/Signatures.java
-          sparse-checkout-cone-mode: false
 
       # jkit self-update refuses a release whose SHA256SUMS isn't signed by the key built into it.
       # JKIT_RELEASE_KEY is that key's armored secret key, without a passphrase
