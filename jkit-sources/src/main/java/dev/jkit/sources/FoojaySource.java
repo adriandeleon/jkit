@@ -731,44 +731,78 @@ public final class FoojaySource {
     static final int BEHIND_UPDATES = 2;
 
     /**
+     * The same for JDK 8 (and older), as a difference in update numbers: those move by about 10 a
+     * quarter (8u452, 8u462), and a respin by 1 or 2 (8u512, 8u514), so 20 is two quarterly releases.
+     */
+    static final int BEHIND_UPDATES_8 = 20;
+
+    /**
      * The builds of {@code index} (each vendor's newest per major, {@link #newestPerVendorAndMajor})
-     * that are at least {@link #BEHIND_UPDATES} updates older than the newest release of their
-     * major from another vendor: a vendor that stopped updating that release, such as openjdk
-     * (Oracle's jdk.java.net builds), which publishes only the first updates of each release. A
-     * vendor a single update behind is likely just later with the newest one. Pre-releases, and
-     * Mandrel, whose versions carry only the feature number ({@link #version}), don't count.
+     * whose vendor's newest build of that major is at least {@link #BEHIND_UPDATES} updates
+     * ({@link #BEHIND_UPDATES_8} update numbers for JDK 8) older than the newest update at least two
+     * vendors have: a vendor that stopped updating that release, such as openjdk (Oracle's
+     * jdk.java.net builds), which publishes only the first updates of each release. A vendor a
+     * single update behind is likely just later with the newest one, and an update only one vendor
+     * has may be that vendor's own.
+     * <p>
+     * Only versions that are OpenJDK updates count (21.0.13, 8.0.462): not pre-releases, not
+     * Mandrel's ({@link #version}), and not the ones some GraalVM distributions list under their
+     * own release numbers (Gluon's 21.1, GraalVM CE's 25.1.3). GraalVM-based distributions can be
+     * behind, but don't set the newest update: their numbering is their own.
      */
     public static Map<Pkg, Behind> behind(List<Pkg> index) {
-        Map<Integer, Pkg> newest = new HashMap<>();
+        Map<Integer, Map<String, Integer>> best = new HashMap<>(); // major -> vendor -> newest update
         for (Pkg p : index) {
             if (comparable(p)) {
-                newest.merge(p.major(), p, (a, b) -> update(b) > update(a) ? b : a);
+                best.computeIfAbsent(p.major(), k -> new HashMap<>()).merge(p.vendor().name(), update(p), Math::max);
+            }
+        }
+        Map<Integer, Integer> newest = new HashMap<>();
+        for (Map.Entry<Integer, Map<String, Integer>> major : best.entrySet()) {
+            List<Integer> updates = index.stream()
+                    .filter(p -> p.major() == major.getKey() && comparable(p) && !p.vendor().isGraalVmBased())
+                    .map(p -> p.vendor().name()).distinct()
+                    .map(major.getValue()::get).sorted(Comparator.reverseOrder()).toList();
+            if (updates.size() >= 2) {
+                newest.put(major.getKey(), updates.get(1)); // the newest update two vendors have
             }
         }
         Map<Pkg, Behind> out = new HashMap<>();
         for (Pkg p : index) {
-            Pkg top = newest.get(p.major());
-            if (top == null || !comparable(p) || update(top) - update(p) < BEHIND_UPDATES) {
+            Integer top = newest.get(p.major());
+            int lag = p.major() <= 8 ? BEHIND_UPDATES_8 : BEHIND_UPDATES;
+            if (top == null || !comparable(p) || top - best.get(p.major()).get(p.vendor().name()) < lag) {
                 continue;
             }
             TreeSet<String> from = new TreeSet<>();
+            Version version = null;
             for (Pkg q : index) {
-                if (q.major() == p.major() && comparable(q) && update(q) == update(top)) {
+                if (q.major() == p.major() && comparable(q) && !q.vendor().isGraalVmBased() && update(q) >= top) {
                     from.add(q.vendor().name());
+                    if (update(q) == top && (version == null || q.version().compareTo(version) > 0)) {
+                        version = q.version();
+                    }
                 }
             }
-            out.put(p, new Behind(top.version(), List.copyOf(from)));
+            out.put(p, new Behind(version, List.copyOf(from)));
         }
         return out;
     }
 
+    /**
+     * Whether the build's version is an OpenJDK update of its major (21.0.13, 8.0.462), which
+     * {@link #behind} compares: not Mandrel's or Gluon's, whose versions are their own (Mandrel's
+     * the feature number alone, Gluon's its GraalVM release, 21.1 or 22.0.0.3).
+     */
     private static boolean comparable(Pkg p) {
-        return !p.version().isPreRelease() && !p.vendor().foojayName().equals("mandrel");
+        String vendor = p.vendor().foojayName();
+        return !p.version().isPreRelease() && !vendor.equals("mandrel") && !vendor.equals("gluon_graalvm")
+                && p.version().part(0) == p.major() && p.version().part(1) == 0;
     }
 
-    /** The interim and update numbers of a build as one number: 21.0.9 is 9, 8.0.462 is 462. */
-    private static long update(Pkg p) {
-        return (long) p.version().part(1) * 100_000 + p.version().part(2);
+    /** The update number of a build: 21.0.9 is 9, 8.0.462 is 462. */
+    private static int update(Pkg p) {
+        return p.version().part(2);
     }
 
     /**

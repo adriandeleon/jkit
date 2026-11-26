@@ -577,6 +577,62 @@ class SourcesTest {
                 new FoojaySource.Behind(Version.parse("21.0.9+10"), List.of("temurin", "zulu")));
     }
 
+    private static Pkg jdk(String vendor, String version) {
+        Version v = Version.parse(version);
+        return new Pkg(vendor + version, Vendor.of(vendor), v.part(0), v, vendor + ".tar.gz", "tar.gz", "lts", true);
+    }
+
+    /** {@link FoojaySource#behind}, as "vendor version → newest (vendors)". */
+    private static Map<String, String> behind(List<Pkg> index) {
+        Map<String, String> out = new java.util.TreeMap<>();
+        FoojaySource.behind(index).forEach((p, b) -> out.put(p.vendor() + " " + p.version(),
+                b.newest() + " " + b.vendors()));
+        return out;
+    }
+
+    @Test
+    void theNewestUpdateIsOneTwoVendorsHaveAndNeverAGraalVmReleaseNumber() {
+        // Gluon lists its GraalVM releases as 21.1 and 21.2, GraalVM CE its 25.0.x builds as
+        // 25.1.3 to 25.4.4.1: those aren't updates of 21 or 25, and the others aren't behind them
+        assertThat(behind(List.of(jdk("temurin", "21.0.13+11"), jdk("zulu", "21.0.13"), jdk("gluon_graalvm", "21.2"),
+                jdk("gluon_graalvm", "21.1"), jdk("temurin", "25.0.5+11"), jdk("corretto", "25.0.5.11.1"),
+                jdk("graalvm_community", "25.4.4.1"), jdk("graalvm_community", "25.1.3"),
+                jdk("graalvm_community", "25.0.5")))).isEmpty();
+        // an update only one vendor has may be its own; a vendor's older build next to its newest isn't behind
+        assertThat(behind(List.of(jdk("temurin", "21.0.15+1"), jdk("zulu", "21.0.13"), jdk("corretto", "21.0.13.11.1"),
+                jdk("liberica", "21.0.12+7"), jdk("kona", "21.0.4+1"), jdk("kona", "21.0.13+1"), jdk("openjdk", "21.0.11")))).containsExactly(
+                Map.entry("openjdk 21.0.11", "21.0.13.11.1 [corretto, kona, temurin, zulu]"));
+        // a GraalVM distribution can be behind, but doesn't set the newest: two of them at 21.0.20
+        // don't make the others behind
+        assertThat(behind(List.of(jdk("temurin", "21.0.13"), jdk("zulu", "21.0.13"), jdk("graalvm", "21.0.20"),
+                jdk("liberica_native", "21.0.20"), jdk("graalvm_community", "21.0.2"))))
+                .containsOnlyKeys("graalvm-ce 21.0.2");
+        // JDK 8's update numbers move by about 10 a quarter and 1 or 2 a respin: behind is 2 quarters
+        assertThat(behind(List.of(jdk("temurin", "8.0.514+1"), jdk("zulu", "8.0.514"), jdk("kona", "8.0.512"),
+                jdk("dragonwell", "8.0.502"), jdk("bisheng", "8.0.492")))).containsOnlyKeys("bisheng 8.0.492");
+    }
+
+    @Test
+    void onFoojaysRealListOnlyVendorsThatStoppedUpdatingAreBehind() throws IOException {
+        // each vendor's newest builds for Linux x64, as foojay listed them in November 2026
+        FoojaySource foojay = new FoojaySource(fake(Map.of("latest=available", resource("foojay-latest-linux-x64.json"))),
+                FoojaySource.DEFAULT_BASE);
+        Map<String, String> glibc = behind(foojay.newestPerVendorAndMajor(Platform.LINUX_X64, false));
+        assertThat(glibc.keySet()).containsExactlyInAnyOrder(
+                "bisheng 8.0.492", "openjdk 8.0.342+7", "semeru 8.0.482.1", "trava 8.0.282+8",
+                "jetbrains 11.0.14.1", "liberica-nik 11.0.22+12", "openjdk 11.0.16+8", "sapmachine 11.0.30",
+                "trava 11.0.10+6", "trava 11.0.15+1",
+                "graalvm 17.0.12", "graalvm-ce 17.0.9", "jetbrains 17.0.14+136722", "openjdk 17.0.2+8",
+                // JetBrains moved on to 25; GraalVM CE has no public 21 updates after 21.0.2
+                "graalvm-ce 21.0.2", "jetbrains 21.0.11+1163125", "openjdk 21.0.2+13",
+                "eliya 25.0.3", "openjdk 25.0.2+10");
+        assertThat(glibc.get("openjdk 21.0.2+13")).startsWith("21.0.13");
+        assertThat(glibc.get("bisheng 8.0.492")).startsWith("8.0.514");
+        Map<String, String> musl = behind(foojay.newestPerVendorAndMajor(Platform.LINUX_X64_MUSL, false));
+        assertThat(musl.keySet()).containsExactlyInAnyOrder("kona 8.0.482", "liberica-nik 11.0.22+12",
+                "jetbrains 17.0.9", "kona 21.0.4+1");
+    }
+
     @Test
     void noMatchNamesVendorsThatHaveTheMajor() {
         String index = "{\"result\":[" + pkg("z", "zulu", 22, "22.0.2+9", "glibc", "") + "]}";
