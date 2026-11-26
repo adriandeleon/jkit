@@ -9,6 +9,7 @@ import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.model.Visible;
 import dev.jkit.sources.FoojaySource;
+import dev.jkit.sources.FoojaySource.Behind;
 import dev.jkit.sources.FoojaySource.Major;
 import dev.jkit.sources.FoojaySource.Pkg;
 import java.io.IOException;
@@ -85,9 +86,9 @@ final class SearchCommand implements Callable<Integer> {
         }
         switch (spec.tool()) {
             case JDK, GRAALVM -> searchJdk(ctx);
-            case MAVEN -> grouped(ctx, ctx.maven().versions(pre));
-            case GRADLE -> grouped(ctx, ctx.gradle().versions(pre));
-            case SBT -> grouped(ctx, ctx.sbt().versions(pre));
+            case MAVEN -> grouped(ctx, ctx.maven().versions(pre), () -> ctx.maven().versions(true));
+            case GRADLE -> grouped(ctx, ctx.gradle().versions(pre), () -> ctx.gradle().versions(true));
+            case SBT -> grouped(ctx, ctx.sbt().versions(pre), () -> ctx.sbt().versions(true));
         }
         // stdout is the table; what the lookup wrote to disk goes to stderr
         new Changes(ctx).disk().print(ctx.err);
@@ -136,6 +137,7 @@ final class SearchCommand implements Callable<Integer> {
             }
             pkgs.sort(Comparator.comparing(Pkg::version).reversed()
                     .thenComparing(p -> p.vendor().name()));
+            Map<String, Behind> behind = behind(ctx, foojay);
             List<Object> majors = new ArrayList<>();
             for (Major m : info.values()) {
                 if (!maintained || m.maintained()) {
@@ -160,7 +162,8 @@ final class SearchCommand implements Callable<Integer> {
                         "installed", !mark(installed, p.version(), p.vendor(), fx).isEmpty(),
                         "downloadable", verdict == Verdict.UNKNOWN ? null : verdict != Verdict.NO_DOWNLOAD,
                         "verifiable", verdict == Verdict.UNKNOWN || verdict == Verdict.NO_DOWNLOAD ? null
-                                : verdict == Verdict.OK));
+                                : verdict == Verdict.OK,
+                        "behind", behindJson(behindOf(behind, p))));
             }
         } else {
             doc.put("majors", List.of());
@@ -198,20 +201,25 @@ final class SearchCommand implements Callable<Integer> {
                     + (pre ? "" : " (pre-releases: --pre)"));
             return;
         }
+        Map<String, Behind> behind = behind(index);
         if (spec.version() == null) {
-            majorTable(ctx, foojay, foojay.majors(), index, vendor, installed);
+            majorTable(ctx, foojay, foojay.majors(), index, vendor, installed, behind);
         } else if (vendorText == null) {
-            vendorRows(ctx, foojay, newestMatchingPerVendor(ctx, foojay, index), vendor, installed);
+            vendorRows(ctx, foojay, newestMatchingPerVendor(ctx, foojay, index), vendor, installed, behind);
         } else {
             List<Pkg> builds = foojay.builds(spec.major(), vendor, ctx.platform, fx, pre).stream()
                     .filter(p -> p.version().matches(spec.version())).toList();
             if (builds.isEmpty()) {
-                noMatch(ctx, vendor.name(), "jkit search " + spec.tool().id() + "@" + spec.major() + " " + vendor.name()
-                        + " lists its " + spec.major() + " builds");
+                noMatch(ctx, vendor.name(), onlyPreReleases(() -> foojay.builds(spec.major(), vendor, ctx.platform, fx, true)
+                        .stream().map(Pkg::version).toList())
+                        ? preHint()
+                        : "jkit search " + spec.tool().id() + "@" + spec.major() + " " + vendor.name()
+                                + " lists its " + spec.major() + " builds");
                 return;
             }
             Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, builds, true);
             Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
+            boolean anyBehind = false;
             for (Pkg p : builds) {
                 String installedMark = mark(installed, p.version(), p.vendor(), fx);
                 Verdict v = verdicts.getOrDefault(p, Verdict.UNKNOWN);
@@ -219,10 +227,78 @@ final class SearchCommand implements Callable<Integer> {
                 if (!note.isEmpty()) {
                     shown.add(v);
                 }
-                ctx.out.println(p.version() + installedMark + note);
+                String late = behindNote(behindOf(behind, p));
+                anyBehind |= !late.isEmpty();
+                ctx.out.println(p.version() + installedMark + note + late);
             }
             legendForRefused(ctx, shown);
+            legendForBehind(ctx, anyBehind);
         }
+    }
+
+    /**
+     * The builds of {@code index} that are {@link FoojaySource#behind}: a vendor's newest build of
+     * a major, several updates older than another vendor's. Keyed by vendor, major and version, so
+     * only that very build is marked, not the vendor's older ones.
+     */
+    private Map<String, Behind> behind(List<Pkg> index) {
+        Map<String, Behind> out = new HashMap<>();
+        FoojaySource.behind(index).forEach((p, b) -> out.put(p.vendor().name() + "|" + p.major() + "|" + p.version().raw(), b));
+        return out;
+    }
+
+    /** For the JSON: the same index text search shows, which the lookups above have cached. */
+    private Map<String, Behind> behind(Context ctx, FoojaySource foojay) {
+        try {
+            List<Pkg> index = new ArrayList<>(foojay.newestPerVendorAndMajor(ctx.platform, fx, pre));
+            if (spec.tool() == Tool.GRAALVM) {
+                index.removeIf(p -> !p.vendor().isGraalVmBased());
+            }
+            return behind(index);
+        } catch (IOException | JkitException e) {
+            return Map.of(); // offline and not cached: nothing to compare with
+        }
+    }
+
+    /** Whether {@code p} is its vendor's newest build of its major and that one is behind. */
+    private static Behind behindOf(Map<String, Behind> behind, Pkg p) {
+        return behind.get(p.vendor().name() + "|" + p.major() + "|" + p.version().raw());
+    }
+
+    private static Object behindJson(Behind b) {
+        return b == null ? null : JsonOut.fields("newest", b.newest().raw(), "vendors", b.vendors());
+    }
+
+    private static String behindNote(Behind b) {
+        return b == null ? "" : "  " + BEHIND + " behind: newest " + b.newest().part(0) + " is " + b.newest();
+    }
+
+    private static void legendForBehind(Context ctx, boolean shown) {
+        if (shown) {
+            ctx.out.println(BEHIND + " behind: the vendor stopped updating this release; other vendors have newer builds");
+        }
+    }
+
+    /** Versions that a search with --pre would also see. */
+    @FunctionalInterface
+    interface Versions {
+        List<Version> get() throws Exception;
+    }
+
+    /** Whether a pre-release matches the version asked for, when no release does: then --pre is the answer. */
+    private boolean onlyPreReleases(Versions withPre) {
+        if (pre || spec.version() == null) {
+            return false;
+        }
+        try {
+            return withPre.get().stream().anyMatch(v -> v.isPreRelease() && v.matches(spec.version()));
+        } catch (Exception e) {
+            return false; // the plain hint then
+        }
+    }
+
+    private String preHint() {
+        return "only pre-releases match " + spec + ": add --pre";
     }
 
     /** What install would do with a build, as far as search can tell before downloading it. */
@@ -323,13 +399,14 @@ final class SearchCommand implements Callable<Integer> {
 
     private static final String AVAILABLE = "✓";
     private static final String UNVERIFIED = "○";
+    private static final String BEHIND = "↓";
     /** The most vendors search asks for a version's builds, one request each. */
     static final int MAX_VENDOR_LOOKUPS = 64;
     private static final String GAP = "  ";
 
     /** One column per major (maintained first, then end of life), one row per vendor. */
     private void majorTable(Context ctx, FoojaySource foojay, List<Major> majors, List<Pkg> index, Vendor vendor,
-                            List<Installed> installed) {
+                            List<Installed> installed, Map<String, Behind> behind) {
         Map<Integer, Major> info = new TreeMap<>();
         majors.forEach(m -> info.put(m.major(), m));
         TreeSet<Integer> all = new TreeSet<>(Comparator.reverseOrder());
@@ -358,6 +435,12 @@ final class SearchCommand implements Callable<Integer> {
         Map<Pkg, Verdict> found = verdicts(ctx, foojay, shownPkgs, false);
         Map<String, Verdict> verdicts = new HashMap<>();
         found.forEach((p, v) -> verdicts.put(p.vendor().name() + "|" + p.major(), v));
+        Set<String> late = new HashSet<>();
+        for (Pkg p : shownPkgs) {
+            if (behindOf(behind, p) != null) {
+                late.add(p.vendor().name() + "|" + p.major());
+            }
+        }
 
         String chosen = vendor.name();
         List<String> vendors = new ArrayList<>();
@@ -384,20 +467,22 @@ final class SearchCommand implements Callable<Integer> {
         ctx.out.println(numbers.toString().stripTrailing());
         ctx.out.println(lts.toString().stripTrailing());
 
+        boolean anyBehind = false;
         for (String v : vendors) {
             Set<Integer> has = byVendor.get(v);
             String label = v.equals(chosen) ? v + " *" : v;
             StringBuilder line = new StringBuilder(String.format("%-" + nameWidth + "s", label));
-            cells(line, current, has, v, installed, fx, verdicts);
+            anyBehind |= cells(line, current, has, v, installed, fx, verdicts, late);
             if (!ended.isEmpty()) {
                 line.append(GAP);
-                cells(line, ended, has, v, installed, fx, verdicts);
+                anyBehind |= cells(line, ended, has, v, installed, fx, verdicts, late);
             }
             ctx.out.println(line.toString().stripTrailing());
         }
         ctx.out.println();
         boolean anyUnverified = verdicts.containsValue(Verdict.UNVERIFIED);
         ctx.out.println("✓ available   " + (anyUnverified ? "○ no checksum (needs --allow-unverified)   " : "")
+                + (anyBehind ? BEHIND + " behind (the vendor stopped updating it)   " : "")
                 + "● installed   ‾‾ LTS   * " + (vendorText == null ? "default vendor" : "chosen vendor"));
         ctx.out.println("versions per vendor: jkit search " + spec.tool().name().toLowerCase() + "@<major>");
     }
@@ -420,8 +505,10 @@ final class SearchCommand implements Callable<Integer> {
         groups.append(String.format("%-" + span + "s", t));
     }
 
-    private static void cells(StringBuilder line, List<Integer> majors, Set<Integer> has, String vendor,
-                              List<Installed> installed, boolean fx, Map<String, Verdict> verdicts) {
+    /** Returns whether a cell shows {@link #BEHIND}, for the legend. */
+    private static boolean cells(StringBuilder line, List<Integer> majors, Set<Integer> has, String vendor,
+                                 List<Installed> installed, boolean fx, Map<String, Verdict> verdicts, Set<String> late) {
+        boolean behind = false;
         for (int i = 0; i < majors.size(); i++) {
             int major = majors.get(i);
             String n = String.valueOf(major);
@@ -429,9 +516,12 @@ final class SearchCommand implements Callable<Integer> {
             String mark = !has.contains(major) ? " "
                     : isInstalled(installed, major, vendor, fx) ? "●"
                     : verdict == Verdict.NO_DOWNLOAD ? " "
-                    : verdict == Verdict.UNVERIFIED ? UNVERIFIED : AVAILABLE;
+                    : verdict == Verdict.UNVERIFIED ? UNVERIFIED
+                    : late.contains(vendor + "|" + major) ? BEHIND : AVAILABLE;
             line.append(i == 0 ? "" : " ").append(" ".repeat(n.length() - 1)).append(mark);
+            behind |= mark.equals(BEHIND);
         }
+        return behind;
     }
 
     private static boolean isInstalled(List<Installed> installed, int major, String vendor, boolean fx) {
@@ -457,17 +547,21 @@ final class SearchCommand implements Callable<Integer> {
     }
 
     private void vendorRows(Context ctx, FoojaySource foojay, List<Pkg> index, Vendor vendor,
-                            List<Installed> installed) {
+                            List<Installed> installed, Map<String, Behind> behind) {
         TreeMap<String, Pkg> byVendor = new TreeMap<>();
         for (Pkg p : index) {
             byVendor.put(p.vendor().name(), p);
         }
         if (byVendor.isEmpty()) {
-            noMatch(ctx, null, "jkit search " + spec.tool().id() + " lists the versions there are");
+            noMatch(ctx, null, onlyPreReleases(() -> foojay.newestPerVendorAndMajor(ctx.platform, fx, true).stream()
+                    .filter(p -> spec.tool() != Tool.GRAALVM || p.vendor().isGraalVmBased())
+                    .map(Pkg::version).toList())
+                    ? preHint() : "jkit search " + spec.tool().id() + " lists the versions there are");
             return;
         }
         Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, new ArrayList<>(byVendor.values()), false);
         Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
+        boolean anyBehind = false;
         for (Pkg p : byVendor.values()) {
             String name = p.vendor().equals(vendor) ? p.vendor().name() + " *" : p.vendor().name();
             String installedMark = mark(installed, p.version(), p.vendor(), fx);
@@ -476,14 +570,17 @@ final class SearchCommand implements Callable<Integer> {
             if (!note.isEmpty()) {
                 shown.add(v);
             }
-            ctx.out.println(String.format("%-16s %s", name, p.version() + installedMark + note));
+            String late = behindNote(behindOf(behind, p));
+            anyBehind |= !late.isEmpty();
+            ctx.out.println(String.format("%-16s %s", name, p.version() + installedMark + note + late));
         }
         ctx.out.println("* default vendor   ● installed   · all builds of one vendor: jkit search "
                 + spec + " <vendor>");
         legendForRefused(ctx, shown);
+        legendForBehind(ctx, anyBehind);
     }
 
-    private void grouped(Context ctx, List<Version> versions) throws Exception {
+    private void grouped(Context ctx, List<Version> versions, Versions withPre) throws Exception {
         List<Installed> installed = ctx.store.list(spec.tool());
         Map<String, List<Version>> groups = new LinkedHashMap<>();
         for (Version v : versions) {
@@ -493,6 +590,7 @@ final class SearchCommand implements Callable<Integer> {
         }
         if (groups.isEmpty()) {
             noMatch(ctx, null, spec.version() == null ? null
+                    : onlyPreReleases(withPre) ? preHint()
                     : "jkit search " + spec.tool().id() + " lists the versions there are");
             return;
         }

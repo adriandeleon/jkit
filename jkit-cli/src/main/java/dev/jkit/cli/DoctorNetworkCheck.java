@@ -17,6 +17,10 @@ final class DoctorNetworkCheck {
         if (!r.network) {
             return;
         }
+        if (Context.offlineByEnv(r.ctx.env)) {
+            r.info("skipped the network check: offline mode is on (JKIT_NETWORK_OFFLINE)");
+            return;
+        }
         // one quick try each: doctor answers "can I reach it now", not "eventually"
         try (JdkHttp http = new JdkHttp(r.ctx.env, Context.userAgent(), Duration.ofSeconds(10), 1)) {
             List<URI> uris = List.of(

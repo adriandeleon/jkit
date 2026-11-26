@@ -11,11 +11,14 @@ import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
+import dev.jkit.sources.FoojaySource;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -66,12 +69,12 @@ final class InstallCommand implements Callable<Integer> {
     /**
      * Downloads and installs {@code artifact}, first telling the user what can't be checked.
      *
-     * <p>A download with no checksum at all is refused unless {@code allowUnverified}, so that a
-     * project's jkit sync never installs unchecked code without being asked to; {@code retry} is
-     * the command line that allows it. An md5 or sha1 checksum only gets a warning. If the
-     * publisher signs its downloads with a key built into jkit, the signature must check out too,
-     * unless {@code allowUnverified}. For downloads without a checksum (Corretto) the signature is
-     * the only check.
+     * <p>The Installer enforces the rules ({@link Installer.Verification}): a download with no
+     * checksum at all is refused unless {@code allowUnverified}, so that a project's jkit sync never
+     * installs unchecked code without being asked to; {@code retry} is the command line that allows
+     * it. An md5 or sha1 checksum only gets a warning. If the publisher signs its downloads with a
+     * key built into jkit, the signature must check out too, unless {@code allowUnverified}. For
+     * downloads without a checksum (Corretto) the signature is the only check.
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
@@ -80,20 +83,14 @@ final class InstallCommand implements Callable<Integer> {
                     "run the command without --offline");
         }
         String signer = signer(artifact);
-        // When the publisher signs its downloads, a signature jkit can't fetch or check refuses the
-        // install: whoever can replace a download can usually replace the checksum next to it too.
-        boolean signatureRequired = signer != null && !allowUnverified;
         if (artifact.checksum() == null && signer != null) {
             ctx.err.println("note: " + artifact.label() + " has no published checksum; checking " + signer
                     + "'s signature instead");
         } else if (artifact.checksum() == null) {
-            if (!allowUnverified) {
-                throw new JkitException(artifact.label() + " from " + artifact.url().getHost()
-                        + " has no published checksum, so jkit can't check the download; nothing installed",
-                        "install it anyway: " + retry, "or pick another version or vendor");
+            if (allowUnverified) { // otherwise the Installer refuses it
+                ctx.err.println("warning: " + artifact.label() + " has no published checksum; installing it unchecked"
+                        + " (--allow-unverified)");
             }
-            ctx.err.println("warning: " + artifact.label() + " has no published checksum; installing it unchecked"
-                    + " (--allow-unverified)");
         } else if (!isStrong(artifact.checksumAlgorithm())) {
             ctx.err.println("warning: only a " + artifact.checksumAlgorithm() + " checksum is published for "
                     + artifact.label() + ": it catches a broken download, not a tampered one");
@@ -103,8 +100,9 @@ final class InstallCommand implements Callable<Integer> {
         ProgressBar progress = new ProgressBar(ctx.err,
                 "downloading " + artifact.label() + " from " + artifact.url().getHost());
         try {
-            return ctx.installer().install(artifact, progress, signatureRequired);
-        } catch (Installer.SignatureRequired e) {
+            return ctx.installer().install(artifact, progress,
+                    allowUnverified ? Installer.Verification.ALLOW_UNVERIFIED : Installer.Verification.REQUIRED);
+        } catch (Installer.VerificationRequired e) {
             throw new JkitException(e.getMessage(), "install it anyway: " + retry,
                     "or pick another version or vendor");
         }
@@ -130,6 +128,10 @@ final class InstallCommand implements Callable<Integer> {
         boolean wantPre = pre || spec.version() != null && Version.looksLikeVersion(spec.version())
                 && Version.parse(spec.version()).isPreRelease();
         Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
+        behind = behind(ctx, spec.tool(), artifact);
+        if (behind != null) {
+            ctx.err.println("warning: " + behindWarning(ctx, spec.tool(), artifact, behind));
+        }
         PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
@@ -158,7 +160,7 @@ final class InstallCommand implements Callable<Integer> {
         if (result.fresh() && first && !noDefault) {
             // Checked and set under the link lock, since another jkit may set a default or remove this
             // install in the meantime.
-            try (AutoCloseable lock = ctx.store.linkLock()) {
+            try (var _ = ctx.store.linkLock()) {
                 if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, LinkOption.NOFOLLOW_LINKS)
                         && Files.isRegularFile(result.installed().home().resolve(Store.MARKER),
                                 LinkOption.NOFOLLOW_LINKS)) {
@@ -186,6 +188,48 @@ final class InstallCommand implements Callable<Integer> {
                     + (fx ? " --fx" : "") + " --global");
         }
         return 0;
+    }
+
+    /** What {@link #behind(Context, Tool, Artifact)} found for this install, for the JSON. */
+    private FoojaySource.Behind behind;
+
+    /**
+     * Whether {@code artifact} is its vendor's newest build of its major and that vendor has
+     * stopped updating it ({@link FoojaySource#behind}): openjdk publishes only the first updates of
+     * each release. Uses the list of each vendor's newest builds, which search and an install with
+     * no version fetch too; null when it can't be had (offline and not cached) or for other tools.
+     */
+    static FoojaySource.Behind behind(Context ctx, Tool tool, Artifact artifact) {
+        if ((tool != Tool.JDK && tool != Tool.GRAALVM) || artifact.vendor() == null || artifact.version().isPreRelease()) {
+            return null;
+        }
+        try {
+            List<FoojaySource.Pkg> index = new ArrayList<>(ctx.foojay().newestPerVendorAndMajor(ctx.platform, artifact.fx()));
+            if (tool == Tool.GRAALVM) {
+                index.removeIf(p -> !p.vendor().isGraalVmBased());
+            }
+            for (Map.Entry<FoojaySource.Pkg, FoojaySource.Behind> e : FoojaySource.behind(index).entrySet()) {
+                FoojaySource.Pkg p = e.getKey();
+                if (p.vendor().equals(artifact.vendor()) && p.version().equals(artifact.version())) {
+                    return e.getValue();
+                }
+            }
+        } catch (IOException | JkitException e) {
+            // nothing to compare with
+        }
+        return null;
+    }
+
+    /** "openjdk stopped updating 21 at 21.0.2+13; the newest 21 is 21.0.9+10 (temurin, zulu): jkit install jdk@21". */
+    static String behindWarning(Context ctx, Tool tool, Artifact artifact, FoojaySource.Behind behind) {
+        int major = artifact.version().part(0);
+        String vendors = behind.vendors().size() <= 3 ? String.join(", ", behind.vendors())
+                : String.join(", ", behind.vendors().subList(0, 3)) + ", …";
+        String byDefault = ctx.config.defaultVendor(tool).name();
+        String pick = behind.vendors().contains(byDefault) ? "" : " " + behind.vendors().getFirst();
+        return artifact.vendor() + " stopped updating " + major + " at " + artifact.version() + "; the newest " + major
+                + " is " + behind.newest() + " (" + vendors + "): jkit install " + tool.id() + "@" + major + pick
+                + (artifact.fx() ? " --fx" : "");
     }
 
     /**
@@ -232,6 +276,8 @@ final class InstallCommand implements Callable<Integer> {
         doc.put("status", status);
         doc.put("verified", verified);
         doc.put("signedBy", signedBy);
+        doc.put("behind", behind == null ? null
+                : JsonOut.fields("newest", behind.newest().raw(), "vendors", behind.vendors()));
         for (Installed i : ctx.store.list(spec.tool().storeTool())) {
             if (i.version().equals(version) && Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
                 doc.put("installed", JsonOut.installed(ctx, i));

@@ -112,6 +112,23 @@ class DoctorTest {
     }
 
     @Test
+    void offlineModeSkipsTheNetworkCheckAndAMisspeltVariableIsAWarning() {
+        // JKIT_SOURCES_FOOJAY_URL points nowhere: the check must not even try
+        env.put("JKIT_NETWORK_OFFLINE", "1");
+        env.put("JKIT_SOURCES_FOOJAY_URL", "http://127.0.0.1:1/");
+        List<Finding> findings = DoctorCommand.run(Context.lenient(env, System.out), project, true);
+        assertThat(only(findings, "network").message())
+                .isEqualTo("skipped the network check: offline mode is on (JKIT_NETWORK_OFFLINE)");
+        assertThat(only(findings, "network").level()).isEqualTo(Level.INFO);
+
+        env.remove("JKIT_NETWORK_OFFLINE");
+        env.put("JKIT_OFFLINE", "1");
+        Finding typo = run().stream().filter(f -> f.level() == Level.WARN).findFirst().orElseThrow();
+        assertThat(typo.message()).isEqualTo("JKIT_OFFLINE is set, but jkit reads JKIT_NETWORK_OFFLINE (it ignores JKIT_OFFLINE)");
+        assertThat(typo.fix()).isEqualTo("set JKIT_NETWORK_OFFLINE=1 for offline mode, and unset JKIT_OFFLINE");
+    }
+
+    @Test
     void temporaryFilesAnInterruptedWriteLeftAreReported() throws Exception {
         assertThat(of(run(), "temp-files")).isEmpty();
         Path rcLeft = Files.writeString(tmp.resolve("user/.bashrc.8121361834962231183.jkit-tmp"), "half");

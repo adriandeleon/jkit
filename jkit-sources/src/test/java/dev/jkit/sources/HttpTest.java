@@ -100,10 +100,11 @@ class HttpTest {
 
     @Test
     void badProxyFailsOnlyWhenTheNetworkIsUsed() {
-        JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
-        assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
-                .isInstanceOf(JkitException.class)
-                .hasMessageContaining("the port isn't a number");
+        try (JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc"))) { // must not throw here
+            assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
+                    .isInstanceOf(JkitException.class)
+                    .hasMessageContaining("the port isn't a number");
+        }
     }
 
     @Test
@@ -155,8 +156,7 @@ class HttpTest {
         });
         server.start();
         other.start();
-        try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1)) {
             String base = "http://127.0.0.1:" + server.getAddress().getPort();
             assertThatThrownBy(() -> http.get(URI.create(base + "/plain")))
                     .isInstanceOf(JkitException.class).hasMessageContaining("refusing a redirect");
@@ -200,10 +200,9 @@ class HttpTest {
     void aFarTooSlowDownloadStartsAgainOnceOnANewConnection() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         HttpServer server = sizedServer(8 << 20, 1, calls);
-        try {
-            // 8 MB at 40 KB/s: minutes
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
-                    Duration.ofSeconds(5));
+        // 8 MB at 40 KB/s: minutes
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                Duration.ofSeconds(5))) {
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("big");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/big"), target,
@@ -228,9 +227,8 @@ class HttpTest {
     void aDownloadThatIsSlowButWillFinishSoonIsLeftAlone() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         HttpServer server = sizedServer(80 << 10, 1, calls); // 80 KB at 40 KB/s: two seconds
-        try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
-                    Duration.ofSeconds(30));
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                    Duration.ofSeconds(30))) {
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("small");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/small"), target,
@@ -267,8 +265,7 @@ class HttpTest {
             exchange.close();
         });
         server.start();
-        try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofMillis(500), 1);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofMillis(500), 1)) {
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/");
             long start = System.nanoTime();
             assertThatThrownBy(() -> http.get(uri)).isInstanceOf(NetworkException.class).hasMessageContaining("no data");
@@ -294,8 +291,7 @@ class HttpTest {
             exchange.close();
         });
         server.start();
-        try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofMillis(500), 3);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofMillis(500), 3)) {
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/");
             long start = System.nanoTime();
             assertThatThrownBy(() -> http.get(uri)).isInstanceOf(NetworkException.class);
@@ -318,8 +314,7 @@ class HttpTest {
             exchange.close();
         });
         server.start();
-        try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 2);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 2)) {
             assertThat(http.get(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/"))).isEqualTo("ok");
         } finally {
             server.stop(0);

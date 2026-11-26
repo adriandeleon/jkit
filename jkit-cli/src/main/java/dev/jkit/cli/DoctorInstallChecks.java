@@ -241,6 +241,10 @@ final class DoctorInstallChecks {
         if (Context.offlineByEnv(r.ctx.env)) {
             r.info("offline mode is on (JKIT_NETWORK_OFFLINE): only cached version lists are used");
         }
+        String typo = Options.misspelled(r.ctx.env);
+        if (typo != null) {
+            r.warn(typo, "set JKIT_NETWORK_OFFLINE=1 for offline mode, and unset " + Options.typoName(r.ctx.env));
+        }
     }
 
     static void javaRuns(DoctorReport r) throws Exception {
