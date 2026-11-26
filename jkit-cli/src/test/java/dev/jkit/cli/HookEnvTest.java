@@ -128,6 +128,21 @@ class HookEnvTest {
     }
 
     @Test
+    void aJavaHomeSetOutsideJkitComesBackOnLeavingAndThatIsSaid() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
+        env.put("JAVA_HOME", "/opt/my-jdk");
+        cd(project);
+        assertThat(env).containsEntry("JAVA_HOME", temurin21.toString()).containsEntry("JKIT_USER_JDK", "/opt/my-jdk");
+        assertThat(said()).contains("set    JKIT_USER_JDK=/opt/my-jdk").contains("your own JAVA_HOME is kept in JKIT_USER_JDK");
+        cd(elsewhere);
+        assertThat(env).containsEntry("JAVA_HOME", "/opt/my-jdk").doesNotContainKey("JKIT_USER_JDK");
+        assertThat(env.get("PATH")).doesNotContain(temurin21.toString());
+        assertThat(said()).contains("left the project in").contains("jdk back to your own JAVA_HOME")
+                .doesNotContain("back to the global").contains("set    JAVA_HOME=/opt/my-jdk")
+                .contains("JAVA_HOME is your own again: /opt/my-jdk");
+    }
+
+    @Test
     void aMissingInstallIsNotedOnceAndPickedUpOnceInstalled() throws Exception {
         Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"11\"\n");
         cd(project);

@@ -119,19 +119,33 @@ final class HookEnvCommand implements Callable<Integer> {
             String left = appliedDir(applied);
             List<String> back = new ArrayList<>();
             List<String> own = new ArrayList<>();
+            List<String> user = new ArrayList<>();
             for (Tool t : Tool.values()) {
                 if (env.containsKey(ShellEnv.projectVariable(t))) {
-                    (env.containsKey(ShellEnv.stateVariable(t)) ? own : back).add(t.toString());
+                    if (env.containsKey(ShellEnv.stateVariable(t))) {
+                        own.add(t.toString());
+                    } else if (env.get(ShellEnv.userVariable(t)) != null && !env.get(ShellEnv.userVariable(t)).isBlank()) {
+                        user.add(t + " back to your own " + t.homeVariable());
+                    } else {
+                        back.add(t.toString());
+                    }
                 }
             }
             String where = "left the project" + (left == null ? "" : " in " + Changes.tilde(left));
-            if (own.isEmpty()) {
+            if (own.isEmpty() && user.isEmpty()) {
                 return where + ": back to the global versions";
             }
-            String stays = "this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay");
-            return where + (back.isEmpty() ? "; " + stays
-                    : ": " + String.join(", ", back) + " back to the global " + (back.size() == 1 ? "version" : "versions")
-                            + "; " + stays);
+            List<String> parts = new ArrayList<>();
+            if (!back.isEmpty()) {
+                parts.add(String.join(", ", back) + " back to the global " + (back.size() == 1 ? "version" : "versions"));
+            }
+            if (!user.isEmpty()) {
+                parts.add(String.join(", ", user));
+            }
+            if (!own.isEmpty()) {
+                parts.add("this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay"));
+            }
+            return where + (back.isEmpty() && user.isEmpty() ? "; " : ": ") + String.join("; ", parts);
         }
         String where = Changes.tilde(plan.project().get().dir().toString()) + "/" + plan.project().get().source();
         List<String> tools = new ArrayList<>();
