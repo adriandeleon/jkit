@@ -200,6 +200,36 @@ class SelfUpdateTest {
     }
 
     @Test
+    void anOldExeStillHeldGetsANameOfItsOwn() throws Exception {
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path binary = Files.writeString(bin.resolve("jkit.exe"), "old");
+        // jkit.exe.old can't be deleted, as when the jkit that left it still runs: here, a folder
+        // with something in it, which no system deletes as a file
+        Path held = Files.createDirectories(bin.resolve("jkit.exe.old"));
+        Files.writeString(held.resolve("x"), "x");
+        Files.writeString(bin.resolve("jkit.exe.1.old"), "older, free");
+        Path old = SelfUpdate.replace(Files.writeString(tmp.resolve("new.exe"), "new"), binary, true);
+        assertThat(old.getFileName().toString()).isEqualTo("jkit.exe.2.old");
+        assertThat(Files.readString(binary)).isEqualTo("new");
+        assertThat(Files.readString(old)).isEqualTo("old");
+
+        // the next self-update deletes every one that is free, and nothing else
+        Files.writeString(bin.resolve("jkit.exe.x.old"), "not ours");
+        Files.writeString(bin.resolve("vcruntime140.dll.3.old"), "old runtime");
+        assertThat(SelfUpdate.deleteOld(binary)).containsExactlyInAnyOrder(bin.resolve("jkit.exe.1.old"), old,
+                bin.resolve("vcruntime140.dll.3.old"));
+        try (var left = Files.list(bin)) {
+            assertThat(left.map(f -> f.getFileName().toString()))
+                    .containsExactlyInAnyOrder("jkit.exe", "jkit.exe.old", "jkit.exe.x.old");
+        }
+        assertThat(SelfUpdate.isOld("jkit.exe.old", "jkit.exe")).isTrue();
+        assertThat(SelfUpdate.isOld("jkit.exe.12.old", "jkit.exe")).isTrue();
+        assertThat(SelfUpdate.isOld("jkit.exe.0.old", "jkit.exe")).isFalse();
+        assertThat(SelfUpdate.isOld("jkit.exe.new.old", "jkit.exe")).isFalse();
+        assertThat(SelfUpdate.isOld("jkit.exe", "jkit.exe")).isFalse();
+    }
+
+    @Test
     void windowsReplacesOnlyTheRuntimeDllsAlreadyBesideJkit() throws Exception {
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         Path binary = Files.writeString(bin.resolve("jkit.exe"), "old");
