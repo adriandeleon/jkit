@@ -156,7 +156,7 @@ public final class ConfigWriter {
     }
 
     private static TomlParseResult parse(Path file, String text) {
-        TomlParseResult toml = ProjectFile.parseToml(file, text);
+        TomlParseResult toml = TextFiles.parseToml(file, text);
         if (toml.hasErrors()) {
             throw new JkitException("invalid " + file + ": " + toml.errors().getFirst(), "fix it by hand first");
         }

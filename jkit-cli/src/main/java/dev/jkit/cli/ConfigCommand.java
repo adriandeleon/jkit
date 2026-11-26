@@ -3,7 +3,7 @@ package dev.jkit.cli;
 import dev.jkit.core.Config;
 import dev.jkit.core.Config.Setting;
 import dev.jkit.core.ConfigWriter;
-import dev.jkit.core.ProjectFile;
+import dev.jkit.core.TextFiles;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Suggest;
@@ -14,12 +14,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import org.tomlj.TomlParseResult;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -60,23 +58,7 @@ final class ConfigCommand implements Callable<Integer> {
 
     /** config.toml's own values by dotted key; empty when there is no file. */
     private static Map<String, Object> fileValues(Context ctx) {
-        Path file = ctx.home.config();
-        if (!Files.isRegularFile(file)) {
-            return Map.of();
-        }
-        try {
-            TomlParseResult toml = ProjectFile.parseToml(file, ProjectFile.text(file));
-            Map<String, Object> values = new HashMap<>();
-            for (Setting s : Setting.values()) {
-                Object v = toml.hasErrors() ? null : toml.get(s.key());
-                if (v != null) {
-                    values.put(s.key(), v);
-                }
-            }
-            return values;
-        } catch (IOException e) {
-            throw new JkitException("cannot read " + file + ": " + e.getMessage());
-        }
+        return Config.fileValues(ctx.home);
     }
 
     static int list(Context ctx, boolean asJson) {
@@ -264,13 +246,13 @@ final class ConfigCommand implements Callable<Integer> {
             throws IOException {
         Path config = ctx.home.config();
         boolean exists = Files.exists(config);
-        ConfigWriter.Edit edit = writer.edit(config, exists ? ProjectFile.text(config) : "", s.table, s.name, literal);
+        ConfigWriter.Edit edit = writer.edit(config, exists ? TextFiles.text(config) : "", s.table, s.name, literal);
         if (!edit.changed()) {
             return false;
         }
         HookCommand.createParent(ctx, config, report);
         // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
-        ProjectFile.write(config, edit.text(), true);
+        TextFiles.write(config, edit.text(), true);
         report.file(config, !exists);
         return true;
     }

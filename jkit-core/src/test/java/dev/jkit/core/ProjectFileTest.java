@@ -33,8 +33,8 @@ class ProjectFileTest {
     void textALatin1FileCantHoldIsRefusedAndTheFileStays() throws Exception {
         byte[] latin1 = "# café\n[tools]\n".getBytes(StandardCharsets.ISO_8859_1);
         Path toml = Files.write(tmp.resolve("jkit.toml"), latin1);
-        assertThat(ProjectFile.encoding(toml).charset()).isEqualTo(StandardCharsets.ISO_8859_1);
-        assertThatThrownBy(() -> ProjectFile.write(toml, ProjectFile.text(toml) + "# ☕\n", false))
+        assertThat(TextFiles.encoding(toml).charset()).isEqualTo(StandardCharsets.ISO_8859_1);
+        assertThatThrownBy(() -> TextFiles.write(toml, TextFiles.text(toml) + "# ☕\n", false))
                 .isInstanceOf(JkitException.class)
                 .hasMessageEndingWith("is in ISO-8859-1, which can't hold the new text; nothing changed");
         assertThat(Files.readAllBytes(toml)).isEqualTo(latin1);
@@ -302,7 +302,7 @@ class ProjectFileTest {
         dir("shared/mine/repo");
         Files.setPosixFilePermissions(tmp.resolve("shared"), PosixFilePermissions.fromString("rwxrwxrwx"));
         assertThat(ProjectFile.find(tmp.resolve("shared/mine/repo"), env)).isEqualTo(Optional.empty());
-        assertThat(ProjectFile.trusted(tmp.resolve("shared/mine"))).isTrue();
+        assertThat(ProjectFile.trustProblem(tmp.resolve("shared/mine"))).isNull();
     }
 
     @Test

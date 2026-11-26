@@ -4,6 +4,7 @@ import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.TextFiles;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
@@ -60,7 +61,7 @@ final class ProjectShell {
      * one put there since {@link #target} checked is replaced, and what it points at left alone.
      */
     static void write(Path file, String text) throws IOException {
-        ProjectFile.write(file, text, false);
+        TextFiles.write(file, text, false);
     }
 
     private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {

@@ -3,6 +3,7 @@ package dev.jkit.cli;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ProjectWriter;
+import dev.jkit.core.TextFiles;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
@@ -92,7 +93,7 @@ final class PinCommand implements Callable<Integer> {
             say.println(name + " already pins " + StatusCommand.pinText(pin));
         } else {
             String text = created ? ProjectWriter.fresh(pin)
-                    : ProjectWriter.set(file, ProjectFile.text(file), pin).text();
+                    : ProjectWriter.set(file, TextFiles.text(file), pin).text();
             ProjectShell.write(file, text);
             report.file(file, created);
             say.println(previous == null
