@@ -3,6 +3,8 @@ package dev.jkit.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
@@ -271,6 +273,29 @@ class PinSyncTest {
         assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
                 .isInstanceOf(JkitException.class)
                 .hasMessage("jkit.toml pins maven, but jkit can't read that pin (see the warning above); nothing was installed");
+    }
+
+    @Test
+    void resetGlobalJsonReportsTheLinkItRemoved() throws Exception {
+        ResetCommand reset = new ResetCommand();
+        reset.tool = Tool.MAVEN;
+        reset.global = true;
+        reset.json.json = true;
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(home.resolve("global/maven")).doesNotExist();
+        JsonNode doc = new ObjectMapper().readTree(output());
+        assertThat(doc.path("schemaVersion").asInt()).isEqualTo(JsonOut.SCHEMA_VERSION);
+        assertThat(doc.path("scope").asText()).isEqualTo("global");
+        assertThat(doc.path("tool").asText()).isEqualTo("maven");
+        assertThat(doc.path("changed").asBoolean()).isTrue();
+        assertThat(doc.path("changes").get(0).path("kind").asText()).isEqualTo("link");
+        assertThat(doc.path("changes").get(0).path("action").asText()).isEqualTo("remove");
+
+        out.reset();
+        assertThat(reset.run(ctx())).isZero(); // nothing left to clear
+        JsonNode again = new ObjectMapper().readTree(output());
+        assertThat(again.path("changed").asBoolean()).isFalse();
+        assertThat(again.path("changes")).isEmpty();
     }
 
     @Test

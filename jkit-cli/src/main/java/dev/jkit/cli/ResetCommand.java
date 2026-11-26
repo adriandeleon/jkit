@@ -6,6 +6,7 @@ import dev.jkit.core.ToolStates;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
@@ -31,6 +32,9 @@ final class ResetCommand implements Callable<Integer> {
     @CommandLine.Option(names = "--global", description = "Clear the global default; installs stay.")
     boolean global;
 
+    @CommandLine.Mixin
+    JsonOut.Flag json = new JsonOut.Flag();
+
     /** Parsing here, not in call(), so an unknown tool is a usage error (exit 2). */
     static final class ToolConverter implements CommandLine.ITypeConverter<Tool> {
         @Override
@@ -52,13 +56,17 @@ final class ResetCommand implements Callable<Integer> {
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active", Changes.hookHint(ctx));
         }
+        PrintStream say = json.json ? ctx.err : ctx.out;
         if (!ShellEnv.hasChoice(ctx.env, tool)) {
             // nothing of jkit's to take away: a *_HOME the user set stays as it is
-            ctx.out.println("nothing to reset: this shell has no " + tool + " from jkit use or a project");
+            say.println("nothing to reset: this shell has no " + tool + " from jkit use or a project");
+            Changes report = new Changes(ctx);
             String own = ctx.env.get(tool.homeVariable());
             if (own != null && !own.isBlank() && !ShellEnv.isGlobal(own, ctx.home, tool)) {
-                ctx.out.println("  " + tool.homeVariable() + " stays as you set it: " + Changes.tilde(own));
+                report.note(tool.homeVariable() + " stays as you set it: " + Changes.tilde(own));
             }
+            report.print(say);
+            printJson(ctx, "shell", false, report);
             return 0;
         }
         // the project's install applies again only while this folder's project still pins it
@@ -83,36 +91,54 @@ final class ResetCommand implements Callable<Integer> {
             changes.put(projectVar, env.get(projectVar));
         }
         ProjectShell.writeEnvFile(ctx, envFile, changes);
-        ctx.out.println("reset " + tool + " in this shell");
+        say.println("reset " + tool + " in this shell");
         Changes report = new Changes(ctx).env(changes);
         if (report.isEmpty()) {
             // only jkit's own record of the choice went
             report.note("its " + tool.homeVariable() + " and PATH stay as they were: the " + tool
                     + " it goes back to is the one it had");
         }
-        report.print(ctx.out);
+        report.print(say);
+        printJson(ctx, "shell", true, report);
         return 0;
+    }
+
+    /** {@code {schemaVersion, scope: shell|global, tool, changed, changes: […], notes: […]}}. */
+    private void printJson(Context ctx, String scope, boolean changed, Changes report) {
+        if (!json.json) {
+            return;
+        }
+        Map<String, Object> doc = JsonOut.document();
+        doc.put("scope", scope);
+        doc.put("tool", tool.id());
+        doc.put("changed", changed);
+        doc.put("changes", report.json());
+        doc.put("notes", report.notes());
+        ctx.out.println(JsonOut.write(doc));
     }
 
     /** Removes the global link: the install stays, new shells just don't get it. */
     private int resetGlobal(Context ctx) throws Exception {
         Path link = ctx.home.global(tool);
         Changes report = new Changes(ctx);
+        PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.os.readLink(link) == null) {
-            ctx.out.println("no global " + tool + " to clear");
+            say.println("no global " + tool + " to clear");
+            printJson(ctx, "global", false, report);
             return 0;
         }
         try (AutoCloseable lock = ctx.store.linkLock()) {
             ctx.os.removeLink(link);
         }
         report.link(link, null);
-        ctx.out.println("cleared the global " + tool);
+        say.println("cleared the global " + tool);
         report.note("installs stay; new shells get no " + tool + " from jkit until: jkit use " + tool + "@<version> --global");
         if (link.toString().equals(ctx.env.get(tool.homeVariable()))) {
             report.note("this shell's " + tool.homeVariable() + " pointed there: open a new shell, or: jkit use "
                     + tool + "@<version>");
         }
-        report.print(ctx.out);
+        report.print(say);
+        printJson(ctx, "global", true, report);
         return 0;
     }
 }
