@@ -5,6 +5,8 @@ import dev.jkit.model.Perms;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -45,6 +47,9 @@ public final class CachingHttp implements Http {
 
         /** {@code file} was deleted to keep the cache small. */
         default void removed(Path file) { }
+
+        /** A response couldn't be written to the cache (a full disk, a read-only folder); the lookup still worked. */
+        default void notStored(String message) { }
     }
 
     /** Cached answers older than this are deleted when the cache is written to. */
@@ -144,19 +149,46 @@ public final class CachingHttp implements Http {
                     new JkitException("got a web page instead of data from " + uri.getHost()
                             + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again"));
         }
-        Perms.mkdirs(dir);
-        boolean created = !Files.exists(file);
-        Path tmp = Files.createTempFile(dir, "index-", ".tmp");
-        try {
-            Files.writeString(tmp, body);
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } finally {
-            Files.deleteIfExists(tmp);
+        if (store(uri, file, body)) {
+            prune(file);
         }
-        listener.stored(uri, file, created);
-        prune(file);
         return body;
+    }
+
+    /**
+     * Writes {@code body} to {@code file} in one step; returns whether it did. A cache that can't be
+     * written (a full disk, a read-only folder, a file another program holds open on Windows)
+     * doesn't fail the lookup: the answer is in hand, and only the next lookup can't reuse it.
+     */
+    private boolean store(URI uri, Path file, String body) {
+        Path tmp = null;
+        try {
+            Perms.mkdirs(dir);
+            boolean created = !Files.exists(file);
+            tmp = Files.createTempFile(dir, "index-", ".tmp");
+            Files.writeString(tmp, body);
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            tmp = null;
+            listener.stored(uri, file, created);
+            return true;
+        } catch (IOException e) {
+            // a FileSystemException's message is only the path; its reason says what went wrong
+            String why = e instanceof FileSystemException fs && fs.getReason() != null ? fs.getReason()
+                    : e instanceof AccessDeniedException ? "permission denied"
+                    : e instanceof FileSystemException || e.getMessage() == null ? e.getClass().getSimpleName()
+                    : e.getMessage();
+            listener.notStored("couldn't save the answer from " + uri.getHost() + " in the cache at " + dir
+                    + " (" + why + "); the next lookup asks again");
+            return false;
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // a leftover .tmp in the cache folder is harmless
+                }
+            }
+        }
     }
 
     /**
@@ -220,7 +252,7 @@ public final class CachingHttp implements Http {
         }
     }
 
-    private static String key(URI uri) {
+    static String key(URI uri) {
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")
                     .digest(uri.toString().getBytes(StandardCharsets.UTF_8));
