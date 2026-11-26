@@ -182,6 +182,24 @@ class ExecTest {
     }
 
     @Test
+    void aPathIsResolvedAgainstTheCommandsFolderAndGetsItsSuffixOnWindows() throws Exception {
+        Path sub = Files.createDirectories(project.resolve("sub"));
+        Files.writeString(project.resolve("gradlew"), "#!/bin/sh\n");
+        Path bat = Files.writeString(project.resolve("gradlew.bat"), "@echo off\n");
+        Path tool = Files.writeString(sub.resolve("tool"), "#!/bin/sh\n");
+        // ./gradlew is gradlew.bat, found in the command's folder rather than jkit's own
+        assertThat(ExecCommand.executable("./gradlew", "", project, true)).isEqualTo(bat.toString());
+        assertThat(ExecCommand.executable("./gradlew.bat", "", project, true)).isEqualTo(bat.toString());
+        assertThat(ExecCommand.executable("sub/tool", "", project, true)).isEqualTo(tool.toString());
+        assertThat(ExecCommand.executable(bat.toString(), "", sub, true)).isEqualTo(bat.toString());
+        // not there: the resolved path, so that starting it fails naming it
+        assertThat(ExecCommand.executable("./nothing", "", project, true))
+                .isEqualTo(project.resolve("nothing").toString());
+        // Unix: as given, started from the command's folder
+        assertThat(ExecCommand.executable("./gradlew", "", project, false)).isEqualTo("./gradlew");
+    }
+
+    @Test
     void anExitCodeFromASignalNamesItOnUnixOnly() {
         assertThat(Signals.endedBy(130, false)).isEqualTo("INT");
         assertThat(Signals.endedBy(143, false)).isEqualTo("TERM");

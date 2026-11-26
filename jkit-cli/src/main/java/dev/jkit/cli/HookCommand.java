@@ -36,8 +36,13 @@ import picocli.CommandLine.Parameters;
         "  jkit hook --install --auto-switch   and switch on cd",
         "  eval \"$(jkit hook bash)\"            load it by hand (zsh alike)",
         "  jkit hook fish | source             load it by hand in fish",
-        "  jkit hook --uninstall               take it out again"})
+        "  jkit hook --uninstall               take it out again",
+        "",
+        "PowerShell (the shell jkit has a hook for on Windows): add this line to $PROFILE",
+        "  jkit hook pwsh | Out-String | Invoke-Expression"})
 final class HookCommand implements Callable<Integer> {
+    /** The line that loads the hook in PowerShell, for $PROFILE. */
+    static final String PWSH_LINE = "jkit hook pwsh | Out-String | Invoke-Expression";
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<shell>", completionCandidates = Candidates.Shells.class,
             description = "bash, zsh, fish or pwsh. With --install, defaults to your login shell ($SHELL).")
@@ -73,6 +78,9 @@ final class HookCommand implements Callable<Integer> {
             throw new JkitException("--auto-switch goes with --install",
                     "jkit hook --install --auto-switch (it skips the startup file if the hook is already there)");
         }
+        if (action.install) {
+            refuseInstallOnWindows(ctx.platform.isWindows());
+        }
         if (action.install || action.uninstall) {
             String name = shell != null ? shell : loginShell(ctx, action.install ? "--install" : "--uninstall");
             return action.install ? install(ctx, name, userHome(ctx), autoSwitch) : uninstall(ctx, name, userHome(ctx));
@@ -94,6 +102,19 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.print(CompletionCommand.script(spec.root().commandLine()));
         }
         return 0;
+    }
+
+    /**
+     * --install on Windows: jkit has a hook for PowerShell only there, and doesn't edit PowerShell
+     * profiles. Git Bash sets SHELL=/usr/bin/bash, and a block in its ~/.bashrc would fail on every
+     * Git Bash start. --uninstall still works, to take out a block an older jkit added.
+     */
+    static void refuseInstallOnWindows(boolean windows) {
+        if (windows) {
+            throw new JkitException("jkit hook --install doesn't edit startup files on Windows",
+                    "PowerShell: add to your $PROFILE:  " + PWSH_LINE,
+                    "PowerShell is the shell jkit has a hook for on Windows; Git Bash, MSYS2 and Cygwin have none");
+        }
     }
 
     static Path userHome(Context ctx) {
@@ -121,9 +142,12 @@ final class HookCommand implements Callable<Integer> {
         if (List.of("bash", "zsh", "fish").contains(name)) {
             return name;
         }
-        throw new JkitException("can't tell which shell " + (flag.equals("--install") ? "to add the hook to" : "to take the hook out of")
-                + (name.isEmpty() ? " ($SHELL isn't set)" : " ($SHELL is " + sh + ")"),
-                "name it: jkit hook bash " + flag + " (or zsh, fish)");
+        String problem = "can't tell which shell " + (flag.equals("--install") ? "to add the hook to" : "to take the hook out of")
+                + (name.isEmpty() ? " ($SHELL isn't set)" : " ($SHELL is " + sh + ")");
+        if (ctx.platform.isWindows() && flag.equals("--install")) {
+            throw new JkitException(problem, "PowerShell: add to your $PROFILE:  " + PWSH_LINE);
+        }
+        throw new JkitException(problem, "name it: jkit hook bash " + flag + " (or zsh, fish)");
     }
 
     /** Adds the block to the startup file and says exactly what changed. */

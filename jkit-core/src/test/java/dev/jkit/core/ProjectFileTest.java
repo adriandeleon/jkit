@@ -261,9 +261,28 @@ class ProjectFileTest {
         // jenv's name for any build that only says "OpenJDK": the version, from any vendor
         write("home/c/.java-version", "openjdk64-17.0.2\n");
         assertThat(find("home/c").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "17.0.2", null, false));
-        write("home/d/.java-version", "oracle64-1.8.0.202\n");
-        assertThat(find("home/d").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "8.0.202", Vendor.of("oracle"), false));
+        write("home/d/.java-version", "oracle64-17.0.2\n");
+        assertThat(find("home/d").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "17.0.2", Vendor.of("oracle"), false));
         assertThat(find("home/d").warnings()).isEmpty();
+        // a note quotes the name as the file has it, not the .tool-versions id it is read as
+        Path zulu = write("home/e/.java-version", "zulu64-21.38.21\n");
+        assertThat(find("home/e").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "21", Vendor.of("zulu"), false));
+        assertThat(find("home/e").warnings()).singleElement().asString()
+                .startsWith(zulu + ":1: 'zulu64-21.38.21' is a Zulu release number").doesNotContain("'zulu-21.38.21'");
+    }
+
+    /** Oracle offers JDK 8 and 11 only after a sign-in, so no build of them can be installed. */
+    @Test
+    void anOracleJdkEightJenvNameIsSkippedSayingWhy() throws IOException {
+        Path file = write("home/a/.java-version", "oracle64-1.8.0.202\n");
+        ProjectSpec spec = find("home/a");
+        assertThat(spec.tools()).isEmpty();
+        assertThat(spec.skipped()).containsExactly(Tool.JDK);
+        assertThat(spec.warnings()).containsExactly(file + ":1: 'oracle64-1.8.0.202' is Oracle JDK 8, which Oracle"
+                + " offers only after a sign-in, so jkit can't install it; skipped (another vendor's 8.0.202 can stand"
+                + " in: jkit pin jdk@8.0.202 --here)");
+        write("home/b/.java-version", "oracle64-11.0.20\n");
+        assertThat(find("home/b").skipped()).containsExactly(Tool.JDK);
     }
 
     @Test
@@ -282,14 +301,33 @@ class ProjectFileTest {
         assertThat(skipped.skipped()).containsExactly(Tool.JDK);
     }
 
+    /** sdk env runs sdk use for each line in turn, so in .sdkmanrc the last line for a tool wins. */
     @Test
-    void theFirstLineForAToolDecidesIt() throws IOException {
-        Path rc = write("home/p/.sdkmanrc", "java=21.0.5-tem\njava=bogus\n");
+    void theLastSdkmanrcLineForAToolDecidesIt() throws IOException {
+        Path rc = write("home/p/.sdkmanrc", "java=17.0.13-tem\nmaven=3.9.9\njava=21.0.5-tem\n");
         ProjectSpec spec = find("home/p");
         assertThat(spec.get(Tool.JDK).version()).isEqualTo("21.0.5");
+        assertThat(spec.get(Tool.MAVEN).version()).isEqualTo("3.9.9");
         assertThat(spec.skipped()).isEmpty();
-        assertThat(spec.warnings()).containsExactly(rc + ":2: java is already set on line 1, ignored");
+        assertThat(spec.warnings()).containsExactly(rc + ":1: java is set again on line 3, which wins (as in sdk env), ignored");
 
+        // a later line jkit can read wins over an earlier one it can't, which is no longer a skip
+        Path fixed = write("home/q/.sdkmanrc", "java=system\njava=21.0.5-tem\n");
+        ProjectSpec read = find("home/q");
+        assertThat(read.get(Tool.JDK).version()).isEqualTo("21.0.5");
+        assertThat(read.skipped()).isEmpty();
+        assertThat(read.warnings()).last().isEqualTo(fixed + ":1: java is set again on line 2, which wins (as in sdk env), ignored");
+
+        // and a later line it can't read decides too: the tool is skipped, not pinned by the earlier line
+        Path broken = write("home/r/.sdkmanrc", "java=21.0.5-tem\njava=system\n");
+        ProjectSpec skipped = find("home/r");
+        assertThat(skipped.tools()).isEmpty();
+        assertThat(skipped.skipped()).containsExactly(Tool.JDK);
+        assertThat(skipped.warnings()).first().isEqualTo(broken + ":1: java is set again on line 2, which wins (as in sdk env), ignored");
+    }
+
+    @Test
+    void theFirstToolVersionsLineForAToolDecidesIt() throws IOException {
         Path tv = write("home/q/.tool-versions", "java system\njava 21\n");
         ProjectSpec skipped = find("home/q");
         assertThat(skipped.tools()).isEmpty();

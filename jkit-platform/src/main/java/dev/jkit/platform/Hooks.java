@@ -36,7 +36,7 @@ final class Hooks {
         // the shell's name goes in unquoted (it's one of the two above); the rest are paths
         return render("hook.sh", Map.of(
                 "SHELL", shell,
-                "GLOBAL", ShellQuote.quote(shell, root.resolve("global").toString()),
+                "GLOBAL", ShellQuote.script(shell, root.resolve("global").toString()),
                 "SELF", quoteSelf(shell, self),
                 "ROOT", quoteRoot(shell, root)));
     }
@@ -60,7 +60,7 @@ final class Hooks {
 
     static String fish(Path root, String self) {
         return render("hook.fish", Map.of(
-                "GLOBAL", ShellQuote.quote("fish", root.resolve("global").toString()),
+                "GLOBAL", ShellQuote.script("fish", root.resolve("global").toString()),
                 "SELF", quoteSelf("fish", self),
                 "ROOT", quoteRoot("fish", root)));
     }
@@ -71,7 +71,7 @@ final class Hooks {
 
     static String powershell(Path root, String self) {
         return render("hook.ps1", Map.of(
-                "GLOBAL", ShellQuote.quote("pwsh", root.resolve("global").toString()),
+                "GLOBAL", ShellQuote.script("pwsh", root.resolve("global").toString()),
                 "SELF", quoteSelf("pwsh", self),
                 "ROOT", quoteRoot("pwsh", root)));
     }
@@ -83,11 +83,11 @@ final class Hooks {
      * hook looks jkit up on PATH instead.
      */
     private static String quoteSelf(String shell, String self) {
-        return ShellQuote.quote(shell, self == null ? "" : self);
+        return ShellQuote.script(shell, self == null ? "" : self);
     }
 
     private static String quoteRoot(String shell, Path root) {
-        return ShellQuote.quote(shell, root.toAbsolutePath().normalize().toString());
+        return ShellQuote.script(shell, root.toAbsolutePath().normalize().toString());
     }
 
     /**

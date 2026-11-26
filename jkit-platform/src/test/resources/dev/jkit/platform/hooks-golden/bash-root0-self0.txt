@@ -9,7 +9,18 @@ for __jkit_t in sbt gradle maven jdk; do
   __jkit_h=${__jkit_h%/}
   __jkit_b="$__jkit_g/$__jkit_t/bin"
   case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
-  case ":$PATH:" in *":$__jkit_b:"*) ;; *) PATH="$__jkit_b:$PATH" ;; esac
+  # first on PATH, also when it is there already but further back (macOS's path_helper in a
+  # nested login shell puts /usr/bin ahead of it): its other places, with or without a trailing /, go
+  __jkit_p=":$PATH:"
+  while :; do
+    case $__jkit_p in
+      *":$__jkit_b:"*) __jkit_p="${__jkit_p%%":$__jkit_b:"*}:${__jkit_p#*":$__jkit_b:"}" ;;
+      *":$__jkit_b/:"*) __jkit_p="${__jkit_p%%":$__jkit_b/:"*}:${__jkit_p#*":$__jkit_b/:"}" ;;
+      *) break ;;
+    esac
+  done
+  # what is left, without the : added at either end (":" alone: nothing is left)
+  case $__jkit_p in :) PATH=$__jkit_b ;; *) __jkit_p=${__jkit_p#:}; PATH="$__jkit_b:${__jkit_p%:}" ;; esac
 done
 export PATH
 [ -z "${JAVA_HOME-}" ] && [ -e "$__jkit_g/jdk" ] && export JAVA_HOME="$__jkit_g/jdk"
@@ -17,16 +28,22 @@ export PATH
 [ -z "${GRADLE_HOME-}" ] && [ -e "$__jkit_g/gradle" ] && export GRADLE_HOME="$__jkit_g/gradle"
 [ -z "${SBT_HOME-}" ] && [ -e "$__jkit_g/sbt" ] && export SBT_HOME="$__jkit_g/sbt"
 [ -z "${GRAALVM_HOME-}" ] && [ -e "$__jkit_g/graalvm" ] && export GRAALVM_HOME="$__jkit_g/graalvm"
-unset __jkit_t __jkit_g __jkit_h __jkit_b
+unset __jkit_t __jkit_g __jkit_h __jkit_b __jkit_p
 __jkit_bin=''
 __jkit_root='/home/u/.jkit'
+# set here, so zsh's warn_create_global doesn't warn when jkit() first sets it; a hook loaded
+# again keeps the file a killed run left, for the next run to remove
+__jkit_last_env=${__jkit_last_env-}
 __jkit_run() {
+  # local, so that zsh's warn_create_global doesn't warn about the read below
+  local __jkit_d
   if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
     # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
-    # skipping folders under jkit's root, where a tool's bin could hold some other jkit.
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit, and
+    # relative entries (. or bin), which would run a ./jkit or bin/jkit of the folder cd went to.
     # The case patterns start with ( because bash 3.2 (macOS) ends $( ) at a pattern's lone ).
     __jkit_bin=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
-      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%s\n' "$__jkit_d/jkit"; break; fi ;; esac
+      case $__jkit_d in ("$__jkit_root"|"$__jkit_root"/*) ;; (/*) if [ -x "$__jkit_d/jkit" ]; then printf '%s\n' "$__jkit_d/jkit"; break; fi ;; esac
     done)
   fi
   if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi

@@ -155,6 +155,33 @@ class ChangesTest {
                 .doesNotContain("PATH");
     }
 
+    /**
+     * The global bin on PATH, but behind the system's (Windows puts the user PATH that jkit env
+     * --install wrote after the system one): it is moved to the front, and the move is reported.
+     * PowerShell's env file is a new file jkit creates, readable by its owner only.
+     */
+    @Test
+    void aFirstInstallMovesTheGlobalBinAheadOfTheSystemsAndSaysSo() throws Exception {
+        Path link = Files.createDirectories(home.resolve("global")).resolve("jdk");
+        Files.createSymbolicLink(link, Files.createDirectories(home.resolve("tools/jdk/21")));
+        Path envFile = home.resolve("jkit-env-1234.ps1");
+        String sys = home.resolve("sys").toString();
+        String bin = link.resolve("bin").toString();
+        Context ctx = context(Map.of("JKIT_SHELL", "pwsh", "JKIT_ENV_FILE", envFile.toString(),
+                "PATH", sys + File.pathSeparator + bin));
+
+        String out = print(new Changes(ctx).globalEffect(Tool.JDK));
+
+        assertThat(out).contains("set    JAVA_HOME=" + link).contains("PATH   moved " + bin);
+        String text = Files.readString(envFile);
+        assertThat(text).startsWith("\uFEFF$env:JAVA_HOME = ")
+                .contains("$env:PATH = '" + bin + File.pathSeparator + sys + "'");
+        if (dev.jkit.model.Perms.posix()) {
+            assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(envFile)))
+                    .isEqualTo("rw-------");
+        }
+    }
+
     @Test
     @DisabledOnOs(value = OS.WINDOWS, disabledReason = "jkit doesn't inspect PowerShell profiles: Windows always gets the $PROFILE hint")
     void withTheHookInstalledButNotLoadedTheHintIsANewShell() throws Exception {

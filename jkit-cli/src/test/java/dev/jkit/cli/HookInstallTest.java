@@ -206,6 +206,19 @@ class HookInstallTest {
                 .hasMessageContaining("$SHELL is /bin/tcsh");
     }
 
+    /**
+     * Windows: Git Bash sets SHELL=/usr/bin/bash, but a bash block there would fail on every Git
+     * Bash start, so --install names the PowerShell profile line instead, whatever the shell.
+     */
+    @Test
+    void installOnWindowsGivesThePowerShellProfileLine() {
+        assertThatThrownBy(() -> HookCommand.refuseInstallOnWindows(true)).isInstanceOf(JkitException.class)
+                .hasMessage("jkit hook --install doesn't edit startup files on Windows")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).first().asString()
+                        .isEqualTo("PowerShell: add to your $PROFILE:  jkit hook pwsh | Out-String | Invoke-Expression"));
+        HookCommand.refuseInstallOnWindows(false); // Unix: nothing to refuse
+    }
+
     @Test
     void autoSwitchWritesConfigTomlAndSaysSo() throws Exception {
         Path config = user.resolve(".jkit/config.toml");

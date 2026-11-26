@@ -206,19 +206,33 @@ public final class ShellEnv {
     }
 
     /**
-     * Points {@code tool}'s *_HOME at the global link and puts its bin first on PATH (unless it is
-     * there already), as the hook does when it loads. Used after the first install in a shell
-     * whose hook loaded before there was anything to link to.
+     * Points {@code tool}'s *_HOME at the global link and puts its bin first on PATH, as the hook
+     * does when it loads: added, or moved to the front when it is further back (the Windows user
+     * PATH comes after the system one). Used after the first install in a shell whose hook loaded
+     * before there was anything to link to.
      */
     public static Map<String, String> global(Map<String, String> env, JkitHome home, Tool tool) {
         Map<String, String> out = new LinkedHashMap<>();
         out.put(tool.homeVariable(), home.global(tool).toString());
         String bin = home.global(tool).resolve("bin").toString();
-        if (tool.onPath() && !onPath(env, bin)) {
-            String path = env.getOrDefault("PATH", "");
-            out.put("PATH", path.isEmpty() ? bin : bin + File.pathSeparator + path);
+        List<String> entries = userEntries(env);
+        boolean first = !entries.isEmpty() && !entries.getFirst().isEmpty() && samePathEntry(entries.getFirst(), bin);
+        if (tool.onPath() && !first) {
+            List<String> path = new ArrayList<>();
+            path.add(spelling(entries, bin));
+            for (String entry : entries) {
+                if (entry.isEmpty() || !samePathEntry(entry, bin)) {
+                    path.add(entry);
+                }
+            }
+            out.put("PATH", String.join(File.pathSeparator, path));
         }
         return out;
+    }
+
+    /** {@code entry} as PATH has it already (C:\X\ for C:\x), so moving it is a move; else as given. */
+    private static String spelling(List<String> entries, String entry) {
+        return entries.stream().filter(e -> !e.isEmpty() && samePathEntry(e, entry)).findFirst().orElse(entry);
     }
 
     /** Per tool, the install this shell has: its own choice, else the project's. */
@@ -357,9 +371,16 @@ public final class ShellEnv {
             if (toolHome == null) {
                 continue;
             }
+            // When jkit's choice just went away (changes sets *_HOME back), the bin of what comes
+            // back goes first, moved there if PATH has it further back: behind /usr/bin, java
+            // would not be $JAVA_HOME/bin/java. Other tools' bins stay where they are.
+            boolean back = changes.containsKey(t.homeVariable());
             Path ownBin = isGlobal(toolHome, home, t) ? null : Fs.path(toolHome);
             if (ownBin == null) {
-                if (!onPath(env, global)) {
+                if (back) {
+                    entries.add(spelling(userEntries(env), global));
+                    dropped.add(global);
+                } else if (!onPath(env, global)) {
                     entries.add(global);
                 }
             } else if (Files.isDirectory(ownBin.resolve("bin"))) {
@@ -367,7 +388,12 @@ public final class ShellEnv {
                 String bin = ownBin.resolve("bin").toString();
                 // Entries under tools/ are all removed below, so a user's own *_HOME inside tools/
                 // must be added here even if PATH already has it.
-                if (!onPath(env, bin) || underTools(bin, home)) {
+                if (underTools(bin, home)) {
+                    entries.add(bin);
+                } else if (back) {
+                    entries.add(spelling(userEntries(env), bin));
+                    dropped.add(bin);
+                } else if (!onPath(env, bin)) {
                     entries.add(bin);
                 }
             }
@@ -440,6 +466,6 @@ public final class ShellEnv {
     }
 
     private static String quote(String shell, String value) {
-        return ShellQuote.quote(shell, value);
+        return ShellQuote.script(shell, value);
     }
 }

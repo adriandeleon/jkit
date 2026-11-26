@@ -2,8 +2,9 @@
 $env:JKIT_SHELL = 'pwsh'
 & {
   # in a script block of its own, so variables of the same name in the profile ($t, $bin...) are untouched
-  $g = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit/global'
+  $g = ('/tmp/o''brien $HOME `x` \ "q" ' + [char]0x2018 + 't' + [char]0x2019 + '/.jkit/global')
   $sep = [IO.Path]::PathSeparator
+  $win = [IO.Path]::DirectorySeparatorChar -eq '\'
   foreach ($pair in @(@('sbt', 'SBT_HOME'), @('gradle', 'GRADLE_HOME'), @('maven', 'MAVEN_HOME'), @('jdk', 'JAVA_HOME'))) {
     $bin = Join-Path (Join-Path $g $pair[0]) 'bin'
     # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
@@ -13,17 +14,29 @@ $env:JKIT_SHELL = 'pwsh'
     if ($own -and $own -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
       $bin = Join-Path $own 'bin'
     }
-    if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }
+    # first on PATH, also when it is there already but further back (Windows puts the user PATH,
+    # where jkit env --install puts it, after the system one): its other places go. The same
+    # folder on Windows whatever the case, slash direction or trailing slash.
+    $key = $bin.TrimEnd('\', '/')
+    if ($win) { $key = $key.Replace('/', '\') }
+    $rest = @()
+    if ($env:PATH) {
+      $rest = @($env:PATH -split [regex]::Escape($sep) | Where-Object {
+        $e = $_.TrimEnd('\', '/')
+        if ($win) { $e.Replace('/', '\') -ne $key } else { $e -cne $key }
+      })
+    }
+    $env:PATH = (@($bin) + $rest) -join $sep
   }
   foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
     $dir = Join-Path $g $pair[1]
-    if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
+    if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path -LiteralPath $dir)) {
       Set-Item -Path ("Env:" + $pair[0]) -Value $dir
     }
   }
 }
 $global:__jkit_bin = ''
-$global:__jkit_root = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit'
+$global:__jkit_root = ('/tmp/o''brien $HOME `x` \ "q" ' + [char]0x2018 + 't' + [char]0x2019 + '/.jkit')
 function jkit {
   # PowerShell drops the first bare -- from a function's arguments, and jkit exec needs it,
   # so put it back where the command line has it. That is only safe when every word before
@@ -61,10 +74,15 @@ function jkit {
   try {
     if (-not ($global:__jkit_bin -and (Test-Path -LiteralPath $global:__jkit_bin))) {
       # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
-      # skipping folders under jkit's root, where a tool's bin could hold some other jkit
+      # skipping folders under jkit's root, where a tool's bin could hold some other jkit, and
+      # relative entries (. or bin), which would run a jkit of the current folder: only a jkit in
+      # a folder that PATH names by its full path counts
       $root = $global:__jkit_root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+      $dirs = @($env:PATH -split [regex]::Escape([IO.Path]::PathSeparator) | ForEach-Object { $_.Trim('"') } |
+        Where-Object { $_ -and [IO.Path]::IsPathRooted($_) } | ForEach-Object { $_.TrimEnd('\', '/') })
       $global:__jkit_bin = Get-Command jkit -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+        Where-Object { [IO.Path]::IsPathRooted($_.Source) -and ($dirs -contains (Split-Path -Parent $_.Source).TrimEnd('\', '/')) -and
+          -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
         Select-Object -First 1 -ExpandProperty Source
     }
     if ($global:__jkit_bin) {
