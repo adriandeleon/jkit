@@ -11,4 +11,4 @@ Description: installs and switches JDKs, Maven, Gradle and sbt
  JDKs from many vendors (Temurin, Corretto, Zulu, Liberica, GraalVM and
  others), Maven, Gradle and sbt. It needs no JDK to run.
  .
- Enable switching in the current shell with: eval "$(jkit hook bash)"
+ Set up your shell (bash, zsh or fish) with: jkit hook --install

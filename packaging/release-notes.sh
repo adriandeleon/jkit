@@ -91,6 +91,7 @@ EOF
 | Debian, Ubuntu | \`sudo apt install jkit\` from the [Vitrina](https://vitrina-project.dev) apt repository ([setup](https://jkit-project.dev/install/#apt)), or the \`.deb\` below |
 | Fedora, RHEL, Rocky, Alma 9+ | the \`.rpm\` below: \`sudo dnf install ./jkit-*.x86_64.rpm\` (\`.aarch64.rpm\` on ARM) |
 | Windows x64 (preview) | \`winget install AdrianDeLeon.jkit\` (once winget-pkgs has merged this release; until then, the \`.zip\`) |
+| Alpine and other musl Linux (x64) | the \`-linux-x64-musl\` \`.tar.gz\` below |
 | Anything else | a \`.tar.gz\` or \`.zip\` below |
 
 A jkit from a \`.tar.gz\` or \`.zip\` updates itself with \`jkit self-update\`.
@@ -99,8 +100,8 @@ EOF
 esac
 cat <<EOF
 
-To check a download: \`sha256sum -c SHA256SUMS --ignore-missing\`, \`gpg --verify SHA256SUMS.asc
-SHA256SUMS\` (jkit's release key is in [SECURITY.md](https://github.com/$repo/blob/v$version/SECURITY.md)),
-and \`gh attestation verify <file> --repo $repo\`. Requirements: [Install](https://github.com/$repo/blob/v$version/README.md#install).
+To check a download: first \`gpg --verify SHA256SUMS.asc SHA256SUMS\` (jkit's release key is in
+[SECURITY.md](https://github.com/$repo/blob/v$version/SECURITY.md)), then
+\`sha256sum -c SHA256SUMS --ignore-missing\`, and \`gh attestation verify <file> --repo $repo\`. Requirements: [Install](https://github.com/$repo/blob/v$version/README.md#install).
 EOF
 } | unwrap

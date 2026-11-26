@@ -180,6 +180,7 @@ what `--install` set. The message goes to stderr.
 
 ```json
 {
+  "schemaVersion": 1,
   "action": "install",
   "changed": true,
   "changes": [
@@ -259,9 +260,11 @@ and not cached); `verifiable` is also `null` when the build isn't downloadable.
 ## What changed: `changes`
 
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
-prints a line for each change under its own message, and with `--json` lists them in `changes`
+prints the changes under its own message, and with `--json` lists each one in `changes`
 (`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`,
 `prune`, `config set` and `config unset`, `self-update`, `env --install` and `env --uninstall`).
+Text output folds cached version lists into one `cache` line, and `install` leaves out that line
+and the folders its own message names; `changes` lists them all.
 The `cd` hook (`shell.auto_switch`) follows the same rule: whenever it switches versions it prints
 the same lines on stderr, under a `jkit: using …` or `jkit: left the project …` line.
 
@@ -350,7 +353,10 @@ lines text mode prints, also on stderr):
 }
 ```
 
-`--global` changes a link and no variables; without it, only variables of this shell change.
+`--global` changes a link. In a hooked shell with no version of its own for the tool and its
+variable (`JAVA_HOME`, `MAVEN_HOME`, …) unset, it also sets that variable to the link and, if
+missing, adds the link's `bin` to `PATH`: `env` changes. Without `--global`, only variables of this
+shell change.
 
 ## `jkit pin <tool>[@version] [vendor] [--fx] [--exact] [--here] --json`
 

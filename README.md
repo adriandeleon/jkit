@@ -54,12 +54,14 @@ jkit self-update                       # jkit itself (or how to, for brew, apt, 
 Next to SDKMAN, mise and asdf, jkit is narrower and stricter:
 
 - One native binary. Running it needs no JDK, bash or plugins.
-- Every download is checked against its published checksum, and the main JDKs, Maven and sbt
-  also against their publisher's OpenPGP signature ([how](#how-it-works)).
+- Downloads are checked against their published checksum, and the Temurin, Microsoft and Corretto
+  JDKs, Maven 3.9.0+ and sbt also against their publisher's OpenPGP signature (Corretto publishes
+  only the signature) ([how](#how-it-works)).
 - JDKs from 20+ vendors through foojay. Projects keep their `.sdkmanrc`, `.tool-versions` or
   `.java-version`: jkit reads them.
 - `jkit exec` and `--json` for scripts, CI, editors and agents.
-- Nothing changes out of sight: jkit prints each folder, link and variable it touches.
+- Nothing changes out of sight: jkit prints the links, variables, files and folders it changes
+  ([details](#how-it-works)).
 
 What it doesn't do: it manages JDKs, GraalVM, Maven, Gradle and sbt, nothing else (no Kotlin,
 JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows support is a preview.
@@ -87,14 +89,21 @@ release's signed `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that 
 
 ## How it works
 
-- Nothing outside `~/.jkit` (below) is touched except the marked block `jkit hook --install` adds
-  to your shell's startup file. Every change is printed: folders, links, cache files, variables.
+- jkit keeps its files in `~/.jkit` (below). Outside it, it writes only the hook that
+  `jkit hook --install` adds (a marked block in `~/.bashrc` or `~/.zshrc`, or its own
+  `~/.config/fish/conf.d/jkit.fish`), a project's `jkit.toml` (`pin`, `unpin`), the jkit binary
+  (`self-update`), on Windows your user environment variables (`jkit env --install`), and the
+  hook's temporary file in `$TMPDIR`, deleted after each command.
+- Each command prints what it changed: links, variables, files and folders. Cached version lists
+  are folded into one `cache` line; `install` leaves out that line and the folders its
+  `installed … →` line names. `--json` lists every change.
 - The global default is a link, `~/.jkit/global/<tool>`, which the hook puts on `PATH` and uses for
   `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME` and `GRAALVM_HOME`; point an IDE at
   `~/.jkit/global/jdk` and it follows `jkit use … --global`. `jkit use` without `--global`
   changes only the current shell, through the hook.
 - Downloads come over https only and are checked against their source's checksum (SHA-256 or
-  stronger; SHA-1 only, as for old Maven, installs marked unverified; none is refused). Temurin,
+  stronger; SHA-1 only, as for old Maven, installs marked unverified; none is refused, except for
+  Corretto, which publishes only a signature). Temurin,
   Microsoft and Corretto, Maven 3.9.0+ and sbt are also checked against their publisher's OpenPGP
   signature, with keys built into jkit: a missing or bad one stops the install. `--allow-unverified`
   overrides both, marked unverified; `jkit search` marks builds with nothing to check ○.
@@ -110,6 +119,7 @@ release's signed `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that 
 | `~/.jkit/tools/<tool>/<version>` | installed JDKs, Maven, Gradle and sbt |
 | `~/.jkit/global/` | links to the global defaults |
 | `~/.jkit/index/` | version lists, cached 24 h (`--refresh` refetches, `--offline` uses only the cache) |
+| `~/.jkit/tmp/` | work folders of a running `install`, `remove` or `self-update`; `jkit prune` clears leftovers |
 | `~/.jkit/config.toml` | settings (below) |
 | `JKIT_HOME` | moves all of it: an absolute path to a folder you (or root) own that others can't write to |
 
@@ -148,6 +158,10 @@ jkit hook --uninstall          # takes the block out of your shell's startup fil
 rm -rf ~/.jkit                 # every install, link and setting
 brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit, winget uninstall AdrianDeLeon.jkit
 ```
+
+On Windows, first run `jkit env --uninstall` if you ran `jkit env --install`, and take the
+`jkit hook pwsh | Out-String | Invoke-Expression` line out of your `$PROFILE`; then delete
+`%USERPROFILE%\.jkit` and run `winget uninstall AdrianDeLeon.jkit`.
 
 ## Not yet
 

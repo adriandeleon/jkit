@@ -17,15 +17,16 @@ that isn't what jkit would pick, with the command that fixes it:
 
 ```console
 $ jkit status
-jdk      17.0.13 zulu        shell
+jdk      17.0.13+11 zulu         shell
          jkit.toml wants jdk 21; this shell chose another with jkit use, to follow it: jkit reset jdk
-maven    3.9.11              global
+maven    3.9.11                  global
+project: ~/src/app (jkit.toml)
 ```
 
 ## `jkit doctor`
 
-Runs a fixed list of checks and prints `ok`, `warn` or `fail` for each, with a `fix:` line under
-anything that isn't ok. It exits 1 when something failed, so it can gate a CI step. `--network` also
+Runs a fixed list of checks and prints `ok`, `info`, `warn` or `fail` for each, with a `fix:` line
+under anything that needs one. It exits 1 when something failed, so it can gate a CI step. `--network` also
 checks that foojay, services.gradle.org, Maven Central and GitHub can be reached.
 
 It checks: the shell hook, more than one `jkit` on PATH, `JAVA_HOME` and friends set outside jkit,
