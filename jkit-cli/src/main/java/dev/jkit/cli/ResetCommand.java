@@ -41,13 +41,25 @@ final class ResetCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
+        return run(Context.create(false, true));
+    }
+
+    int run(Context ctx) throws Exception {
         if (global) {
             return resetGlobal(ctx);
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active", "load it in new shells: " + Changes.HOOK_SETUP);
+        }
+        if (!ShellEnv.hasChoice(ctx.env, tool)) {
+            // nothing of jkit's to take away: a *_HOME the user set stays as it is
+            ctx.out.println("nothing to reset: this shell has no " + tool + " from jkit use or a project");
+            String own = ctx.env.get(tool.homeVariable());
+            if (own != null && !own.isBlank() && !ShellEnv.isGlobal(own, ctx.home, tool)) {
+                ctx.out.println("  " + tool.homeVariable() + " stays as you set it: " + Changes.tilde(own));
+            }
+            return 0;
         }
         // the project's install applies again only while this folder's project still pins it
         String projectVar = ShellEnv.projectVariable(tool);

@@ -107,13 +107,17 @@ when you leave, printing every variable they change. PowerShell doesn't switch o
 - A `JAVA_HOME` (or other `*_HOME`) you set yourself, outside jkit, is kept in `JKIT_USER_JDK`
   (`JKIT_USER_MAVEN`, ...) when a project or `jkit use` first replaces it. It comes back, instead of
   the global version, once neither applies any more (you leave the project, `jkit reset jdk`), and
-  jkit says so each time.
+  jkit says so each time. In a shell where jkit chose no JDK, `jkit reset jdk` changes nothing.
+  PATH follows: while your own `JAVA_HOME` applies, its `bin` comes first on PATH, not the global
+  JDK's (the hook does the same when it loads), so `java` and `JAVA_HOME` are the same JDK. jkit
+  removes only its own PATH entries (under `~/.jkit`), never one you added.
 
 ## Commands
 
 - `jkit pin <tool>[@version] [vendor] [--exact] [--here]` writes or updates one line of the nearest
-  `jkit.toml` (or creates one here with `--here`), keeping comments and order. The version must be
-  installed or downloadable. It won't edit `.sdkmanrc`, `.tool-versions` or `.java-version`.
+  `jkit.toml` (or creates one here with `--here`), keeping comments, order, line endings and the
+  file's encoding (UTF-8 with or without a byte-order mark, UTF-16 with one, or Latin-1). The version
+  must be installed or downloadable. It won't edit `.sdkmanrc`, `.tool-versions` or `.java-version`.
 - `jkit unpin <tool>` removes that line.
 - `jkit sync [--dry-run]` installs what the project asks for and switches this shell to it. A
   download with no published checksum is refused unless you add `--allow-unverified`.

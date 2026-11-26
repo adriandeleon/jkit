@@ -30,13 +30,15 @@ checks that foojay, services.gradle.org, Maven Central and GitHub can be reached
 
 It checks: the shell hook, more than one `jkit` on PATH, `JAVA_HOME` and friends set outside jkit,
 whether `java`, `mvn`, `gradle` and `sbt` on PATH are jkit's, broken global links, leftovers from
-interrupted installs, `config.toml`, the project file's warnings, the age of the version cache, and
-whether the active JDK actually runs.
+interrupted installs and from writes of a startup file, `config.toml` or `jkit.toml` (a
+`.<name>.<digits>.jkit-tmp` next to it), `config.toml`, the project file's warnings, the age of the
+version cache, and whether the active JDK actually runs.
 
 The usual culprits:
 
 - **`JAVA_HOME` set in your shell profile** (`~/.bashrc`, `~/.profile`, `/etc/environment`): it wins
-  over jkit's choice. Remove the export.
+  over jkit's global version, for `java` on PATH too (the hook puts `$JAVA_HOME/bin` first instead
+  of jkit's). Remove the export.
 - **The hook loads before something else changes PATH** (SDKMAN, a distro's `java` alternatives):
   move the jkit line to the end of the startup file.
 - **No hook at all**: `jkit hook --install`, then open a new shell.

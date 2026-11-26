@@ -187,7 +187,7 @@ class RobustnessTest {
         String keep = tmp.resolve("home/tools-old/bin").toString();
         String drop = tmp.resolve("home/tools/jdk/21/bin").toString();
         Map<String, String> env = Map.of("PATH", String.join(File.pathSeparator, drop, keep));
-        String path = ShellEnv.path(env, home, new EnumMap<>(Tool.class));
+        String path = ShellEnv.path(env, home, new EnumMap<>(Tool.class), Map.of());
         assertThat(path).isEqualTo(keep);
     }
 

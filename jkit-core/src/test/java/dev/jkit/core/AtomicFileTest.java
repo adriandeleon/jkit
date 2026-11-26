@@ -2,9 +2,11 @@ package dev.jkit.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -27,6 +29,41 @@ class AtomicFileTest {
         try (var files = Files.list(tmp)) {
             assertThat(files.map(p -> p.getFileName().toString())).containsExactlyInAnyOrder(".bashrc", "config.toml");
         }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aReadOnlyFileIsRefusedAsWritingInPlaceWouldBe() throws Exception {
+        Path rc = Files.writeString(tmp.resolve(".bashrc"), "old\n");
+        Files.setPosixFilePermissions(rc, PosixFilePermissions.fromString("r--r--r--"));
+        assumeFalse(Files.isWritable(rc), "root may write it anyway");
+        assertThatThrownBy(() -> AtomicFile.write(rc, "new\n", StandardCharsets.UTF_8, true))
+                .isInstanceOf(AccessDeniedException.class).hasMessage(rc.toString());
+        assertThat(Files.readString(rc)).isEqualTo("old\n");
+        try (var files = Files.list(tmp)) {
+            assertThat(files).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void theFileKeepsItsOwnerAndGroup() throws Exception {
+        Path rc = Files.writeString(tmp.resolve(".bashrc"), "old\n");
+        Object uid = Files.getAttribute(rc, "unix:uid");
+        Object gid = Files.getAttribute(rc, "unix:gid");
+        AtomicFile.write(rc, "new\n", StandardCharsets.UTF_8, true);
+        assertThat(Files.getAttribute(rc, "unix:uid")).isEqualTo(uid);
+        assertThat(Files.getAttribute(rc, "unix:gid")).isEqualTo(gid);
+    }
+
+    @Test
+    void leftoversFindOnlyJkitsOwnTemporaryFiles() throws Exception {
+        Path left = Files.writeString(tmp.resolve(".bashrc.123456789.jkit-tmp"), "half");
+        Files.writeString(tmp.resolve(".bashrc"), "old\n");
+        Files.writeString(tmp.resolve("notes.jkit-tmp"), "mine");
+        Files.writeString(tmp.resolve(".x.abc.jkit-tmp"), "mine");
+        assertThat(AtomicFile.leftovers(tmp)).containsExactly(left);
+        assertThat(AtomicFile.leftovers(tmp.resolve("missing"))).isEmpty();
     }
 
     @Test

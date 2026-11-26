@@ -9,6 +9,7 @@ import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -27,6 +28,17 @@ class ProjectFileTest {
     Path tmp;
     Path home;
     Map<String, String> env;
+
+    @Test
+    void textALatin1FileCantHoldIsRefusedAndTheFileStays() throws Exception {
+        byte[] latin1 = "# café\n[tools]\n".getBytes(StandardCharsets.ISO_8859_1);
+        Path toml = Files.write(tmp.resolve("jkit.toml"), latin1);
+        assertThat(ProjectFile.encoding(toml).charset()).isEqualTo(StandardCharsets.ISO_8859_1);
+        assertThatThrownBy(() -> ProjectFile.write(toml, ProjectFile.text(toml) + "# ☕\n", false))
+                .isInstanceOf(JkitException.class)
+                .hasMessageEndingWith("is in ISO-8859-1, which can't hold the new text; nothing changed");
+        assertThat(Files.readAllBytes(toml)).isEqualTo(latin1);
+    }
 
     @BeforeEach
     void setUp() throws IOException {

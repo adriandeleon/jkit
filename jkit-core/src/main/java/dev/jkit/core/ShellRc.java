@@ -111,7 +111,7 @@ public final class ShellRc {
 
     /** {@link #add(String, String, String, Path)}; {@code created} when the file didn't exist before. */
     public static Edit add(String text, String shell, String self, Path root, boolean created) {
-        if (hasBlock(text) || manualLine(text) > 0) {
+        if (hasBlock(text) || unterminatedStart(text) > 0 || manualLine(text) > 0) {
             return new Edit(text, false);
         }
         // the block is always \n: bash and zsh read a \r\n block's last line as "fi\r" and fail to
@@ -143,9 +143,9 @@ public final class ShellRc {
         int end = -1;
         for (int i = 0; i < lines.size() && end < 0; i++) {
             String line = lines.get(i).text();
-            if (start < 0 && line.equals(START)) {
+            if (start < 0 && is(line, START)) {
                 start = i;
-            } else if (start >= 0 && line.equals(END)) {
+            } else if (start >= 0 && is(line, END)) {
                 end = i;
             }
         }
@@ -164,19 +164,50 @@ public final class ShellRc {
     public static boolean createdByJkit(String text) {
         boolean inBlock = false;
         for (String line : text.lines().toList()) {
-            if (line.equals(START)) {
+            if (is(line, START)) {
                 inBlock = true;
-            } else if (line.equals(END)) {
+            } else if (is(line, END)) {
                 inBlock = false;
-            } else if (inBlock && line.equals(CREATED)) {
+            } else if (inBlock && is(line, CREATED)) {
                 return true;
             }
         }
         return false;
     }
 
+    /** Whether the text has jkit's block, from its start marker to its end marker. */
     public static boolean hasBlock(String text) {
-        return text.lines().anyMatch(START::equals);
+        boolean started = false;
+        for (String line : text.lines().toList()) {
+            if (is(line, START)) {
+                started = true;
+            } else if (started && is(line, END)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The 1-based number of a start marker with no end marker after it (one deleted by hand), or 0.
+     * jkit then can't tell where its block ends, so it changes nothing.
+     */
+    public static int unterminatedStart(String text) {
+        List<String> lines = text.lines().toList();
+        int start = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            if (start == 0 && is(lines.get(i), START)) {
+                start = i + 1;
+            } else if (start > 0 && is(lines.get(i), END)) {
+                start = 0;
+            }
+        }
+        return start;
+    }
+
+    /** A marker line, also indented or with spaces after it (an editor's, a formatter's). */
+    private static boolean is(String line, String marker) {
+        return line.strip().equals(marker);
     }
 
     /**
@@ -199,9 +230,9 @@ public final class ShellRc {
         boolean inBlock = false;
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i).strip();
-            if (line.equals(START)) {
+            if (is(line, START)) {
                 inBlock = true;
-            } else if (line.equals(END)) {
+            } else if (is(line, END)) {
                 inBlock = false;
             } else if (!inBlock && !line.startsWith("#") && LOADS_HOOK.matcher(line).find()) {
                 return i + 1;

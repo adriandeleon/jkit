@@ -4,9 +4,10 @@ import dev.jkit.model.ShellQuote;
 import java.nio.file.Path;
 
 /**
- * Shell hook scripts. Each adds the global bin folders to PATH, sets the global *_HOME variables
- * when unset, and defines a {@code jkit} function that sources the environment changes the binary
- * writes to $JKIT_ENV_FILE.
+ * Shell hook scripts. Each adds the global bin folders to PATH (for a *_HOME the user set, that
+ * one's bin instead, so java and JAVA_HOME agree), sets the global *_HOME variables when unset,
+ * and defines a {@code jkit} function that sources the environment changes the binary writes to
+ * $JKIT_ENV_FILE.
  */
 final class Hooks {
     private Hooks() { }
@@ -32,7 +33,12 @@ final class Hooks {
                 export JKIT_SHELL=%1$s
                 __jkit_g=%2$s
                 for __jkit_t in sbt gradle maven jdk; do
-                  case ":$PATH:" in *":$__jkit_g/$__jkit_t/bin:"*) ;; *) PATH="$__jkit_g/$__jkit_t/bin:$PATH" ;; esac
+                  # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+                  case $__jkit_t in sbt) __jkit_h=${SBT_HOME-} ;; gradle) __jkit_h=${GRADLE_HOME-} ;;
+                    maven) __jkit_h=${MAVEN_HOME-} ;; *) __jkit_h=${JAVA_HOME-} ;; esac
+                  __jkit_b="$__jkit_g/$__jkit_t/bin"
+                  case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t"|"$__jkit_g/$__jkit_t/") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
+                  case ":$PATH:" in *":$__jkit_b:"*) ;; *) PATH="$__jkit_b:$PATH" ;; esac
                 done
                 export PATH
                 [ -z "${JAVA_HOME-}" ] && [ -e "$__jkit_g/jdk" ] && export JAVA_HOME="$__jkit_g/jdk"
@@ -40,7 +46,7 @@ final class Hooks {
                 [ -z "${GRADLE_HOME-}" ] && [ -e "$__jkit_g/gradle" ] && export GRADLE_HOME="$__jkit_g/gradle"
                 [ -z "${SBT_HOME-}" ] && [ -e "$__jkit_g/sbt" ] && export SBT_HOME="$__jkit_g/sbt"
                 [ -z "${GRAALVM_HOME-}" ] && [ -e "$__jkit_g/graalvm" ] && export GRAALVM_HOME="$__jkit_g/graalvm"
-                unset __jkit_t __jkit_g
+                unset __jkit_t __jkit_g __jkit_h __jkit_b
                 __jkit_bin=%3$s
                 __jkit_root=%4$s
                 __jkit_run() {
@@ -131,7 +137,15 @@ final class Hooks {
                 set -gx JKIT_SHELL fish
                 set -l __jkit_g %1$s
                 for t in sbt gradle maven jdk
-                  contains -- $__jkit_g/$t/bin $PATH; or set -gx PATH $__jkit_g/$t/bin $PATH
+                  # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+                  set -l v (string upper -- $t)_HOME
+                  test $t = jdk; and set v JAVA_HOME
+                  set -l h $$v
+                  set -l b $__jkit_g/$t/bin
+                  if test -n "$h"; and not contains -- "$h" $__jkit_g/$t $__jkit_g/$t/; and test -d "$h/bin"
+                    set b "$h/bin"
+                  end
+                  contains -- $b $PATH; or set -gx PATH $b $PATH
                 end
                 if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end
                 if not set -q MAVEN_HOME; and test -e $__jkit_g/maven; set -gx MAVEN_HOME $__jkit_g/maven; end
@@ -185,8 +199,13 @@ final class Hooks {
                   # a script block of its own: the profile's $t, $bin, $dir... stay as they were
                   $g = %1$s
                   $sep = [IO.Path]::PathSeparator
-                  foreach ($t in 'sbt', 'gradle', 'maven', 'jdk') {
-                    $bin = Join-Path (Join-Path $g $t) 'bin'
+                  foreach ($pair in @(@('sbt', 'SBT_HOME'), @('gradle', 'GRADLE_HOME'), @('maven', 'MAVEN_HOME'), @('jdk', 'JAVA_HOME'))) {
+                    $bin = Join-Path (Join-Path $g $pair[0]) 'bin'
+                    # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+                    $own = [Environment]::GetEnvironmentVariable($pair[1])
+                    if ($own -and $own.TrimEnd('\\', '/') -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
+                      $bin = Join-Path $own 'bin'
+                    }
                     if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }
                   }
                   foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
