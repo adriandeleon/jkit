@@ -29,6 +29,7 @@ class UserEnvSetupTest {
     JkitHome home;
     Context ctx;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    final ByteArrayOutputStream err = new ByteArrayOutputStream();
     String jdk;
     String maven;
     String jdkBin;
@@ -46,7 +47,7 @@ class UserEnvSetupTest {
         jdkBin = Path.of(jdk, "bin").toString();
         mavenBin = Path.of(maven, "bin").toString();
         ctx = Context.forEnv(new HashMap<>(Map.of("JKIT_HOME", root.toString(), "HOME", tmp.resolve("user").toString())),
-                new PrintStream(out, true, StandardCharsets.UTF_8));
+                new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8));
     }
 
     private static String path(String... entries) {
@@ -157,6 +158,9 @@ class UserEnvSetupTest {
         String printed = out.toString(StandardCharsets.UTF_8);
         assertThat(printed.split("\\{\\s*\"schemaVersion\"", -1)).hasSize(3);
         assertThat(printed).contains("\"action\" : \"install\"").contains("\"action\" : \"uninstall\"");
+        assertThat(err.toString(StandardCharsets.UTF_8)) // the prose goes to stderr with --json
+                .contains("set jkit's global versions in your user environment")
+                .contains("removed jkit's global versions from your user environment");
     }
 
     @Test

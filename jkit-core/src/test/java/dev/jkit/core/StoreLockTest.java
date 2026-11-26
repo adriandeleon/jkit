@@ -2,6 +2,8 @@ package dev.jkit.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
@@ -25,18 +27,26 @@ class StoreLockTest {
         // the second take used to open the file again: closing it let go of the OS lock on Unix
         store.lock(home.lockFile(), "waiting…").close();
         assertThat(probe(home.lockFile())).isEqualTo("held");
-        // another thread of this jkit waits its turn
-        CompletableFuture<Void> other = CompletableFuture.runAsync(() -> {
-            try (Store.Lock lock = store.lock()) {
-                // got it
-            } catch (Exception e) {
-                throw new IllegalStateException(e);
-            }
-        });
-        Thread.sleep(200);
-        assertThat(other).isNotDone();
-        outer.close();
-        other.get(30, TimeUnit.SECONDS);
+        // another thread of this jkit waits its turn, and says so on stderr (Store writes to System.err)
+        PrintStream original = System.err;
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+        try {
+            CompletableFuture<Void> other = CompletableFuture.runAsync(() -> {
+                try (Store.Lock lock = store.lock()) {
+                    // got it
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            Thread.sleep(200);
+            assertThat(other).isNotDone();
+            outer.close();
+            other.get(30, TimeUnit.SECONDS);
+        } finally {
+            System.setErr(original);
+        }
+        assertThat(err.toString(StandardCharsets.UTF_8)).startsWith("waiting for another jkit to finish");
         assertThat(probe(home.lockFile())).isEqualTo("free");
     }
 

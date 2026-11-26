@@ -33,6 +33,7 @@ class PinSyncTest {
     Path zulu17;
     Path maven;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    final ByteArrayOutputStream err = new ByteArrayOutputStream();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -55,11 +56,16 @@ class PinSyncTest {
     }
 
     private Context ctx() {
-        return Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8));
+        return Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8));
     }
 
     private String output() {
         return out.toString(StandardCharsets.UTF_8);
+    }
+
+    private String errors() {
+        return err.toString(StandardCharsets.UTF_8);
     }
 
     private int pin(String spec, String vendor, boolean exact, boolean here) throws Exception {
@@ -273,6 +279,7 @@ class PinSyncTest {
         assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
                 .isInstanceOf(JkitException.class)
                 .hasMessage("jkit.toml pins maven, but jkit can't read that pin (see the warning above); nothing was installed");
+        assertThat(errors()).contains("maven = 3.10 is a TOML number").contains("quote it: maven = \"3.10\"");
     }
 
     @Test
@@ -290,9 +297,12 @@ class PinSyncTest {
         assertThat(doc.path("changed").asBoolean()).isTrue();
         assertThat(doc.path("changes").get(0).path("kind").asText()).isEqualTo("link");
         assertThat(doc.path("changes").get(0).path("action").asText()).isEqualTo("remove");
+        assertThat(errors()).startsWith("cleared the global maven"); // the prose goes to stderr with --json
 
         out.reset();
+        err.reset();
         assertThat(reset.run(ctx())).isZero(); // nothing left to clear
+        assertThat(errors()).isEqualTo("no global maven to clear" + System.lineSeparator());
         JsonNode again = new ObjectMapper().readTree(output());
         assertThat(again.path("changed").asBoolean()).isFalse();
         assertThat(again.path("changes")).isEmpty();

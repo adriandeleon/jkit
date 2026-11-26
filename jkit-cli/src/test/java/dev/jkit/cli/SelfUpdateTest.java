@@ -43,6 +43,8 @@ class SelfUpdateTest {
     Map<String, String> env;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     final ByteArrayOutputStream json = new ByteArrayOutputStream();
+    /** What the command said on stderr (with --json, its prose). */
+    final ByteArrayOutputStream err = new ByteArrayOutputStream();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -95,13 +97,15 @@ class SelfUpdateTest {
 
     private String run(Path binary, String current, boolean check, boolean asJson) throws Exception {
         out.reset();
+        err.reset();
         SelfUpdateCommand cmd = new SelfUpdateCommand();
         cmd.check = check;
         cmd.json.json = asJson;
         cmd.sumsCheck = (data, sig) -> new String(sig, StandardCharsets.UTF_8).equals("good")
                 ? new Signatures.Result(Signatures.Outcome.GOOD, "jkit", "jkit")
                 : new Signatures.Result(Signatures.Outcome.UNKNOWN_KEY, null, "made with key X");
-        cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8)), binary, current);
+        cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8)), binary, current);
         return out.toString(StandardCharsets.UTF_8);
     }
 
@@ -167,6 +171,8 @@ class SelfUpdateTest {
         String said = run(binary, "0.3.0", false, true);
         assertThat(said).contains("\"status\" : \"managed\"").contains("\"installedWith\" : \"homebrew\"")
                 .contains("\"command\" : \"brew upgrade jkit\"");
+        assertThat(err.toString(StandardCharsets.UTF_8))
+                .contains("jkit 9.9.9 is out (this is 0.3.0); jkit came from Homebrew").contains("  brew upgrade jkit");
         assertThat(Files.readString(binary)).isEqualTo("old");
     }
 

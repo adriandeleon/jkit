@@ -61,7 +61,11 @@ class SearchTest {
             SearchCommand cmd = new SearchCommand();
             cmd.spec = ToolSpec.parse(spec);
             cmd.vendorText = vendor;
-            assertThat(cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8)))).isZero();
+            ByteArrayOutputStream err = new ByteArrayOutputStream();
+            assertThat(cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8),
+                    new PrintStream(err, true, StandardCharsets.UTF_8)))).isZero();
+            // the version lists it fetched are cached, and it says so on stderr
+            assertThat(err.toString(StandardCharsets.UTF_8)).contains("saved from 127.0.0.1");
             return out.toString(StandardCharsets.UTF_8).replace("\r\n", "\n");
         } finally {
             server.stop(0);
