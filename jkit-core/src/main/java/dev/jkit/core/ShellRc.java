@@ -113,38 +113,50 @@ public final class ShellRc {
         if (hasBlock(text) || manualLine(text) > 0) {
             return new Edit(text, false);
         }
-        String nl = text.contains("\r\n") ? "\r\n" : "\n";
+        // the block is always \n: bash and zsh read a \r\n block's last line as "fi\r" and fail to
+        // start it. A last line of the user's that has no line ending gets the file's own.
         StringBuilder sb = new StringBuilder(text);
-        if (!text.isEmpty() && !text.endsWith("\n")) {
-            sb.append(nl);
+        if (!text.isEmpty() && !text.endsWith("\n") && !text.endsWith("\r")) {
+            sb.append(Lines.ending(text));
         }
         if (!text.isBlank()) {
-            sb.append(nl);
+            sb.append('\n');
         }
         List<String> lines = new ArrayList<>(block(shell, self, root));
         if (created) {
             lines.add(2, CREATED);
         }
         for (String line : lines) {
-            sb.append(line).append(nl);
+            sb.append(line).append('\n');
         }
         return new Edit(sb.toString(), true);
     }
 
-    /** {@code text} without the block (and the blank line before it, if it added one). */
+    /**
+     * {@code text} without the block (and the blank line before it, if it added one). Every other
+     * byte stays as it was, the file's line endings included.
+     */
     public static Edit remove(String text) {
-        List<String> lines = new ArrayList<>(text.lines().toList());
-        int start = lines.indexOf(START);
-        int end = start < 0 ? -1 : lines.subList(start, lines.size()).indexOf(END);
+        List<Lines.Line> lines = Lines.of(text);
+        int start = -1;
+        int end = -1;
+        for (int i = 0; i < lines.size() && end < 0; i++) {
+            String line = lines.get(i).text();
+            if (start < 0 && line.equals(START)) {
+                start = i;
+            } else if (start >= 0 && line.equals(END)) {
+                end = i;
+            }
+        }
         if (start < 0 || end < 0) {
             return new Edit(text, false);
         }
-        lines.subList(start, start + end + 1).clear();
-        if (start > 0 && start == lines.size() && lines.get(start - 1).isBlank()) {
-            lines.remove(start - 1);
+        int from = lines.get(start).start();
+        int to = lines.get(end).next();
+        if (to == text.length() && start > 0 && lines.get(start - 1).text().isBlank()) {
+            from = lines.get(start - 1).start();
         }
-        String nl = text.contains("\r\n") ? "\r\n" : "\n";
-        return new Edit(lines.isEmpty() ? "" : String.join(nl, lines) + nl, true);
+        return new Edit(text.substring(0, from) + text.substring(to), true);
     }
 
     /** Whether jkit's block says --install created the file. */

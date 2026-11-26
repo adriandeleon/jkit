@@ -70,6 +70,22 @@ class ProjectWriterTest {
     }
 
     @Test
+    void everyOtherLineKeepsItsBytes() {
+        // mixed line endings, trailing spaces and no line ending at the end all stay as they were
+        String text = "# a  \r\n[tools]\njdk = \"17\"\r\nmaven = \"3.9\"  \n\n[x]\r\ny = 1";
+        assertThat(ProjectWriter.set(FILE, text, pin(Tool.JDK, "21")).text())
+                .isEqualTo(text.replace("\"17\"", "\"21\""));
+        assertThat(ProjectWriter.set(FILE, text, pin(Tool.GRADLE, "9.0")).text())
+                .isEqualTo(text.replace("maven = \"3.9\"  \n", "maven = \"3.9\"  \ngradle = \"9.0\"\n"));
+        assertThat(ProjectWriter.remove(FILE, text, Tool.JDK).text()).isEqualTo(text.replace("jdk = \"17\"\r\n", ""));
+        // the last key is the file's last line, with no line ending: it gets the file's
+        assertThat(ProjectWriter.set(FILE, "[tools]\r\njdk = \"17\"", pin(Tool.MAVEN, "3.9")).text())
+                .isEqualTo("[tools]\r\njdk = \"17\"\r\nmaven = \"3.9\"\r\n");
+        assertThat(ProjectWriter.set(FILE, "# x\r\n", pin(Tool.MAVEN, "3.9")).text())
+                .isEqualTo("# x\r\n\r\n[tools]\r\nmaven = \"3.9\"\r\n");
+    }
+
+    @Test
     void removesOnlyThatLine() {
         String text = "[tools]\njdk = \"21\" # keep?\nmaven = \"3.9\"\n";
         ProjectWriter.Edit edit = ProjectWriter.remove(FILE, text, Tool.JDK);
