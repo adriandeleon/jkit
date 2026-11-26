@@ -513,7 +513,8 @@ public final class ProjectFile {
         return new PinnedTool(tool, version, vendor, fx);
     }
 
-    // .sdkmanrc: "<candidate>=<version>"; where a candidate comes twice, the first line decides
+    // .sdkmanrc: "<candidate>=<version>"; where a candidate comes twice, the last line decides, as
+    // in sdk env, which runs sdk use for each line in turn
 
     static ProjectSpec readSdkmanrc(Path file) {
         List<String> lines = lines(file);
@@ -521,7 +522,7 @@ public final class ProjectFile {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         TreeSet<String> unmanaged = new TreeSet<>();
         Set<Tool> skipped = EnumSet.noneOf(Tool.class);
-        Map<Tool, Integer> seen = new EnumMap<>(Tool.class); // the first line for a tool decides
+        Map<Tool, Integer> seen = new EnumMap<>(Tool.class); // the last line for a tool so far
         for (int i = 0; i < lines.size(); i++) {
             String line = stripComment(lines.get(i));
             if (line.isEmpty()) {
@@ -541,8 +542,11 @@ public final class ProjectFile {
                 continue;
             }
             if (seen.containsKey(tool)) {
-                warnings.add(where + ": " + shown(candidate) + " is already set on line " + seen.get(tool) + ", ignored");
-                continue;
+                // this line decides, whether jkit can read it or not: the earlier one never applies
+                warnings.add(file + ":" + seen.get(tool) + ": " + shown(candidate) + " is set again on line " + (i + 1)
+                        + ", which wins (as in sdk env), ignored");
+                tools.remove(tool);
+                skipped.remove(tool);
             }
             seen.put(tool, i + 1);
             try {
@@ -644,11 +648,23 @@ public final class ProjectFile {
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
                     List.of());
         }
+        if (vendor.equals("oracle") && Version.looksLikeVersion(version) && Version.parse(version).part(0) <= 11) {
+            // Oracle offers its JDK 8 and 11 only behind a sign-in: foojay lists them, but sync would
+            // fail on a pin no build can be downloaded for
+            int major = Version.parse(version).part(0);
+            return new ProjectSpec(List.of(file), Map.of(), List.of(where + ": '" + shown(text) + "' is Oracle JDK "
+                    + major + ", which Oracle offers only after a sign-in, so jkit can't install it; skipped "
+                    + "(another vendor's " + version + " can stand in: jkit pin jdk@" + version + " --here)"),
+                    Set.of(Tool.JDK), Map.of());
+        }
         try {
             List<String> notes = new ArrayList<>();
-            PinnedTool pin = ToolVersionsIds.parse(Tool.JDK, vendor + "-" + version, notes);
+            String id = vendor + "-" + version;
+            PinnedTool pin = ToolVersionsIds.parse(Tool.JDK, id, notes);
+            // the notes quote the .tool-versions id jkit read the name as; the file has the jenv name
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, pin),
-                    notes.stream().map(note -> where + ": " + message(note)).toList());
+                    notes.stream().map(note -> where + ": " + message(note.replace("'" + id + "'", "'" + text + "'")))
+                            .toList());
         } catch (IllegalArgumentException e) {
             return new ProjectSpec(List.of(file), Map.of(), List.of(where + ": '" + shown(text)
                     + "' is not a Java version jkit can use, skipped"), Set.of(Tool.JDK), Map.of());
