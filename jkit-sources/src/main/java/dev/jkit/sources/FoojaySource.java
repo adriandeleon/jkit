@@ -472,17 +472,49 @@ public final class FoojaySource {
     private JkitException noMatch(Tool tool, String spec, Vendor vendor, Platform platform,
                                   boolean fx, int major) {
         String what = tool.id() + (spec == null ? "" : "@" + spec);
+        String message = vendor + " has no build matching " + what + " for " + platform;
         try {
             TreeSet<String> others = new TreeSet<>();
+            Version newest = null;
+            TreeSet<String> newestFrom = new TreeSet<>();
+            int lookups = 0;
             for (Pkg p : newestPerVendorAndMajor(platform, fx)) {
-                if (p.major() == major && !p.vendor().equals(vendor)
-                        && (tool != Tool.GRAALVM || p.vendor().isGraalVmBased())) {
+                if (p.major() != major || (tool == Tool.GRAALVM && !p.vendor().isGraalVmBased())) {
+                    continue;
+                }
+                int c = newest == null ? 1 : p.version().compareTo(newest);
+                if (c > 0) {
+                    newest = p.version();
+                    newestFrom.clear();
+                }
+                if (c >= 0) {
+                    newestFrom.add(p.vendor().name());
+                }
+                if (p.vendor().equals(vendor)) {
+                    continue;
+                }
+                // the list has each vendor's newest build only: one whose newest is past the spec
+                // (21.0.9 for jdk@21.0.5) may still have a matching older build, which takes a lookup
+                boolean has = p.version().matches(spec);
+                if (!has && spec != null && p.version().compareTo(Version.parse(spec)) > 0 && lookups++ < MAX_LOOKUPS) {
+                    try {
+                        has = builds(major, p.vendor(), platform, fx, false).stream().anyMatch(b -> b.version().matches(spec));
+                    } catch (IOException | JkitException e) {
+                        // that vendor's list failed: leave it out rather than claim it has the build
+                    }
+                }
+                if (has) {
                     others.add(p.vendor().name());
                 }
             }
             if (!others.isEmpty()) {
-                return new JkitException(vendor + " has no build matching " + what + " for " + platform,
-                        "available from: " + String.join(", ", others));
+                return new JkitException(message, "available from: " + String.join(", ", others));
+            }
+            if (newest != null && spec != null) {
+                // nobody has it, so a list of vendors would mislead: say what the newest build is
+                return new JkitException(message, "no other vendor has " + what + " either; the newest "
+                        + tool + " " + major + " is " + newest + " (" + String.join(", ", newestFrom) + ")",
+                        "see them all: jkit search " + tool.id() + "@" + major);
             }
         } catch (IOException ignored) {
             // fall through to the plain message
