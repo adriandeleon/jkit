@@ -147,6 +147,7 @@ final class HookCommand implements Callable<Integer> {
         String self = self(ctx);
         Changes report = new Changes(ctx);
         boolean added = false;
+        refuseUnterminated(text, shown, shell, "--install");
         if (ShellRc.hasBlock(text)) {
             ctx.out.println("the jkit hook is already in " + shown + "; nothing changed there");
         } else if (manual > 0) {
@@ -259,12 +260,28 @@ final class HookCommand implements Callable<Integer> {
         }
     }
 
+    /**
+     * A start marker whose end marker is gone (edited by hand): jkit can't tell where its block
+     * ends, so it neither adds a second one nor guesses what to take out.
+     */
+    private static void refuseUnterminated(String text, String shown, String shell, String flag) {
+        int start = ShellRc.unterminatedStart(text);
+        if (start > 0) {
+            throw new JkitException("line " + start + " of " + shown + " starts jkit's block (" + ShellRc.START
+                    + ") but no " + ShellRc.END + " line ends it; nothing changed",
+                    "add a " + ShellRc.END + " line where the block's lines end, then run jkit hook " + shell + " " + flag
+                            + " again",
+                    "or delete the block's lines by hand");
+        }
+    }
+
     /** Takes out the block --install added, and nothing else. */
     static int uninstall(Context ctx, String shell, Path userHome) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         String shown = Changes.tilde(file.toString());
         Charset charset = charsetOf(file);
         String text = Files.exists(file) ? Files.readString(file, charset) : "";
+        refuseUnterminated(text, shown, shell, "--uninstall");
         ShellRc.Edit edit = ShellRc.remove(text);
         int manual = ShellRc.manualLine(edit.text());
         if (!edit.changed()) {
