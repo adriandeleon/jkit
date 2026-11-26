@@ -463,6 +463,63 @@ class HttpTest {
     }
 
     @Test
+    void aFailedLookupFallsBackToAWeekOldCopyAtMostButOfflineUsesAnyAge() throws Exception {
+        URI uri = URI.create("https://api.foojay.io/disco/v3.0/packages?jdk_version=21");
+        Instant now = Instant.parse("2026-11-21T12:00:00Z");
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+        Path dir = Files.createDirectories(tmp.resolve("index"));
+        Path cached = Files.writeString(dir.resolve(CachingHttp.key(uri) + ".cache"), "{\"result\":[\"old\"]}");
+        Http outage = new Http() {
+            @Override
+            public String get(URI u) throws IOException {
+                throw new HttpStatusException(503, u);
+            }
+
+            @Override
+            public void download(URI u, Path target, Progress progress) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        List<String> warnings = new ArrayList<>();
+        CachingHttp.Listener listener = new CachingHttp.Listener() {
+            @Override
+            public void stale(String message) {
+                warnings.add(message);
+            }
+        };
+        // a week old: still stands in, and says how old it is
+        Files.setLastModifiedTime(cached, FileTime.from(now.minus(CachingHttp.STALE_LIMIT)));
+        assertThat(new CachingHttp(outage, dir, Duration.ofHours(24), clock, false, false, listener).get(uri))
+                .isEqualTo("{\"result\":[\"old\"]}");
+        assertThat(warnings).singleElement().asString().isEqualTo("api.foojay.io answered 503; using the version list from 168 h ago");
+        // older: it would miss every update since, so the failure stands, with how to use it anyway
+        Files.setLastModifiedTime(cached, FileTime.from(now.minus(Duration.ofDays(8)).minusSeconds(1)));
+        for (Http failing : List.of(outage, answering(null, true))) {
+            assertThatThrownBy(() -> new CachingHttp(failing, dir, Duration.ofHours(24), clock, false, false, listener).get(uri))
+                    .isInstanceOf(JkitException.class)
+                    .hasMessageEndingWith("; the cached version list is 8 days old, too old to use in its place")
+                    .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly("try again later",
+                            "or use the cached list from 8 days ago on purpose: add --offline"));
+        }
+        assertThatThrownBy(() -> new CachingHttp(answering("<html>log in</html>", false), dir, Duration.ofHours(24), clock,
+                false, false).get(uri))
+                .hasMessageStartingWith("got a web page instead of data from api.foojay.io; the cached version list is 8 days old")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                        "sign in to the network in a browser, then try again",
+                        "or use the cached list from 8 days ago on purpose: add --offline"));
+        assertThat(warnings).hasSize(1);
+        // --offline asked for the cache: any age
+        assertThat(new CachingHttp(outage, dir, Duration.ofHours(24), clock, false, true).get(uri))
+                .isEqualTo("{\"result\":[\"old\"]}");
+        Files.setLastModifiedTime(cached, FileTime.from(now.minus(Duration.ofDays(400))));
+        assertThat(new CachingHttp(outage, dir, Duration.ofHours(24), clock, false, true).get(uri))
+                .isEqualTo("{\"result\":[\"old\"]}");
+        // and a working server replaces it as ever
+        assertThat(new CachingHttp(answering("{\"result\":[\"new\"]}", false), dir, Duration.ofHours(24), clock,
+                false, false).get(uri)).isEqualTo("{\"result\":[\"new\"]}");
+    }
+
+    @Test
     void downloadsMustUseHttps() {
         assertThatThrownBy(() -> Http.requireSecure(URI.create("http://example.com/jdk.tar.gz")))
                 .isInstanceOf(JkitException.class);
