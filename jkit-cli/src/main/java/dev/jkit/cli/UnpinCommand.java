@@ -2,6 +2,7 @@ package dev.jkit.cli;
 
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ProjectWriter;
+import dev.jkit.core.TextFiles;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.Tool;
@@ -40,7 +41,7 @@ final class UnpinCommand implements Callable<Integer> {
             throw new JkitException("no jkit.toml here or above, so there is nothing to unpin");
         }
         PinnedTool previous = ProjectFile.read(file).get(tool);
-        ProjectWriter.Edit edit = ProjectWriter.remove(file, ProjectFile.text(file), tool);
+        ProjectWriter.Edit edit = ProjectWriter.remove(file, TextFiles.text(file), tool);
         PrintStream say = json.json ? ctx.err : ctx.out;
         Changes report = new Changes(ctx);
         String name = Changes.tilde(file.toString());

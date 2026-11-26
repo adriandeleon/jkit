@@ -37,14 +37,20 @@ public final class Visible {
         if (c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f)) {
             return String.format("\\x%02x", c);
         }
+        return hidden(c) ? String.format("\\u{%04x}", c) : null;
+    }
+
+    /**
+     * Whether a printable-looking code point can hide or reorder text: the bidirectional marks and
+     * overrides, zero-width and invisible characters, the line and paragraph separators and the
+     * Unicode tag characters (U+E0000..E007F, which can smuggle invisible ASCII). Control characters
+     * are not included: callers escape those their own way. The one list for text and JSON output.
+     */
+    public static boolean hidden(int c) {
         boolean bidi = c == 0x061c || c == 0x200e || c == 0x200f || (c >= 0x202a && c <= 0x202e)
                 || (c >= 0x2066 && c <= 0x2069);
-        // zero-width and invisible characters could hide text in a name
         boolean invisible = (c >= 0x200b && c <= 0x200d) || (c >= 0x2060 && c <= 0x2064) || c == 0xfeff
-                || c == 0x00ad || c == 0x180e || (c >= 0xe0000 && c <= 0xe007f); // and Unicode tag characters
-        if (bidi || invisible || c == 0x2028 || c == 0x2029) {
-            return String.format("\\u{%04x}", c);
-        }
-        return null;
+                || c == 0x00ad || c == 0x180e || (c >= 0xe0000 && c <= 0xe007f);
+        return bidi || invisible || c == 0x2028 || c == 0x2029;
     }
 }

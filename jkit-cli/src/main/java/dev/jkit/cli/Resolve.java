@@ -229,9 +229,8 @@ final class Resolve {
      * Points a global link at an install while holding the link lock, after checking the install is
      * still there: a jkit remove running at the same time must not leave the link on a deleted folder.
      */
-    @SuppressWarnings("try")
     static void pointGlobal(Context ctx, Path link, Path target) throws Exception {
-        try (AutoCloseable lock = ctx.store.linkLock()) {
+        try (var _ = ctx.store.linkLock()) {
             if (!Files.isRegularFile(target.resolve(Store.MARKER),
                     LinkOption.NOFOLLOW_LINKS)) {
                 throw new JkitException(Changes.tilde(target.toString()) + " was removed by another jkit meanwhile",

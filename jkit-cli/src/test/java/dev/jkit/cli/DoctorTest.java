@@ -61,9 +61,7 @@ class DoctorTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
-        return path;
+        return TestInstalls.install(home, tool, dir, properties);
     }
 
     private static void executable(Path file, String body) throws Exception {
@@ -109,6 +107,23 @@ class DoctorTest {
         assertThat(only(findings, "java-runs").message()).startsWith("active JDK runs: openjdk version \"21.0.9\"");
         assertThat(only(findings, "store").message()).isEqualTo("1 install, nothing left over");
         assertThat(of(findings, "network")).isEmpty();
+    }
+
+    @Test
+    void offlineModeSkipsTheNetworkCheckAndAMisspeltVariableIsAWarning() {
+        // JKIT_SOURCES_FOOJAY_URL points nowhere: the check must not even try
+        env.put("JKIT_NETWORK_OFFLINE", "1");
+        env.put("JKIT_SOURCES_FOOJAY_URL", "http://127.0.0.1:1/");
+        List<Finding> findings = DoctorCommand.run(Context.lenient(env, System.out), project, true);
+        assertThat(only(findings, "network").message())
+                .isEqualTo("skipped the network check: offline mode is on (JKIT_NETWORK_OFFLINE)");
+        assertThat(only(findings, "network").level()).isEqualTo(Level.INFO);
+
+        env.remove("JKIT_NETWORK_OFFLINE");
+        env.put("JKIT_OFFLINE", "1");
+        Finding typo = run().stream().filter(f -> f.level() == Level.WARN).findFirst().orElseThrow();
+        assertThat(typo.message()).isEqualTo("JKIT_OFFLINE is set, but jkit reads JKIT_NETWORK_OFFLINE (it ignores JKIT_OFFLINE)");
+        assertThat(typo.fix()).isEqualTo("set JKIT_NETWORK_OFFLINE=1 for offline mode, and unset JKIT_OFFLINE");
     }
 
     @Test

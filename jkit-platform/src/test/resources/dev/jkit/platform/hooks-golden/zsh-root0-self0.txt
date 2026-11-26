@@ -33,11 +33,16 @@ __jkit_run() {
 }
 jkit() {
   local __jkit_env __jkit_rc
+  # Ctrl-C ends this function before its rm, so jkit removes the file itself then; a run killed
+  # outright (kill -9) leaves it, and the next run removes it here.
+  [ -n "${__jkit_last_env-}" ] && rm -f "$__jkit_last_env"
   __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
+  __jkit_last_env=$__jkit_env
   JKIT_ENV_FILE="$__jkit_env" __jkit_run "$@"
   __jkit_rc=$?
   # shellcheck source=/dev/null  # the environment changes jkit wrote just now
   [ -s "$__jkit_env" ] && . "$__jkit_env"
   rm -f "$__jkit_env"
+  __jkit_last_env=
   return $__jkit_rc
 }

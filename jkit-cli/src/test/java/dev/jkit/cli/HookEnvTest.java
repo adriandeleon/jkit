@@ -45,9 +45,7 @@ class HookEnvTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
-        return path;
+        return TestInstalls.install(home, tool, dir, properties);
     }
 
     /** Runs hook-env in {@code dir} and applies its output to {@code env}, as the shell would. */
@@ -103,6 +101,15 @@ class HookEnvTest {
         Files.writeString(project.resolve(".tool-versions"), "maven 3.9.9\n");
         cd(project);
         assertThat(said()).contains("jkit: using " + project + " (.sdkmanrc, .tool-versions): jdk 21.0.9+10 temurin");
+    }
+
+    @Test
+    void aPinItCantReadIsSaidOnCd() throws Exception {
+        Files.writeString(project.resolve(".java-version"), "system\n");
+        cd(project);
+        assertThat(said()).contains("jkit: using " + project.resolve(".java-version") + " (it pins nothing jkit can read)")
+                .contains("jkit can't read the jdk pin in " + project.resolve(".java-version") + ": jkit status says why")
+                .contains("JKIT_PROJECT="); // jkit's note of the project is still said
     }
 
     /** JKIT_AUTO_SWITCH=0 exported in an open shell turns switching off there, from the next cd. */

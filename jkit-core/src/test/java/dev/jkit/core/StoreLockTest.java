@@ -2,14 +2,15 @@ package dev.jkit.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -22,31 +23,29 @@ class StoreLockTest {
     @Test
     void takenTwiceByOneThreadItIsHeldUntilBothClose() throws Exception {
         JkitHome home = new JkitHome(tmp.resolve("home"));
-        Store store = new Store(home);
+        List<String> said = new CopyOnWriteArrayList<>();
+        CountDownLatch waits = new CountDownLatch(1);
+        Store store = new Store(home, line -> {
+            said.add(line);
+            waits.countDown();
+        });
         Store.Lock outer = store.lock();
         // the second take used to open the file again: closing it let go of the OS lock on Unix
         store.lock(home.lockFile(), "waiting…").close();
         assertThat(probe(home.lockFile())).isEqualTo("held");
-        // another thread of this jkit waits its turn, and says so on stderr (Store writes to System.err)
-        PrintStream original = System.err;
-        ByteArrayOutputStream err = new ByteArrayOutputStream();
-        System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-        try {
-            CompletableFuture<Void> other = CompletableFuture.runAsync(() -> {
-                try (Store.Lock lock = store.lock()) {
-                    // got it
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
-            });
-            Thread.sleep(200);
-            assertThat(other).isNotDone();
-            outer.close();
-            other.get(30, TimeUnit.SECONDS);
-        } finally {
-            System.setErr(original);
-        }
-        assertThat(err.toString(StandardCharsets.UTF_8)).startsWith("waiting for another jkit to finish");
+        // another thread of this jkit waits its turn, and says so
+        CompletableFuture<Void> other = CompletableFuture.runAsync(() -> {
+            try (var _ = store.lock()) {
+                // got it
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertThat(waits.await(30, TimeUnit.SECONDS)).isTrue();
+        assertThat(other).isNotDone();
+        outer.close();
+        other.get(30, TimeUnit.SECONDS);
+        assertThat(said).singleElement().asString().startsWith("waiting for another jkit to finish");
         assertThat(probe(home.lockFile())).isEqualTo("free");
     }
 

@@ -131,7 +131,7 @@ class SelfUpdateTest {
             try {
                 // another jkit's install or prune can take the lock meanwhile
                 Thread other = new Thread(() -> {
-                    try (AutoCloseable lock = Context.forEnvOnline(env, new PrintStream(OutputStream.nullOutputStream()))
+                    try (var _ = Context.forEnvOnline(env, new PrintStream(OutputStream.nullOutputStream()))
                             .store.lock()) {
                         seen.add("locked");
                     } catch (Exception e) {

@@ -43,7 +43,34 @@ final class Changes {
      *       wrote, a deleted file) it is null.</li>
      * </ul>
      */
-    record Change(String kind, String name, String action, String value) { }
+    record Change(Type type, String name, String value) {
+        /** Every kind of change with its action, as JSON names them: one enum, so a switch over it is exhaustive. */
+        enum Type {
+            ENV_SET("env", "set"), ENV_UNSET("env", "unset"),
+            ENV_PATH_ADD("env", "add"), ENV_PATH_REMOVE("env", "remove"), ENV_PATH_MOVE("env", "move"),
+            USER_ENV_SET("user-env", "set"), USER_ENV_UNSET("user-env", "unset"),
+            USER_ENV_PATH_ADD("user-env", "add"), USER_ENV_PATH_REMOVE("user-env", "remove"),
+            LINK_SET("link", "set"), LINK_REMOVE("link", "remove"),
+            FOLDER_CREATE("folder", "create"), FOLDER_DELETE("folder", "delete"),
+            FILE_CREATE("file", "create"), FILE_UPDATE("file", "update"), FILE_DELETE("file", "delete");
+
+            final String kind;
+            final String action;
+
+            Type(String kind, String action) {
+                this.kind = kind;
+                this.action = action;
+            }
+        }
+
+        String kind() {
+            return type.kind;
+        }
+
+        String action() {
+            return type.action;
+        }
+    }
 
     private final Context ctx;
     private final List<Change> changes = new ArrayList<>();
@@ -68,9 +95,9 @@ final class Changes {
             if (name.equals("PATH")) {
                 path(before, after);
             } else if (after == null && before != null) {
-                changes.add(new Change("env", name, "unset", null));
+                changes.add(new Change(Change.Type.ENV_UNSET, name, null));
             } else if (after != null && !after.equals(before)) {
-                changes.add(new Change("env", name, "set", after));
+                changes.add(new Change(Change.Type.ENV_SET, name, after));
             }
         }
         // When jkit saves or restores a *_HOME the user set themselves, say so.
@@ -120,12 +147,12 @@ final class Changes {
         List<String> now = entries(after);
         for (String entry : now) {
             if (!old.contains(entry)) {
-                changes.add(new Change("env", "PATH", "add", entry));
+                changes.add(new Change(Change.Type.ENV_PATH_ADD, "PATH", entry));
             }
         }
         for (String entry : old) {
             if (!now.contains(entry)) {
-                changes.add(new Change("env", "PATH", "remove", entry));
+                changes.add(new Change(Change.Type.ENV_PATH_REMOVE, "PATH", entry));
             }
         }
         List<String> oldOrder = old.stream().filter(now::contains).toList();
@@ -153,7 +180,7 @@ final class Changes {
                     detail = "behind " + shownEntry(other);
                 }
             }
-            Change move = new Change("env", "PATH", "move", entry);
+            Change move = new Change(Change.Type.ENV_PATH_MOVE, "PATH", entry);
             changes.add(move);
             moves.put(move, detail);
         }
@@ -197,14 +224,14 @@ final class Changes {
     /** A global link now points at {@code target}, or was removed (null). */
     Changes link(Path link, Path target) {
         changes.add(target == null
-                ? new Change("link", link.toAbsolutePath().toString(), "remove", null)
-                : new Change("link", link.toAbsolutePath().toString(), "set", target.toAbsolutePath().toString()));
+                ? new Change(Change.Type.LINK_REMOVE, link.toAbsolutePath().toString(), null)
+                : new Change(Change.Type.LINK_SET, link.toAbsolutePath().toString(), target.toAbsolutePath().toString()));
         return this;
     }
 
     /** A folder this command created (an install) or deleted (remove, leftovers). */
     Changes folder(Path folder, boolean created) {
-        changes.add(new Change("folder", folder.toAbsolutePath().toString(), created ? "create" : "delete", null));
+        changes.add(new Change(created ? Change.Type.FOLDER_CREATE : Change.Type.FOLDER_DELETE, folder.toAbsolutePath().toString(), null));
         return this;
     }
 
@@ -215,31 +242,31 @@ final class Changes {
      */
     Changes disk() {
         if (!ctx.homeExisted && !ctx.homeReported && Files.exists(ctx.home.root())) {
-            changes.add(new Change("folder", ctx.home.root().toAbsolutePath().toString(), "create", null));
+            changes.add(new Change(Change.Type.FOLDER_CREATE, ctx.home.root().toAbsolutePath().toString(), null));
             ctx.homeReported = true;
         }
         for (Context.CacheWrite w : ctx.cacheWrites) {
             changes.add(w.source() == null
-                    ? new Change("file", w.file().toAbsolutePath().toString(), "delete", null)
-                    : new Change("file", w.file().toAbsolutePath().toString(), w.created() ? "create" : "update",
-                            w.source().toString()));
+                    ? new Change(Change.Type.FILE_DELETE, w.file().toAbsolutePath().toString(), null)
+                    : new Change(w.created() ? Change.Type.FILE_CREATE : Change.Type.FILE_UPDATE,
+                            w.file().toAbsolutePath().toString(), w.source().toString()));
         }
         ctx.cacheWrites.clear();
         return this;
     }
 
-    /**
-     * A variable in the user's persistent environment (Windows, jkit env --install); {@code action}
-     * is as for env.
-     */
-    Changes userEnv(String name, String action, String value) {
-        changes.add(new Change("user-env", name, action, value));
+    /** A variable in the user's persistent environment (Windows, jkit env --install): a USER_ENV_ type. */
+    Changes userEnv(Change.Type type, String name, String value) {
+        if (!type.kind.equals("user-env")) {
+            throw new IllegalArgumentException(type + " is not a user environment change");
+        }
+        changes.add(new Change(type, name, value));
         return this;
     }
 
     /** A file this command deleted (jkit hook fish --uninstall). */
     Changes fileDeleted(Path file) {
-        changes.add(new Change("file", file.toAbsolutePath().toString(), "delete", null));
+        changes.add(new Change(Change.Type.FILE_DELETE, file.toAbsolutePath().toString(), null));
         return this;
     }
 
@@ -298,7 +325,7 @@ final class Changes {
 
     /** A project file or shell startup file this command wrote (pin, unpin, hook --install). */
     Changes file(Path file, boolean created) {
-        changes.add(new Change("file", file.toAbsolutePath().toString(), created ? "create" : "update", null));
+        changes.add(new Change(created ? Change.Type.FILE_CREATE : Change.Type.FILE_UPDATE, file.toAbsolutePath().toString(), null));
         return this;
     }
 
@@ -389,19 +416,19 @@ final class Changes {
         Set<String> hosts = new LinkedHashSet<>();
         Path index = ctx.home.index().toAbsolutePath();
         for (Change c : changes) {
-            if (named != null && c.kind().equals("folder") && c.action().equals("create")
+            if (named != null && c.type() == Change.Type.FOLDER_CREATE
                     && named.startsWith(Path.of(c.name()).normalize())) {
                 continue; // the message names this folder, or one inside it
             }
             if (quietCache && c.kind().equals("file") && Path.of(c.name()).startsWith(index)) {
                 continue;
             }
-            if (c.kind().equals("file") && c.action().equals("delete") && Path.of(c.name()).startsWith(index)) {
+            if (c.type() == Change.Type.FILE_DELETE && Path.of(c.name()).startsWith(index)) {
                 listsDeleted++; // old cached lookups, folded into the cache line
                 continue;
             }
             if (c.kind().equals("file") && c.value() != null) {
-                if (c.action().equals("create")) {
+                if (c.type() == Change.Type.FILE_CREATE) {
                     listsCreated++;
                 } else {
                     listsUpdated++;
@@ -409,25 +436,24 @@ final class Changes {
                 hosts.add(URI.create(c.value()).getHost());
                 continue;
             }
-            out.println("  " + switch (c.kind() + " " + c.action()) {
-                case "env set" -> "set    " + c.name() + "=" + tilde(c.value());
-                case "env unset" -> "unset  " + c.name();
-                case "env add" -> "PATH   + " + shownEntry(c.value());
-                case "env remove" -> "PATH   - " + shownEntry(c.value());
-                case "env move" -> "PATH   moved " + shownEntry(c.value())
+            out.println("  " + switch (c.type()) {
+                case ENV_SET -> "set    " + c.name() + "=" + tilde(c.value());
+                case ENV_UNSET -> "unset  " + c.name();
+                case ENV_PATH_ADD -> "PATH   + " + shownEntry(c.value());
+                case ENV_PATH_REMOVE -> "PATH   - " + shownEntry(c.value());
+                case ENV_PATH_MOVE -> "PATH   moved " + shownEntry(c.value())
                         + (moves.get(c) == null ? "" : " " + moves.get(c));
-                case "user-env set" -> "user   " + c.name() + "=" + tilde(c.value());
-                case "user-env unset" -> "user   " + c.name() + " removed";
-                case "user-env add" -> "user   PATH + " + tilde(c.value());
-                case "user-env remove" -> "user   PATH - " + tilde(c.value());
-                case "link set" -> "link   " + tilde(c.name()) + " → " + tilde(c.value());
-                case "link remove" -> "link   " + tilde(c.name()) + " removed";
-                case "folder create" -> "folder " + tilde(c.name()) + " created";
-                case "folder delete" -> "folder " + tilde(c.name()) + " deleted";
-                case "file create" -> "file   " + tilde(c.name()) + " created";
-                case "file update" -> "file   " + tilde(c.name()) + " updated";
-                case "file delete" -> "file   " + tilde(c.name()) + " deleted";
-                default -> c.toString();
+                case USER_ENV_SET -> "user   " + c.name() + "=" + tilde(c.value());
+                case USER_ENV_UNSET -> "user   " + c.name() + " removed";
+                case USER_ENV_PATH_ADD -> "user   PATH + " + tilde(c.value());
+                case USER_ENV_PATH_REMOVE -> "user   PATH - " + tilde(c.value());
+                case LINK_SET -> "link   " + tilde(c.name()) + " → " + tilde(c.value());
+                case LINK_REMOVE -> "link   " + tilde(c.name()) + " removed";
+                case FOLDER_CREATE -> "folder " + tilde(c.name()) + " created";
+                case FOLDER_DELETE -> "folder " + tilde(c.name()) + " deleted";
+                case FILE_CREATE -> "file   " + tilde(c.name()) + " created";
+                case FILE_UPDATE -> "file   " + tilde(c.name()) + " updated";
+                case FILE_DELETE -> "file   " + tilde(c.name()) + " deleted";
             });
         }
         if (listsCreated + listsUpdated + listsDeleted > 0) {

@@ -58,7 +58,7 @@ class InterruptTest {
             pb.environment().put("TMPDIR", temp.toString());
             pb.environment().put("JKIT_ENV_FILE", envFile.toString());
             Process p = pb.start();
-            try (Socket request = silent.accept()) { // jkit is running, its signal handlers in place
+            try (Socket _ = silent.accept()) { // jkit is running, its signal handlers in place
                 ProcessHandle jkit = p.toHandle().children().findFirst().orElseThrow();
                 new ProcessBuilder("kill", "-" + signal, Long.toString(jkit.pid())).start().waitFor();
                 String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();

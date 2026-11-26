@@ -46,6 +46,7 @@ final class StatusCommand implements Callable<Integer> {
 
     static void print(Context ctx, ToolStates.Result result, PrintStream out) throws Exception {
         boolean any = false;
+        List<String> needHook = new ArrayList<>(); // globals not applied for want of the hook: said once
         for (ToolState s : result.tools()) {
             if (s.isEmpty()) {
                 if (s.tool() != Tool.GRAALVM && !ctx.store.list(s.tool()).isEmpty()) {
@@ -58,7 +59,9 @@ final class StatusCommand implements Callable<Integer> {
             }
             out.println(row(s.tool().id(), version(s), label(s.source()), detail(s, result)));
             String hint = hint(ctx, s, result);
-            if (hint != null) {
+            if (globalNeedsHook(ctx, s)) {
+                needHook.add(s.tool().toString());
+            } else if (hint != null) {
                 out.println(indent(hint));
             }
             any = true;
@@ -77,6 +80,21 @@ final class StatusCommand implements Callable<Integer> {
                 out.println("  warning: " + Changes.tilde(warning));
             }
         }
+        if (!needHook.isEmpty()) {
+            out.println("the global " + String.join(", ", needHook) + (needHook.size() == 1 ? " isn't" : " aren't")
+                    + " applied: the jkit hook isn't loaded; " + Changes.hookHint(ctx));
+        }
+    }
+
+    /** Whether the hook missing is all that keeps the global {@code s} from this shell. */
+    private static boolean globalNeedsHook(Context ctx, ToolState s) {
+        return !s.matches() && !s.globalMissing() && s.wanted() == Source.GLOBAL && s.source() != Source.OUTSIDE && s.source() != Source.STALE
+                && !hookLoaded(ctx);
+    }
+
+    /** Whether this shell loaded the jkit hook, which exports JKIT_SHELL. */
+    private static boolean hookLoaded(Context ctx) {
+        return ctx.env.get("JKIT_SHELL") != null;
     }
 
     private static String row(String tool, String version, String source, String detail) {
@@ -139,12 +157,16 @@ final class StatusCommand implements Callable<Integer> {
                             + ", not installed: jkit sync"
                     : ProjectShell.pinFile(result.project(), s.pin().tool()) + " wants " + tool + " "
                             + s.pinInstall().label() + "; this shell has "
-                            + (s.source() == Source.NONE ? "none" : label(s.source())) + ": jkit sync";
+                            + (s.source() == Source.NONE ? "none" : label(s.source()))
+                            + (hookLoaded(ctx) ? ": jkit sync"
+                                    // sync can't change a shell without the hook: say so, not "jkit sync" again
+                                    : " and no jkit hook to switch it: run one command with it: jkit exec -- <command>,"
+                                            + " or " + Changes.hookHint(ctx));
             case GLOBAL -> switch (s.source()) {
                 case OUTSIDE -> tool.homeVariable() + " is set outside jkit and wins over the global " + tool
                         + "; remove it from your shell profile to use jkit's";
                 case STALE -> "set by jkit earlier but no longer chosen: open a new shell, or jkit reset " + tool;
-                default -> ctx.env.get("JKIT_SHELL") == null
+                default -> !hookLoaded(ctx)
                         ? "the global " + tool + " isn't applied: the jkit hook isn't loaded: " + Changes.HOOK_SETUP + ", then open a new shell"
                         : "the global " + tool + " isn't applied in this shell yet: open a new shell";
             };

@@ -9,6 +9,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
 import dev.jkit.model.Visible;
 import dev.jkit.sources.Artifact;
 import java.io.IOException;
@@ -28,29 +29,47 @@ import picocli.CommandLine.Parameters;
 
 /**
  * Brings each installed release line up to its newest build: JDK 21 temurin 21.0.5 → 21.0.9,
- * Maven 3.9.9 → 3.9.11, Gradle 8.10 → 8.14.3. Never crosses a major version. Older builds stay
- * installed; a global link that pointed at the line's newest build moves to the new one.
+ * Maven 3.9.9 → 3.9.11, Gradle 8.10 → 8.14.3. A line is a JDK's major version, but Maven's and
+ * Gradle's major.minor: their minor releases change behaviour and drop features (Maven 3.9 → 3.10,
+ * Gradle 8.14 → 9.0 is a major), so 3.9.9 never becomes 3.10.2 behind the user's back. sbt's line
+ * is its major: every sbt 1.x reads a build's own project/build.properties and runs that version,
+ * so the installed sbt is only the launcher. Older builds stay installed; a global link that
+ * pointed at the line's newest build moves to the new one.
  */
 @Command(name = "upgrade",
-        description = {"Installs the newest build of each installed major version.",
+        description = {"Installs the newest build within each installed release:",
+                "the same major for JDKs and sbt, the same major.minor for Maven and Gradle.",
                 "A global default that pointed at the old build moves to the new one.",
                 "Old builds stay (jkit remove them).",
                 "",
-                "  jkit upgrade --dry-run   what would change (21.0.5 → 21.0.9, 3.9.11 → 3.10.2)",
+                "  jkit upgrade --dry-run   what would change (21.0.5 → 21.0.9, 3.9.9 → 3.9.11)",
                 "  jkit upgrade jdk"})
 final class UpgradeCommand implements Callable<Integer> {
 
-    /** One release line: a store tool, a major version and (for JDKs) a vendor and JavaFX or not. */
-    record Line(Tool tool, int major, Vendor vendor, boolean fx) {
+    /**
+     * One release line: a store tool, its release ({@code 21} for a JDK, {@code 3.9} for Maven) and
+     * (for JDKs) a vendor and JavaFX or not.
+     */
+    record Line(Tool tool, String release, Vendor vendor, boolean fx) {
         /** The tool as the user names it: graalvm for GraalVM-based JDKs. */
         Tool userTool() {
             return tool == Tool.JDK && vendor != null && vendor.isGraalVmBased() ? Tool.GRAALVM : tool;
         }
 
+        int major() {
+            return Version.parse(release).part(0);
+        }
+
         @Override
         public String toString() {
-            return userTool() + "@" + major + (vendor == null ? "" : " " + vendor.name()) + (fx ? " --fx" : "");
+            return userTool() + "@" + release + (vendor == null ? "" : " " + vendor.name()) + (fx ? " --fx" : "");
         }
+    }
+
+    /** The release line {@code version} of {@code tool} belongs to: {@code 21}, or {@code 3.9} for Maven and Gradle. */
+    static String release(Tool tool, Version version) {
+        return tool == Tool.MAVEN || tool == Tool.GRADLE ? version.part(0) + "." + version.part(1)
+                : Integer.toString(version.part(0));
     }
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "[tool[@major]]", converter = ToolSpecConverter.class,
@@ -81,7 +100,10 @@ final class UpgradeCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = options.context();
+        return run(options.context());
+    }
+
+    int run(Context ctx) throws Exception {
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
@@ -108,7 +130,7 @@ final class UpgradeCommand implements Callable<Integer> {
         int failures = 0;
         int available = 0;
         for (Map.Entry<Line, List<Installed>> entry : lines.entrySet()) {
-            Map<String, Object> row = upgrade(ctx, say, lists, entry.getKey(), entry.getValue().getFirst());
+            Map<String, Object> row = upgrade(ctx, say, lists, entry.getKey(), entry.getValue());
             rows.add(row);
             if ("failed".equals(row.get("status"))) {
                 failures++;
@@ -141,10 +163,13 @@ final class UpgradeCommand implements Callable<Integer> {
      * earlier lines changed is always reported. Version lists fetched to find the newest build go
      * to {@code lists}, not to this line's changes.
      */
-    private Map<String, Object> upgrade(Context ctx, PrintStream say, Changes lists, Line line, Installed newest) {
+    private Map<String, Object> upgrade(Context ctx, PrintStream say, Changes lists, Line line,
+                                        List<Installed> installs) {
+        Installed newest = installs.getFirst();
         Map<String, Object> row = JsonOut.fields(
                 "tool", line.userTool().id(),
                 "major", line.major(),
+                "release", line.release(),
                 "vendor", line.vendor() == null ? null : line.vendor().name(),
                 "fx", line.fx(),
                 "from", newest.version().raw(),
@@ -158,7 +183,9 @@ final class UpgradeCommand implements Callable<Integer> {
                     || ctx.store.contains(line.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
                 row.put("to", newest.version().raw());
                 row.put("status", "up-to-date");
-                say.println(line + " is up to date (" + newest.version() + ")");
+                String global = olderGlobal(ctx, line, installs, newest, newest.version());
+                say.println(line + " is up to date (" + newest.version() + ")"
+                        + (global == null ? "" : "; " + global));
                 return row;
             }
             if (dryRun) {
@@ -184,6 +211,10 @@ final class UpgradeCommand implements Callable<Integer> {
                         + "@" + artifact.version() + (line.vendor() == null ? "" : " " + line.vendor().name())
                         + (line.fx() ? " --fx" : "") + " --global");
             }
+            String global = olderGlobal(ctx, line, installs, newest, artifact.version());
+            if (global != null) {
+                changes.note(global);
+            }
             changes.note("the old build stays: jkit remove " + line.userTool() + "@" + newest.version()
                     + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             row.put("changes", changes.json());
@@ -199,6 +230,36 @@ final class UpgradeCommand implements Callable<Integer> {
         return row;
     }
 
+    /**
+     * What to say when a global link points at an older build of {@code line} than its newest,
+     * which upgrade leaves alone: {@code the global maven is 3.9.5: jkit use maven@3.9.9 --global},
+     * with {@code to} as the version to switch to. Null when no global points at an older build.
+     */
+    private static String olderGlobal(Context ctx, Line line, List<Installed> installs, Installed newest, Version to) {
+        for (Tool t : Tool.values()) {
+            if (t.storeTool() != line.tool()) {
+                continue;
+            }
+            Path target;
+            try {
+                target = ctx.os.readLink(ctx.home.global(t));
+            } catch (IOException | RuntimeException e) {
+                continue;
+            }
+            if (target == null || Fs.same(target, newest.home())) {
+                continue;
+            }
+            for (Installed i : installs) {
+                if (Fs.same(target, i.home())) {
+                    return "the global " + t + " is " + i.version() + ": jkit use " + line.userTool() + "@" + to
+                            + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : "")
+                            + " --global";
+                }
+            }
+        }
+        return null;
+    }
+
     /** Installed builds grouped by release line, each newest first, lines in store order. */
     Map<Line, List<Installed>> lines(Context ctx) throws Exception {
         List<Tool> tools = spec == null ? List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT) : List.of(spec.tool());
@@ -211,13 +272,13 @@ final class UpgradeCommand implements Callable<Integer> {
                 if (vendor != null && !vendor.equals(i.vendor())) {
                     continue;
                 }
-                if (spec != null && spec.version() != null && i.version().part(0) != spec.major()) {
-                    continue;
+                if (spec != null && spec.version() != null && !i.version().matches(spec.version())) {
+                    continue; // maven@3 is every 3.x line, maven@3.9 only that one
                 }
                 if (i.version().isPreRelease() && !pre) {
                     continue; // an early-access line has no GA build to move to
                 }
-                lines.computeIfAbsent(new Line(i.tool(), i.version().part(0), i.vendor(),
+                lines.computeIfAbsent(new Line(i.tool(), release(i.tool(), i.version()), i.vendor(),
                         i.tool() == Tool.JDK && (i.fx() || fx)), k -> new ArrayList<>())
                         .add(i);
             }
@@ -226,12 +287,12 @@ final class UpgradeCommand implements Callable<Integer> {
     }
 
     private Artifact resolve(Context ctx, Line line) throws Exception {
-        String major = Integer.toString(line.major());
+        String release = line.release();
         return switch (line.tool()) {
-            case JDK, GRAALVM -> ctx.foojay().resolve(line.userTool(), major, line.vendor(), ctx.platform, line.fx(), pre);
-            case MAVEN -> ctx.maven().resolve(major, pre);
-            case GRADLE -> ctx.gradle().resolve(major, pre);
-            case SBT -> ctx.sbt().resolve(major, pre);
+            case JDK, GRAALVM -> ctx.foojay().resolve(line.userTool(), release, line.vendor(), ctx.platform, line.fx(), pre);
+            case MAVEN -> ctx.maven().resolve(release, pre);
+            case GRADLE -> ctx.gradle().resolve(release, pre);
+            case SBT -> ctx.sbt().resolve(release, pre);
         };
     }
 
@@ -244,7 +305,7 @@ final class UpgradeCommand implements Callable<Integer> {
             Path link = ctx.home.global(t);
             // read and moved under the link lock: a jkit use --global in between must not be undone
             boolean moved = false;
-            try (AutoCloseable lock = ctx.store.linkLock()) {
+            try (var _ = ctx.store.linkLock()) {
                 Path target = ctx.os.readLink(link);
                 if (target != null && Fs.same(target, previous.home())
                         && Files.isRegularFile(newHome.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
@@ -257,7 +318,7 @@ final class UpgradeCommand implements Callable<Integer> {
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
             if (shell != null && Fs.same(Fs.path(shell), previous.home())) {
-                changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
+                changes.note("this shell still uses the old build: jkit use " + t + "@" + line.release()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }
         }

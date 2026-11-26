@@ -10,6 +10,7 @@ import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
@@ -23,6 +24,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,11 +46,27 @@ import java.util.zip.ZipFile;
 public final class Installer {
 
     /**
-     * Thrown, with nothing installed, when a download with no checksum was to be checked by its
-     * signature alone and the signature couldn't be fetched or checked.
+     * How much checking an install insists on. jkit's commands pass {@link #REQUIRED} unless
+     * --allow-unverified is given.
      */
-    public static final class SignatureRequired extends JkitException {
-        SignatureRequired(String message) {
+    public enum Verification {
+        /**
+         * A download with no published checksum and no signature jkit can check is refused, and so
+         * is one whose publisher signs its downloads with a key built into jkit when that signature
+         * can't be fetched or checked: whoever can replace a download can usually replace the
+         * checksum next to it too.
+         */
+        REQUIRED,
+        /** Installs on whatever can be checked, even nothing, with a warning for each check skipped. */
+        ALLOW_UNVERIFIED
+    }
+
+    /**
+     * Thrown, with nothing installed, by a {@link Verification#REQUIRED} install of a download it
+     * can't check: no checksum and no signature, or a signature that couldn't be fetched or checked.
+     */
+    public static final class VerificationRequired extends JkitException {
+        VerificationRequired(String message) {
             super(message);
         }
     }
@@ -70,25 +88,33 @@ public final class Installer {
 
     private final JkitHome home;
     private final Http http;
+    private final java.util.function.Consumer<String> waiting;
 
     public Installer(JkitHome home, Http http) {
-        this.home = home;
-        this.http = http;
+        this(home, http, System.err::println);
     }
 
-    public Result install(Artifact artifact, Http.Progress progress) throws IOException {
-        return install(artifact, progress, false);
+    /** @param waiting told, in a line for the user, when this install waits for another jkit */
+    public Installer(JkitHome home, Http http, java.util.function.Consumer<String> waiting) {
+        this.home = home;
+        this.http = http;
+        this.waiting = waiting;
     }
 
     /**
-     * @param signatureRequired when true, a signature that can't be fetched or checked throws
-     *                          {@link SignatureRequired} instead of installing on the checksum
-     *                          alone. jkit's commands pass true whenever the publisher signs its
-     *                          downloads, unless --allow-unverified is given.
+     * @param verification what must be checkable; with {@link Verification#REQUIRED} a download
+     *                     that isn't throws {@link VerificationRequired} and nothing is installed
      */
-    @SuppressWarnings("try") // the lock only needs to be held for the block; nothing in it reads the variable
-    public Result install(Artifact artifact, Http.Progress progress, boolean signatureRequired) throws IOException {
+    public Result install(Artifact artifact, Http.Progress progress, Verification verification) throws IOException {
         Http.requireSecure(artifact.url());
+        boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
+        boolean required = verification == Verification.REQUIRED;
+        if (required && !signable && artifact.checksum() == null) {
+            throw new VerificationRequired(artifact.label() + " from " + artifact.url().getHost()
+                    + " has no published checksum, so jkit can't check the download; nothing installed");
+        }
+        // a publisher that signs its downloads: the signature must check out
+        boolean signatureRequired = required && signable;
         Tool storeTool = artifact.tool().storeTool();
         Path toolsDir = home.tools(storeTool);
         String dirName = Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx());
@@ -100,27 +126,39 @@ public final class Installer {
         }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         home.create();
-        List<Path> removed;
-        Path work;
-        try (Store.Lock held = lock()) {
-            Result existing = existing(installed, List.of());
-            if (existing != null) {
-                return existing;
+        // The work folder's name says which build it is for, so that a second install of the same
+        // build can tell that another jkit is downloading it.
+        String prefix = "install-" + storeTool.id() + "-" + dirName + "-";
+        List<Path> removed = new ArrayList<>();
+        Path work = null;
+        boolean waited = false;
+        while (work == null) {
+            try (var _ = lock()) {
+                Result existing = existing(installed, List.copyOf(removed));
+                if (existing != null) {
+                    return existing;
+                }
+                Perms.mkdirs(home.tmp());
+                removed.addAll(removeLeftovers(home.tmp()));
+                if (!downloading(home.tmp(), prefix)) {
+                    // Created under the lock, so no other jkit can take it for a leftover and delete
+                    // it before this one holds it. jkit's Ctrl-C handler deletes it too.
+                    work = WorkDirs.create(home.tmp(), prefix);
+                }
             }
-            Perms.mkdirs(home.tmp());
-            removed = removeLeftovers(home.tmp());
-            // Created under the lock, so no other jkit can take it for a leftover and delete it
-            // before this one holds it. jkit's Ctrl-C handler deletes it too.
-            work = WorkDirs.create(home.tmp(), "install-");
+            if (work == null) {
+                // Another jkit is downloading this very build: wait for it rather than download it
+                // a second time, then look again. If that install fails, this one downloads.
+                if (!waited) {
+                    waiting.accept("another jkit is installing " + artifact.label() + "; waiting for it to finish…");
+                    waited = true;
+                }
+                pause();
+            }
         }
         IOException failure = null;
         try {
             List<String> notes = new ArrayList<>();
-            boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
-            if (signatureRequired && !signable) {
-                throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
-                        + " check; nothing was installed");
-            }
             // Fetch the signature first. It is a few hundred bytes and can refuse the install on its
             // own (none is published, or it was made with a key jkit doesn't have), and then the user
             // doesn't wait for the whole download to hear it.
@@ -143,6 +181,12 @@ public final class Installer {
                 // come unsigned. Say so, so the user knows that only the checksum was checked.
                 notes.add("note: no signature jkit can check is published for " + artifact.label()
                         + "; only its checksum was checked");
+            } else if (signedBy == null && notes.isEmpty() && artifact.checksum() != null
+                    && artifact.checksumAlgorithm() != null) {
+                // a publisher that doesn't sign (Zulu, Gradle, GraalVM CE): say what was checked,
+                // as "signature checked" does for the ones that do
+                notes.add("checksum checked (" + artifact.checksumAlgorithm().toLowerCase(Locale.ROOT)
+                        .replace("-", "") + ")");
             }
             // A good signature by a key built into jkit is a stronger check than any checksum. A
             // signature that is published but couldn't be checked (--allow-unverified) leaves the
@@ -174,7 +218,7 @@ public final class Installer {
                 requireSignedVersion(storeTool, toolHome, artifact);
             }
             Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
-            try (Store.Lock held = lock()) {
+            try (var _ = lock()) {
                 // Another jkit may have installed the same build in the meantime: keep that one.
                 Result existing = existing(installed, removed);
                 if (existing != null) {
@@ -197,6 +241,31 @@ public final class Installer {
                 }
                 // The next install removes what is left in tmp/; don't let this hide the real result.
             }
+        }
+    }
+
+    /**
+     * Whether a running jkit (another one, or another thread of this one) is downloading into a
+     * work folder named {@code prefix...}: the same build. Only called with the lock held.
+     */
+    private static boolean downloading(Path tmp, String prefix) {
+        try (Stream<Path> children = Files.list(tmp)) {
+            return children.anyMatch(c -> c.getFileName().toString().startsWith(prefix)
+                    && WorkDirs.use(c) == WorkDirs.Use.IN_USE);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** How long an install waiting for another jkit's install of the same build sleeps between looks. */
+    static long pauseMillis = 500;
+
+    private static void pause() throws IOException {
+        try {
+            Thread.sleep(pauseMillis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("interrupted while waiting for another jkit");
         }
     }
 
@@ -234,7 +303,7 @@ public final class Installer {
             String why = "couldn't fetch the signature of " + artifact.label() + " ("
                     + Visible.of(String.valueOf(e.getMessage())) + ")";
             if (required) {
-                throw new SignatureRequired(why + refused(artifact));
+                throw new VerificationRequired(why + refused(artifact));
             }
             notes.add("warning: " + why + unchecked(artifact));
             return null;
@@ -279,7 +348,7 @@ public final class Installer {
                 ? " (a newer jkit may know a new key: jkit self-update)"
                 : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
         if (required) {
-            throw new SignatureRequired(why + newer + refused(artifact));
+            throw new VerificationRequired(why + newer + refused(artifact));
         }
         notes.add("warning: " + why + newer + unchecked(artifact));
     }
@@ -449,7 +518,7 @@ public final class Installer {
      * the lock file only once however many code paths hold it.
      */
     private Store.Lock lock() throws IOException {
-        return new Store(home).lock(home.lockFile(), "waiting for another jkit to finish installing…");
+        return new Store(home, waiting).lock(home.lockFile(), "waiting for another jkit to finish installing…");
     }
 
     /** Runs chmod a+x on the regular files directly in {@code bin}, except .bat, .cmd and .exe files. */
@@ -599,12 +668,12 @@ public final class Installer {
         }
     }
 
+    private static final Pattern CORRETTO_EIGHT = Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)");
+
     /**
      * Corretto 8 numbers its builds {@code 8.<update>.<build>.<revision>} (8.514.01.1 is 8u514),
      * where everything else says 8.0.514; later Corretto releases already use 11.0.33.1.1.
      */
-    private static final Pattern CORRETTO_EIGHT = Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)");
-
     static String fromCorrettoEight(String text) {
         Matcher m = CORRETTO_EIGHT.matcher(text);
         return m.matches() ? "8.0." + m.group(1) + m.group(2) : text;

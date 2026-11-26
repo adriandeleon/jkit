@@ -50,9 +50,7 @@ class PinSyncTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
-        return path;
+        return TestInstalls.install(home, tool, dir, properties);
     }
 
     private Context ctx() {
@@ -280,6 +278,28 @@ class PinSyncTest {
                 .isInstanceOf(JkitException.class)
                 .hasMessage("jkit.toml pins maven, but jkit can't read that pin (see the warning above); nothing was installed");
         assertThat(errors()).contains("maven = 3.10 is a TOML number").contains("quote it: maven = \"3.10\"");
+    }
+
+    @Test
+    void syncUsesTheWinningPinWhenALaterFileCantBeRead() throws Exception {
+        Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\n");
+        Files.writeString(project.resolve(".java-version"), "system\n");
+        assertThat(new SyncCommand().run(ctx(), project)).isZero();
+        assertThat(errors()).contains("'system' is not a Java version");
+    }
+
+    @Test
+    void useGlobalForTheGlobalAlreadyChangesNothing() throws Exception {
+        UseCommand use = new UseCommand();
+        use.spec = ToolSpec.parse("maven@3.9.11");
+        use.global = true;
+        use.json.json = true;
+        assertThat(use.run(ctx())).isZero();
+        assertThat(errors().lines().findFirst()).hasValue("the global maven is already 3.9.11, unchanged"); // println: \r\n on Windows
+        assertThat(errors()).doesNotContain("link ");
+        JsonNode doc = new ObjectMapper().readTree(output());
+        assertThat(doc.path("changed").asBoolean()).isFalse();
+        assertThat(doc.path("changes")).isEmpty();
     }
 
     @Test

@@ -250,6 +250,32 @@ class HooksTest {
         assertThat(out.lines().toList().get(1)).startsWith("bin ").contains("jkit-env.");
     }
 
+    /**
+     * Ctrl-C at the prompt makes bash leave the jkit function before its rm; jkit removes the file
+     * itself then, but one it couldn't (stopped before its handler was in place) is removed by the
+     * next run. The shell's own Ctrl-C handling, which stops the rest of the line, is left alone.
+     */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookRemovesAFileAnInterruptedRunLeft() throws Exception {
+        Path temp = Files.createDirectories(tmp.resolve("temp"));
+        Path fake = tmp.resolve("fakejkit");
+        Files.writeString(fake, "#!/bin/sh\nexit 0\n");
+        fake.toFile().setExecutable(true);
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, Hooks.posix("bash", tmp.resolve("root"), fake.toString())
+                + "__jkit_last_env=$(mktemp \"$TMPDIR/jkit-env.XXXXXX\")\nls -A \"$TMPDIR\" | wc -l\n"
+                + "jkit status\necho \"rc=$?\"\nls -A \"$TMPDIR\" | wc -l\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString()).redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("TMPDIR", temp.toString());
+        Process p = pb.start();
+        p.getOutputStream().close();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out.lines().map(String::strip).toList()).as(out).containsExactly("1", "rc=0", "0");
+    }
+
     @Test
     void fishHookKeepsAnExistingJavaHomeAndSetsTheOtherHomes() {
         String fish = Hooks.fish(Path.of("/home/u/.jkit"));

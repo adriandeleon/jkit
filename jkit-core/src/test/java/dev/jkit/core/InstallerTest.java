@@ -102,7 +102,7 @@ class InstallerTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         assertThatThrownBy(() -> new Installer(home, withSignature(archive, realTemurinSignature()))
-                .install(signed(sha256(archive)), Http.Progress.NONE))
+                .install(signed(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED))
                 .isInstanceOf(JkitException.class)
                 .hasMessageContaining("signature of jdk 21.0.13+9 temurin doesn't match the download")
                 .hasMessageContaining("Adoptium's key 843C48A565F8F04B made it")
@@ -118,8 +118,8 @@ class InstallerTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         for (byte[] sig : new byte[][] {"<html>".getBytes(), null}) {
             assertThatThrownBy(() -> new Installer(home, withSignature(archive, sig))
-                    .install(signed(sha256(archive)), Http.Progress.NONE, true))
-                    .isInstanceOf(Installer.SignatureRequired.class)
+                    .install(signed(sha256(archive)), Http.Progress.NONE, Installer.Verification.REQUIRED))
+                    .isInstanceOf(Installer.VerificationRequired.class)
                     .hasMessageContaining("signature of jdk 21.0.13+9 temurin")
                     .hasMessageEndingWith("; nothing was installed")
                     .hasMessageNotContaining("no published checksum");
@@ -148,7 +148,7 @@ class InstallerTest {
         AtomicInteger started = new AtomicInteger();
         Http.Progress progress = countingStarts(started);
         Installer.Result result = new Installer(home, withSignature(archive, "<html>".getBytes()))
-                .install(signed(sha256(archive)), progress);
+                .install(signed(sha256(archive)), progress, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(started).hasValue(1);
         assertThat(result.fresh()).isTrue();
         assertThat(result.verified()).isFalse();
@@ -164,7 +164,7 @@ class InstallerTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, withSignature(archive, null))
-                .install(signed(sha256(archive)), Http.Progress.NONE);
+                .install(signed(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.fresh()).isTrue();
         assertThat(result.notes()).singleElement().asString().startsWith("warning: couldn't fetch the signature");
     }
@@ -197,7 +197,7 @@ class InstallerTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         byte[] real = asc;
         assertThatThrownBy(() -> new Installer(home, withSignature(zip, real))
-                .install(tool(Tool.MAVEN, "3.9.9", zip, sha256(zip)), Http.Progress.NONE))
+                .install(tool(Tool.MAVEN, "3.9.9", zip, sha256(zip)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED))
                 .isInstanceOf(JkitException.class)
                 .hasMessageContaining("signature of maven 3.9.9 doesn't match the download")
                 .hasMessageContaining("Apache Maven's key 3A387D43964143E3 made it");
@@ -214,7 +214,7 @@ class InstallerTest {
         }
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, withSignature(zip, null))
-                .install(tool(Tool.SBT, "1.10.7", zip, sha256(zip)), Http.Progress.NONE);
+                .install(tool(Tool.SBT, "1.10.7", zip, sha256(zip)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.fresh()).isTrue();
         assertThat(result.signedBy()).isNull();
         assertThat(result.notes()).singleElement().asString()
@@ -235,8 +235,8 @@ class InstallerTest {
         // junk, a 404, and a signature by another vendor's key: none may stand in for the checksum
         for (byte[] sig : new byte[][] {"<html>".getBytes(), null, realTemurinSignature()}) {
             assertThatThrownBy(() -> new Installer(home, withSignature(archive, sig))
-                    .install(corretto(), Http.Progress.NONE, true))
-                    .isInstanceOf(Installer.SignatureRequired.class)
+                    .install(corretto(), Http.Progress.NONE, Installer.Verification.REQUIRED))
+                    .isInstanceOf(Installer.VerificationRequired.class)
                     .hasMessageContaining("signature of jdk 21.0.13.1+2 corretto")
                     .hasMessageEndingWith("and it has no published checksum; nothing was installed");
         }
@@ -246,7 +246,7 @@ class InstallerTest {
             amazon = in.readAllBytes();
         }
         assertThatThrownBy(() -> new Installer(home, withSignature(archive, amazon))
-                .install(corretto(), Http.Progress.NONE, true))
+                .install(corretto(), Http.Progress.NONE, Installer.Verification.REQUIRED))
                 .hasMessageContaining("Amazon's key A122542AB04F24E3 made it");
         assertThat(new Store(home).list(Tool.JDK)).isEmpty();
         assertThat(home.tmp()).isEmptyDirectory();
@@ -262,15 +262,15 @@ class InstallerTest {
             retired = in.readAllBytes();
         }
         assertThatThrownBy(() -> new Installer(home, withSignature(archive, retired))
-                .install(corretto(), Http.Progress.NONE, true))
-                .isInstanceOf(Installer.SignatureRequired.class)
+                .install(corretto(), Http.Progress.NONE, Installer.Verification.REQUIRED))
+                .isInstanceOf(Installer.VerificationRequired.class)
                 .hasMessageContaining("signed with Amazon's retired key 5A812B5B67F4FCB4")
                 .hasMessageContaining("(pick a newer build)")
                 .hasMessageNotContaining("self-update")
                 .hasMessageEndingWith("and it has no published checksum; nothing was installed");
         // a key jkit doesn't know at all may be a new one
         assertThatThrownBy(() -> new Installer(home, withSignature(archive, realTemurinSignature()))
-                .install(corretto(), Http.Progress.NONE, true))
+                .install(corretto(), Http.Progress.NONE, Installer.Verification.REQUIRED))
                 .hasMessageContaining("a newer jkit may know a new key: jkit self-update");
         assertThat(new Store(home).list(Tool.JDK)).isEmpty();
     }
@@ -301,8 +301,8 @@ class InstallerTest {
             };
             AtomicInteger started = new AtomicInteger();
             Http.Progress progress = countingStarts(started);
-            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), progress, true))
-                    .isInstanceOf(Installer.SignatureRequired.class);
+            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), progress, Installer.Verification.REQUIRED))
+                    .isInstanceOf(Installer.VerificationRequired.class);
             assertThat(fetched).as("only the signature").containsExactly(corretto().signature());
             assertThat(started).as("no \"downloading\" before a refusal").hasValue(0);
         }
@@ -379,14 +379,36 @@ class InstallerTest {
     }
 
     @Test
-    void aRequiredSignatureNeedsOneJkitCanCheck() throws Exception {
+    void aDownloadWithNoChecksumAndNoSignatureIsRefusedUnlessAllowed() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
-        Artifact unsigned = new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("zulu"),
+        Artifact unchecked = new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("zulu"),
                 URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", null, null, false);
-        assertThatThrownBy(() -> new Installer(home, serving(archive)).install(unsigned, Http.Progress.NONE, true))
-                .isInstanceOf(Installer.SignatureRequired.class)
-                .hasMessageContaining("no published checksum or signature jkit can check");
+        int[] downloads = {0};
+        Http counting = new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                downloads[0]++;
+                Files.copy(archive, target);
+            }
+        };
+        assertThatThrownBy(() -> new Installer(home, counting).install(unchecked, Http.Progress.NONE,
+                Installer.Verification.REQUIRED))
+                .isInstanceOf(Installer.VerificationRequired.class)
+                .hasMessage("jdk 21.0.13+9 zulu from example.invalid has no published checksum, so jkit can't check"
+                        + " the download; nothing installed");
+        assertThat(downloads[0]).isZero();
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+        Installer.Result result = new Installer(home, counting).install(unchecked, Http.Progress.NONE,
+                Installer.Verification.ALLOW_UNVERIFIED);
+        assertThat(result.fresh()).isTrue();
+        assertThat(result.verified()).isFalse();
+        assertThat(result.notes()).isEmpty();
     }
 
     @Test
@@ -394,7 +416,7 @@ class InstallerTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, withSignature(archive, null))
-                .install(corretto(), Http.Progress.NONE, false);
+                .install(corretto(), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.verified()).isFalse();
         assertThat(result.notes()).singleElement().asString()
                 .startsWith("warning: couldn't fetch the signature of jdk 21.0.13.1+2 corretto")
@@ -406,7 +428,7 @@ class InstallerTest {
         // a Temurin build from before Adoptium signed them: the checksum is the check, and the user is told
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
-        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE);
+        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.verified()).isTrue();
         assertThat(result.signedBy()).isNull();
         assertThat(result.notes()).containsExactly("note: no signature jkit can check is published for"
@@ -414,14 +436,77 @@ class InstallerTest {
     }
 
     @Test
-    void aVendorJkitHasNoKeysForGetsNoNote() throws Exception {
+    void aVendorJkitHasNoKeysForSaysItsChecksumWasChecked() throws Exception {
+        // as "signature checked: …" does for the vendors that sign
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Artifact zulu = new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("zulu"),
-                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", sha256(archive), false);
-        Installer.Result result = new Installer(home, serving(archive)).install(zulu, Http.Progress.NONE);
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "SHA-256", sha256(archive), false);
+        Installer.Result result = new Installer(home, serving(archive)).install(zulu, Http.Progress.NONE,
+                Installer.Verification.REQUIRED);
         assertThat(result.verified()).isTrue();
-        assertThat(result.notes()).isEmpty();
+        assertThat(result.notes()).containsExactly("checksum checked (sha256)");
+    }
+
+    @Test
+    void aSecondInstallOfTheSameBuildWaitsForTheFirstInsteadOfDownloadingIt() throws Exception {
+        java.util.List<String> said = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Artifact build = artifact(sha256(archive));
+        Installed installed = new Installed(Tool.JDK, build.version(), build.vendor(),
+                home.tools(Tool.JDK).resolve(Installed.dirName(build.version(), build.vendor(), false)), false);
+        // the other install: downloading into a work folder named for this build
+        Files.createDirectories(home.tmp());
+        Path theirs = WorkDirs.create(home.tmp(), "install-jdk-" + installed.home().getFileName() + "-");
+        long pause = Installer.pauseMillis;
+        Installer.pauseMillis = 20;
+        Thread other = new Thread(() -> {
+            try {
+                Thread.sleep(200);
+                Path out = Files.createDirectories(theirs.resolve("out/jdk"));
+                Store.writeMarker(out, installed, build.url().toString(), true);
+                Files.createDirectories(installed.home().getParent());
+                Files.move(out, installed.home());
+                WorkDirs.remove(theirs);
+                Fs.deleteRecursively(theirs);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        int[] downloads = {0};
+        Http counting = new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                downloads[0]++;
+                Files.copy(archive, target);
+            }
+        };
+        try {
+            other.start();
+            Installer.Result result = new Installer(home, counting, said::add).install(build, Http.Progress.NONE,
+                    Installer.Verification.REQUIRED);
+            assertThat(said).containsExactly("another jkit is installing " + build.label() + "; waiting for it to finish…");
+            assertThat(result.fresh()).isFalse();
+            assertThat(downloads[0]).isZero();
+        } finally {
+            other.join();
+            Installer.pauseMillis = pause;
+        }
+        // another build doesn't wait: a work folder of a different build is left alone
+        Path different = WorkDirs.create(home.tmp(), "install-jdk-17.0.1-temurin-");
+        try {
+            Artifact fx = artifact(sha256(archive), true);
+            assertThat(new Installer(home, serving(archive)).install(fx, Http.Progress.NONE,
+                    Installer.Verification.REQUIRED).fresh()).isTrue();
+        } finally {
+            WorkDirs.remove(different);
+        }
     }
 
     @Test
@@ -475,8 +560,8 @@ class InstallerTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         byte[] huge = new byte[Signatures.MAX_SIGNATURE + 1];
         assertThatThrownBy(() -> new Installer(home, withSignature(archive, huge))
-                .install(signed(sha256(archive)), Http.Progress.NONE, true))
-                .isInstanceOf(Installer.SignatureRequired.class)
+                .install(signed(sha256(archive)), Http.Progress.NONE, Installer.Verification.REQUIRED))
+                .isInstanceOf(Installer.VerificationRequired.class)
                 .hasMessageContaining("couldn't fetch the signature of jdk 21.0.13+9 temurin")
                 .hasMessageContaining("sent more than 64 KB");
     }
@@ -485,7 +570,7 @@ class InstallerTest {
     void installsIntoToolsAndIsFoundByTheStore() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
-        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE);
+        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
 
         assertThat(result.fresh()).isTrue();
         assertThat(result.verified()).isTrue();
@@ -507,7 +592,7 @@ class InstallerTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, serving(archive))
-                .install(artifact(sha256(archive), true), Http.Progress.NONE);
+                .install(artifact(sha256(archive), true), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
 
         assertThat(result.installed().fx()).isTrue();
         assertThat(result.installed().label()).isEqualTo("21.0.13+9 temurin fx");
@@ -522,12 +607,12 @@ class InstallerTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer installer = new Installer(home, serving(archive));
         Store store = new Store(home);
-        installer.install(artifact(sha256(archive), true), Http.Progress.NONE);
+        installer.install(artifact(sha256(archive), true), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
 
         assertThat(store.contains(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), true)).isTrue();
         assertThat(store.contains(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), false)).isFalse();
 
-        Installer.Result plain = installer.install(artifact(sha256(archive), false), Http.Progress.NONE);
+        Installer.Result plain = installer.install(artifact(sha256(archive), false), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(plain.fresh()).isTrue();
         assertThat(store.list(Tool.JDK)).extracting(Installed::fx).containsExactly(false, true);
     }
@@ -538,7 +623,7 @@ class InstallerTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         String wrong = "0".repeat(64);
 
-        assertThatThrownBy(() -> new Installer(home, serving(archive)).install(artifact(wrong), Http.Progress.NONE))
+        assertThatThrownBy(() -> new Installer(home, serving(archive)).install(artifact(wrong), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED))
                 .isInstanceOf(JkitException.class)
                 .hasMessageContaining("checksum mismatch");
         assertThat(home.tools(Tool.JDK).resolve("21.0.13+9-temurin")).doesNotExist();
@@ -549,7 +634,7 @@ class InstallerTest {
     void flattensMacOsContentsHome() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9/Contents/Home");
         JkitHome home = new JkitHome(tmp.resolve("home"));
-        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE);
+        Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.installed().home().resolve("bin/java")).exists();
         assertThat(result.installed().home().resolve("Contents")).doesNotExist();
     }
@@ -651,7 +736,7 @@ class InstallerTest {
             } catch (Exception e) {
                 throw new IOException(e);
             }
-        })).install(artifact(sha256(archive)), Http.Progress.NONE);
+        })).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.fresh()).isTrue();
         assertThat(home.tmp()).isEmptyDirectory();
     }
@@ -665,7 +750,7 @@ class InstallerTest {
         Installer.Result result = new Installer(home, servingWhile(archive, () -> {
             Files.createDirectories(dest.resolve("bin"));
             Store.writeMarker(dest, theirs, "https://example.invalid/theirs.tar.gz", true);
-        })).install(artifact(sha256(archive)), Http.Progress.NONE);
+        })).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.fresh()).isFalse();
         assertThat(result.verified()).isTrue();
         assertThat(dest.resolve(Store.MARKER)).content().contains("theirs.tar.gz");
@@ -689,7 +774,7 @@ class InstallerTest {
                     StandardCharsets.UTF_8)).readLine());
             assertThat(WorkDirs.inUse(theirs)).isTrue();
             Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)),
-                    Http.Progress.NONE);
+                    Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
             assertThat(result.removedLeftovers()).containsExactly(leftover.getParent());
             assertThat(theirs).isDirectory();
             // it ends without cleaning up, as when killed: its folder is a leftover now
@@ -698,7 +783,7 @@ class InstallerTest {
             assertThat(theirs).isDirectory();
             assertThat(WorkDirs.inUse(theirs)).isFalse();
             Fs.deleteRecursively(result.installed().home());
-            assertThat(new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE)
+            assertThat(new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED)
                     .removedLeftovers()).containsExactly(theirs);
         } finally {
             other.destroyForcibly();

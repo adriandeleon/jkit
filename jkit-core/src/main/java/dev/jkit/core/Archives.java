@@ -135,7 +135,8 @@ public final class Archives {
     private static void extractTarGz(Path archive, Path target, Budget budget) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(archive));
              // Read every gzip member, as ArchiveScan does: bgzip and pigz write several.
-             TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw, true))) {
+             TarArchiveInputStream tar = new TarArchiveInputStream(
+                     GzipCompressorInputStream.builder().setInputStream(raw).setDecompressConcatenated(true).get())) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
                 budget.entry();

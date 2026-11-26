@@ -19,10 +19,7 @@ class JsonOutputTest {
     Path home;
 
     private Path install(String storeDir, String dirName, String properties) throws Exception {
-        Path dir = home.resolve("tools").resolve(storeDir).resolve(dirName);
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve("jkit-install.properties"), properties);
-        return dir;
+        return TestInstalls.install(home, storeDir, dirName, properties);
     }
 
     @Test
@@ -86,6 +83,18 @@ class JsonOutputTest {
         assertThat(out).doesNotContain("\u001b").doesNotContain("\u007f").doesNotContain("\u009b")
                 .contains("\\u001B").contains("\\u007F").contains("\\u009b");
         assertThat(JSON.readTree(out).path("text").asText()).isEqualTo("a\u001b[2Jb\u007fc\u009bd");
+    }
+
+    @Test
+    void hiddenCharactersAreEscapedInJsonToo() throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        String text = "ok\uDB40\uDC41x\u202Ey\uD83D\uDE00";
+        doc.put("text", text);
+        String out = JsonOut.write(doc);
+        // both halves of the tag character U+E0041, the bidi override; the emoji stays a valid pair
+        assertThat(out).contains("ok\\udb40\\udc41x\\u202ey\\ud83d\\ude00");
+        assertThat(out.chars().anyMatch(c -> Character.isSurrogate((char) c) || c == 0x202e)).isFalse();
+        assertThat(JSON.readTree(out).path("text").asText()).isEqualTo(text);
     }
 
     @Test

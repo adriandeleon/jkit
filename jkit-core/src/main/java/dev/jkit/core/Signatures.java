@@ -3,6 +3,7 @@ package dev.jkit.core;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.sources.FoojaySource;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,6 +59,10 @@ public final class Signatures {
             if ((vendor != null && tool != null) || fingerprints.isEmpty()) {
                 throw new IllegalArgumentException("a key is for one vendor, one tool, or jkit");
             }
+            // FoojaySource decides where a signing vendor's builds may come from and which have a .sig
+            if (vendor != null && !FoojaySource.SIGNING_VENDORS.contains(vendor)) {
+                throw new IllegalArgumentException(vendor + " isn't in FoojaySource.SIGNING_VENDORS");
+            }
             fingerprints = List.copyOf(fingerprints);
         }
 
@@ -110,7 +115,7 @@ public final class Signatures {
      * told apart from one by a key jkit doesn't know yet. Amazon signed each of its 2019 Corretto
      * releases (8u222, 8u232, 11.0.4, 11.0.5; foojay still lists them) with a key of its own: SHA-1
      * signatures, by RSA keys that expired in 2024. jkit has none of them, and a newer jkit won't
-     * either.
+     * either. Its vendors are FoojaySource.RETIRED_KEY_HOSTS's.
      */
     static final Map<String, Set<String>> RETIRED = Map.of("corretto", Set.of(
             "BD93DF06B540D62A", "E9B1F93E1A158134", // 8.222.10.1 to .3, 8.222.10.4
@@ -287,8 +292,8 @@ public final class Signatures {
     }
 
     /**
-     * Why {@code signer} may not sign, or null when it may: its newest self-signature (for a
-     * subkey, its newest binding signature) must mark it for signing, and it must be RSA of at
+     * Why {@code signer} may not sign, or null when it may: its self-signature ({@link #selfSigned};
+     * for a subkey, its newest binding signature) must mark it for signing, and it must be RSA of at
      * least 2048 bits, EdDSA, or ECDSA of at least 256 bits. The rings jkit has hold encryption
      * subkeys too, and Guillaume Nodet's DSA-1024 primary key, which signed his Maven releases
      * before 3.9.0: a signature by one of those doesn't count.
@@ -301,14 +306,20 @@ public final class Signatures {
             return "it is made with " + which + ", which isn't a signing key";
         }
         int bits = signer.getBitStrength();
-        boolean strong = switch (signer.getAlgorithm()) {
+        return strong(signer.getAlgorithm(), bits) ? null : "it is made with " + which + ", a "
+                + algorithm(signer.getAlgorithm()) + "-" + bits + " key, which jkit doesn't accept";
+    }
+
+    // RSA_SIGN, RSA_ENCRYPT and ELGAMAL_GENERAL are deprecated because RFC 9580 deprecates the
+    // algorithms; old keys still carry them, and there is no other name for the tags.
+    @SuppressWarnings("deprecation")
+    private static boolean strong(int algorithm, int bits) {
+        return switch (algorithm) {
             case PublicKeyAlgorithmTags.RSA_GENERAL, PublicKeyAlgorithmTags.RSA_SIGN -> bits >= 2048;
             case PublicKeyAlgorithmTags.EDDSA_LEGACY, PublicKeyAlgorithmTags.Ed25519, PublicKeyAlgorithmTags.Ed448 -> true;
             case PublicKeyAlgorithmTags.ECDSA -> bits >= 256;
             default -> false;
         };
-        return strong ? null : "it is made with " + which + ", a " + algorithm(signer.getAlgorithm()) + "-" + bits
-                + " key, which jkit doesn't accept";
     }
 
     /** Why {@code sig} was made after {@code signer}, or the primary key it belongs to, expired; null if it wasn't. */
@@ -328,28 +339,86 @@ public final class Signatures {
     }
 
     /**
-     * The hashed subpackets of the newest self-signature that says what {@code key} is for: for a
-     * primary key, its certification of a user ID or a direct-key signature; for a subkey, the
-     * primary key's binding signature. Null if it has none.
+     * The hashed subpackets of the self-signature that says what {@code key} is for and when it
+     * expires, as RFC 9580 (5.2.3.10) picks it. For a subkey, the primary key's newest binding
+     * signature. For a primary key, its newest direct-key signature when that carries key flags;
+     * otherwise the newest self-signature of its primary user ID. A later signature that says
+     * nothing about the key's use must not hide the one that does: gpg's addrevoker adds a
+     * direct-key signature with no key flags, and a user ID added later may be self-signed without
+     * them. So among the user IDs, one whose newest self-signature has key flags comes first, then
+     * one marked primary, then the newest. Null if the key has no such signature.
      */
     private static PGPSignatureSubpacketVector selfSigned(PGPPublicKey key, PGPPublicKey primary) {
-        PGPSignature newest = null;
-        for (Iterator<PGPSignature> it = key.getSignatures(); it.hasNext(); ) {
+        long by = primary.getKeyID();
+        if (key.getKeyID() != by) {
+            PGPSignature binding = newest(key.getSignaturesOfType(PGPSignature.SUBKEY_BINDING), by);
+            return binding == null ? null : binding.getHashedSubPackets();
+        }
+        PGPSignature direct = null;
+        for (Iterator<PGPSignature> it = key.getSignaturesOfType(PGPSignature.DIRECT_KEY); it.hasNext(); ) {
             PGPSignature s = it.next();
-            int type = s.getSignatureType();
-            boolean fits = key.getKeyID() == primary.getKeyID()
-                    ? type == PGPSignature.DEFAULT_CERTIFICATION || type == PGPSignature.NO_CERTIFICATION
-                            || type == PGPSignature.CASUAL_CERTIFICATION || type == PGPSignature.POSITIVE_CERTIFICATION
-                            || type == PGPSignature.DIRECT_KEY
-                    : type == PGPSignature.SUBKEY_BINDING;
-            if (fits && s.getKeyID() == primary.getKeyID()
-                    && (newest == null || s.getCreationTime().after(newest.getCreationTime()))) {
-                newest = s;
+            if (s.getKeyID() == by && hasFlags(s) && (direct == null || s.getCreationTime().after(direct.getCreationTime()))) {
+                direct = s;
             }
         }
-        return newest == null ? null : newest.getHashedSubPackets();
+        if (direct != null) {
+            return direct.getHashedSubPackets();
+        }
+        PGPSignature best = null;
+        for (Iterator<byte[]> ids = key.getRawUserIDs(); ids.hasNext(); ) {
+            byte[] id = ids.next();
+            PGPSignature cert = null;
+            PGPSignature revoked = null;
+            for (Iterator<PGPSignature> it = key.getSignaturesForID(id); it != null && it.hasNext(); ) {
+                PGPSignature s = it.next();
+                if (s.getKeyID() != by) {
+                    continue;
+                }
+                int type = s.getSignatureType();
+                if (type == PGPSignature.CERTIFICATION_REVOCATION) {
+                    revoked = later(revoked, s);
+                } else if (type == PGPSignature.DEFAULT_CERTIFICATION || type == PGPSignature.NO_CERTIFICATION
+                        || type == PGPSignature.CASUAL_CERTIFICATION || type == PGPSignature.POSITIVE_CERTIFICATION) {
+                    cert = later(cert, s);
+                }
+            }
+            if (cert == null || (revoked != null && !cert.getCreationTime().after(revoked.getCreationTime()))) {
+                continue; // a user ID revoked since its last self-signature says nothing about the key
+            }
+            if (best == null || rank(cert) > rank(best)
+                    || (rank(cert) == rank(best) && cert.getCreationTime().after(best.getCreationTime()))) {
+                best = cert;
+            }
+        }
+        return best == null ? null : best.getHashedSubPackets();
     }
 
+    private static boolean hasFlags(PGPSignature s) {
+        return s.getHashedSubPackets() != null && s.getHashedSubPackets().hasSubpacket(SignatureSubpacketTags.KEY_FLAGS);
+    }
+
+    /** A user ID self-signature with key flags first, then one marking its user ID primary. */
+    private static int rank(PGPSignature s) {
+        boolean primaryId = s.getHashedSubPackets() != null && s.getHashedSubPackets().isPrimaryUserID();
+        return (hasFlags(s) ? 2 : 0) + (primaryId ? 1 : 0);
+    }
+
+    private static PGPSignature later(PGPSignature a, PGPSignature b) {
+        return a == null || b.getCreationTime().after(a.getCreationTime()) ? b : a;
+    }
+
+    private static PGPSignature newest(Iterator<PGPSignature> signatures, long by) {
+        PGPSignature newest = null;
+        while (signatures.hasNext()) {
+            PGPSignature s = signatures.next();
+            if (s.getKeyID() == by) {
+                newest = later(newest, s);
+            }
+        }
+        return newest;
+    }
+
+    @SuppressWarnings("deprecation") // the deprecated tags, as for strong()
     private static String algorithm(int tag) {
         return switch (tag) {
             case PublicKeyAlgorithmTags.RSA_GENERAL, PublicKeyAlgorithmTags.RSA_SIGN, PublicKeyAlgorithmTags.RSA_ENCRYPT -> "RSA";

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.sources.FoojaySource;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -22,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
 import org.bouncycastle.bcpg.HashAlgorithmTags;
+import org.bouncycastle.bcpg.PublicKeyPacket;
 import org.bouncycastle.bcpg.sig.KeyFlags;
 import org.bouncycastle.crypto.generators.RSAKeyPairGenerator;
 import org.bouncycastle.crypto.params.RSAKeyGenerationParameters;
@@ -60,7 +62,7 @@ class SignaturesTest {
     private static PGPKeyPair rsa(int bits, Date created) throws Exception {
         RSAKeyPairGenerator gen = new RSAKeyPairGenerator();
         gen.init(new RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), new SecureRandom(), bits, 12));
-        return new BcPGPKeyPair(PGPPublicKey.RSA_GENERAL, gen.generateKeyPair(), created);
+        return new BcPGPKeyPair(PublicKeyPacket.VERSION_4, PGPPublicKey.RSA_GENERAL, gen.generateKeyPair(), created);
     }
 
     /** A key ring of one primary key, its user ID self-signed with {@code flags}, as gpg makes them. */
@@ -225,6 +227,41 @@ class SignaturesTest {
         assertThat(bare.outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
     }
 
+    /** {@code ring} with a self-signature of {@code type} added a minute from now, for {@code userId} or, if null, the key. */
+    private static PGPPublicKeyRing resigned(PGPPublicKeyRing ring, PGPKeyPair primary, int type, String userId,
+                                             int flags) throws Exception {
+        PGPSignatureSubpacketGenerator hashed = new PGPSignatureSubpacketGenerator();
+        hashed.setSignatureCreationTime(false, new Date(System.currentTimeMillis() + 60_000));
+        if (flags != 0) {
+            hashed.setKeyFlags(false, flags);
+        }
+        PGPSignatureGenerator gen = new PGPSignatureGenerator(
+                new BcPGPContentSignerBuilder(PGPPublicKey.RSA_GENERAL, HashAlgorithmTags.SHA256), primary.getPublicKey());
+        gen.init(type, primary.getPrivateKey());
+        gen.setHashedSubpackets(hashed.generate());
+        PGPPublicKey key = ring.getPublicKey();
+        PGPPublicKey signed = userId == null
+                ? PGPPublicKey.addCertification(key, gen.generateCertification(key))
+                : PGPPublicKey.addCertification(key, userId, gen.generateCertification(userId, key));
+        return PGPPublicKeyRing.insertPublicKey(ring, signed);
+    }
+
+    @Test
+    void aLaterSelfSignatureWithoutKeyFlagsDoesNotHideThem() throws Exception {
+        PGPKeyPair primary = rsa();
+        // gpg --edit-key addrevoker: a newer direct-key signature that says nothing about the key's use
+        PGPPublicKeyRing revoker = resigned(ring(primary), primary, PGPSignature.DIRECT_KEY, null, 0);
+        assertThat(checkWith(revoker, primary, primary).outcome()).isEqualTo(Signatures.Outcome.GOOD);
+        // a user ID added later, self-signed without key flags
+        PGPPublicKeyRing secondId = resigned(ring(primary), primary, PGPSignature.POSITIVE_CERTIFICATION,
+                "Someone Else <else@example.com>", 0);
+        assertThat(checkWith(secondId, primary, primary).outcome()).isEqualTo(Signatures.Outcome.GOOD);
+        // a direct-key signature that does carry key flags decides: certify-only now
+        PGPPublicKeyRing certifyOnly = resigned(ring(primary), primary, PGPSignature.DIRECT_KEY, null,
+                KeyFlags.CERTIFY_OTHER);
+        assertThat(checkWith(certifyOnly, primary, primary).outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
+    }
+
     @Test
     void aWeakKeyDoesNotCount() throws Exception {
         PGPKeyPair weak = rsa(1024, new Date());
@@ -327,6 +364,17 @@ class SignaturesTest {
         Signatures.Result bad = Signatures.verify(other, sign(subkey, DATA, HashAlgorithmTags.SHA256, false), key, ring);
         assertThat(bad.outcome()).isEqualTo(Signatures.Outcome.BAD);
         assertThat(bad.detail()).isEqualTo("Apache Maven's key " + fingerprint(vendor).substring(24) + " made it");
+    }
+
+    @Test
+    void theVendorsWithKeysAreTheOnesFoojaySourceTreatsAsSigning() {
+        // FoojaySource pins these vendors' downloads to their servers and fetches their .sig
+        Set<String> withKeys = new HashSet<>();
+        Signatures.KEYS.stream().filter(k -> k.vendor() != null).forEach(k -> withKeys.add(k.vendor()));
+        assertThat(withKeys).isEqualTo(FoojaySource.SIGNING_VENDORS);
+        assertThat(Signatures.RETIRED.keySet()).isEqualTo(FoojaySource.RETIRED_KEY_HOSTS.keySet());
+        assertThatThrownBy(() -> Signatures.Key.vendor("zulu", "Azul", "azul.asc", "AB"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

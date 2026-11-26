@@ -5,6 +5,8 @@ import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import org.tomlj.TomlParseResult;
@@ -30,7 +32,7 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
         if (Files.isRegularFile(home.config())) {
             try {
                 // by byte-order mark: Notepad and PowerShell 5 write one, and the TOML parser rejects it
-                TomlParseResult toml = ProjectFile.parseToml(home.config(), ProjectFile.text(home.config()));
+                TomlParseResult toml = TextFiles.parseToml(home.config(), TextFiles.text(home.config()));
                 if (toml.hasErrors()) {
                     throw new JkitException("invalid " + home.config() + ": " + toml.errors().getFirst());
                 }
@@ -60,6 +62,30 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
             autoSwitch = parsed;
         }
         return new Config(jdk, graalvm, autoSwitch);
+    }
+
+    /**
+     * config.toml's own values by setting key ({@code jdk.vendor}), as written there: a string, a
+     * boolean or whatever else the file holds. Empty when there is no file or it isn't valid TOML.
+     */
+    public static Map<String, Object> fileValues(JkitHome home) {
+        Path file = home.config();
+        if (!Files.isRegularFile(file)) {
+            return Map.of();
+        }
+        try {
+            TomlParseResult toml = TextFiles.parseToml(file, TextFiles.text(file));
+            Map<String, Object> values = new HashMap<>();
+            for (Setting s : Setting.values()) {
+                Object v = toml.hasErrors() ? null : toml.get(s.key());
+                if (v != null) {
+                    values.put(s.key(), v);
+                }
+            }
+            return values;
+        } catch (IOException e) {
+            throw new JkitException("cannot read " + file + ": " + e.getMessage());
+        }
     }
 
     /** 1/true/yes/on or 0/false/no/off, any case; null for anything else. */

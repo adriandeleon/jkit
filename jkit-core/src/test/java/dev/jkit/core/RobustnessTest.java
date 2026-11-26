@@ -139,7 +139,7 @@ class RobustnessTest {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         assertThatThrownBy(() -> new Installer(home, serving(archive))
-                .install(artifact("http://example.com/jdk.tar.gz", "jdk.tar.gz", null, null), Http.Progress.NONE))
+                .install(artifact("http://example.com/jdk.tar.gz", "jdk.tar.gz", null, null), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED))
                 .isInstanceOf(JkitException.class)
                 .hasMessageContaining("refusing to download over http");
     }
@@ -150,11 +150,11 @@ class RobustnessTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, serving(archive)).install(
                 artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", "sha1", digest(archive, "SHA-1")),
-                Http.Progress.NONE);
+                Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(result.verified()).isFalse();
         // and an existing install reports what was recorded, not "verified"
         assertThat(new Installer(home, serving(archive)).install(
-                artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", "sha1", "x"), Http.Progress.NONE).verified())
+                artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", "sha1", "x"), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED).verified())
                 .isFalse();
     }
 
@@ -165,7 +165,7 @@ class RobustnessTest {
         Path leftover = Files.createDirectories(home.tmp().resolve("install-123/out"));
         Installer.Result result = new Installer(home, serving(archive)).install(
                 artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", "sha256", digest(archive, "SHA-256")),
-                Http.Progress.NONE);
+                Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED);
         assertThat(leftover.getParent()).doesNotExist();
         assertThat(result.removedLeftovers()).containsExactly(leftover.getParent()); // so the command can say so
     }
@@ -177,7 +177,7 @@ class RobustnessTest {
         Files.createDirectories(home.tools(Tool.JDK).resolve("21.0.13+9-temurin"));
         assertThat(new Store(home).contains(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), false)).isFalse();
         assertThatThrownBy(() -> new Installer(home, serving(archive)).install(
-                artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", null, null), Http.Progress.NONE))
+                artifact("https://example.invalid/jdk.tar.gz", "jdk.tar.gz", null, null), Http.Progress.NONE, Installer.Verification.ALLOW_UNVERIFIED))
                 .hasMessageContaining("isn't a jkit install");
     }
 

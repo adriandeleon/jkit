@@ -127,7 +127,7 @@ final class ResetCommand implements Callable<Integer> {
             printJson(ctx, "global", false, report);
             return 0;
         }
-        try (AutoCloseable lock = ctx.store.linkLock()) {
+        try (var _ = ctx.store.linkLock()) {
             ctx.os.removeLink(link);
         }
         report.link(link, null);
