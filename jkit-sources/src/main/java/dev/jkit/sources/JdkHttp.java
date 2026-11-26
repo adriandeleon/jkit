@@ -12,7 +12,6 @@ import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.SocketAddress;
 import java.net.URI;
-import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -34,19 +33,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link Http} on the JDK's HttpClient. HttpClient ignores HTTPS_PROXY and NO_PROXY, so the proxy
  * is read from the environment here. A response that stops sending data for {@link #idle} fails
  * (HttpClient's own timeout ends when the headers arrive). Requests that fail on the network or
- * with a 5xx are tried again (three tries by default).
+ * with a 5xx are tried again (three tries by default). Closing it closes its connections.
  */
-public final class JdkHttp implements Http {
+public final class JdkHttp implements Http, AutoCloseable {
+    /** When a download's speed is judged, once: long enough for a slow start to pick up. */
+    static final Duration SLOW_AFTER = Duration.ofSeconds(30);
+    /** A download that would still take longer than this at its speed then starts again on a new connection. */
+    static final Duration SLOW_LEFT = Duration.ofMinutes(10);
+
     private final int attempts;
     private final String userAgent;
     private final Duration idle;
     private final HttpClient client;
     /** Builds a client with the same settings, for a download that starts again on a new connection. */
     private final HttpClient.Builder builder;
-    /** When a download's speed is judged, once: long enough for a slow start to pick up. */
-    Duration slowAfter = Duration.ofSeconds(30);
-    /** A download that would still take longer than this at its speed then starts again on a new connection. */
-    Duration slowLeft = Duration.ofMinutes(10);
+    /** {@link #SLOW_AFTER}, shorter in tests. */
+    private final Duration slowAfter;
+    /** {@link #SLOW_LEFT}, shorter in tests. */
+    private final Duration slowLeft;
     /** Why the proxy setting can't be used; reported on the first request, so offline commands still work. */
     private final String proxyError;
 
@@ -63,9 +67,17 @@ public final class JdkHttp implements Http {
      * @param attempts tries per request when the network fails or the server answers 5xx
      */
     public JdkHttp(Map<String, String> env, String userAgent, Duration idle, int attempts) {
+        this(env, userAgent, idle, attempts, SLOW_AFTER, SLOW_LEFT);
+    }
+
+    /** With the slow-download limits given: tests can't wait 30 s to see one start again. */
+    JdkHttp(Map<String, String> env, String userAgent, Duration idle, int attempts, Duration slowAfter,
+            Duration slowLeft) {
         this.attempts = Math.max(1, attempts);
         this.userAgent = userAgent;
         this.idle = idle;
+        this.slowAfter = slowAfter;
+        this.slowLeft = slowLeft;
         HttpClient.Builder builder = HttpClient.newBuilder()
                 // followed by hand, so every hop is checked before anything is sent to it
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -96,6 +108,12 @@ public final class JdkHttp implements Http {
         this.proxyError = error;
         this.builder = builder;
         this.client = builder.build();
+    }
+
+    /** Closes the client's connections; a request after this fails. */
+    @Override
+    public void close() {
+        client.close();
     }
 
     private static String firstNonBlank(Map<String, String> env, String... names) {
@@ -129,8 +147,8 @@ public final class JdkHttp implements Http {
                 String credentials = rest.substring(0, at);
                 rest = rest.substring(at + 1);
                 int colon = credentials.indexOf(':');
-                user = decode(colon < 0 ? credentials : credentials.substring(0, colon));
-                password = colon < 0 ? "" : decode(credentials.substring(colon + 1));
+                user = decode(colon < 0 ? credentials : credentials.substring(0, colon), setting);
+                password = colon < 0 ? "" : decode(credentials.substring(colon + 1), setting);
             }
             int slash = rest.indexOf('/');
             if (slash >= 0) {
@@ -173,8 +191,33 @@ public final class JdkHttp implements Http {
             throw new IllegalArgumentException("proxy " + redact(setting) + ": the port isn't a number from 1 to 65535");
         }
 
-        private static String decode(String text) {
-            return URLDecoder.decode(text, StandardCharsets.UTF_8);
+        /**
+         * Percent-escapes ({@code %40} for {@code @}) decoded as UTF-8. Only those: a URL's user info
+         * isn't a form, so {@code +} stays a plus, as curl reads it.
+         */
+        static String decode(String text, String setting) {
+            if (text.indexOf('%') < 0) {
+                return text;
+            }
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            for (int i = 0; i < text.length(); ) {
+                char c = text.charAt(i);
+                if (c != '%') {
+                    int cp = text.codePointAt(i);
+                    bytes.writeBytes(new String(Character.toChars(cp)).getBytes(StandardCharsets.UTF_8));
+                    i += Character.charCount(cp);
+                    continue;
+                }
+                int hi = i + 2 < text.length() ? Character.digit(text.charAt(i + 1), 16) : -1;
+                int lo = hi < 0 ? -1 : Character.digit(text.charAt(i + 2), 16);
+                if (lo < 0) {
+                    throw new IllegalArgumentException("proxy " + redact(setting)
+                            + ": a % in the user name or password must start an escape such as %40");
+                }
+                bytes.write(hi * 16 + lo);
+                i += 3;
+            }
+            return bytes.toString(StandardCharsets.UTF_8);
         }
 
         /** The setting without its password, for messages. */
