@@ -171,7 +171,9 @@ Put the archive you downloaded, `SHA256SUMS` and `SHA256SUMS.asc` from the same 
 folder (for example `gh release download v0.4.0 --repo adriandeleon/jkit -p SHA256SUMS -p
 SHA256SUMS.asc -p 'jkit-0.4.0-linux-x64.tar.gz'`), and run these in that folder.
 
-1. Import jkit's release key, once:
+1. Import jkit's release key, once. From 0.5.0 it's on each release page as
+   `jkit-release-key.asc` (`gpg --import jkit-release-key.asc`); for any release, it's also in
+   this repository:
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/adriandeleon/jkit/main/jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc | gpg --import

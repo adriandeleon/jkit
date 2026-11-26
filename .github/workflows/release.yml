@@ -801,6 +801,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             jkit-core/src/main/java/dev/jkit/core/Signatures.java
+            jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc
             packaging/sign-linux-packages.sh
             packaging/check-linux-signatures.sh
             packaging/linux/signing-key.asc
@@ -831,6 +832,19 @@ jobs:
           export LINUX_GPG_EXPECTED_KEY=src/packaging/linux/signing-key.asc
           bash src/packaging/sign-linux-packages.sh dist
           bash src/packaging/check-linux-signatures.sh "$LINUX_GPG_EXPECTED_KEY" dist
+
+      # The public half of the key SHA256SUMS.asc is signed with, so users can check a download
+      # with what's on the release page. It must be the key jkit itself trusts (JKIT_FINGERPRINT).
+      - name: Attach jkit's release key
+        run: |
+          key=src/jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc
+          expected=$(sed -n 's/.*JKIT_FINGERPRINT = "\([0-9A-F]\{40\}\)".*/\1/p' src/jkit-core/src/main/java/dev/jkit/core/Signatures.java)
+          actual=$(gpg --batch --with-colons --import-options show-only --import "$key" | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+            echo "::error::$key is ${actual:-no key}, but JKIT_FINGERPRINT is ${expected:-missing}"
+            exit 1
+          fi
+          cp "$key" dist/jkit-release-key.asc
 
       - name: Checksums
         run: |

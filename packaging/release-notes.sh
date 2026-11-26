@@ -99,8 +99,9 @@ EOF
 esac
 cat <<EOF
 
-To check a download: \`sha256sum -c SHA256SUMS --ignore-missing\`, \`gpg --verify SHA256SUMS.asc
-SHA256SUMS\` (jkit's release key is in [SECURITY.md](https://github.com/$repo/blob/v$version/SECURITY.md)),
-and \`gh attestation verify <file> --repo $repo\`. Requirements: [Install](https://github.com/$repo/blob/v$version/README.md#install).
+To check a download: \`gpg --import jkit-release-key.asc\`, \`gpg --verify SHA256SUMS.asc SHA256SUMS\`
+(the key must be A9444E8F5048FEBCB942E110FC89EBE68C4539E6), then \`sha256sum -c SHA256SUMS --ignore-missing\`;
+[SECURITY.md](https://github.com/$repo/blob/v$version/SECURITY.md#verifying-a-download) explains each step.
+\`gh attestation verify <file> --repo $repo\` shows where a file was built. Requirements: [Install](https://github.com/$repo/blob/v$version/README.md#install).
 EOF
 } | unwrap

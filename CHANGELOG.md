@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Each release carries jkit's public key**, `jkit-release-key.asc`, so a download can be
+  checked with what's on the release page: `gpg --import jkit-release-key.asc`, then
+  `gpg --verify SHA256SUMS.asc SHA256SUMS` and `sha256sum -c SHA256SUMS --ignore-missing`.
+  SECURITY.md explains each step.
 - **`jkit env --install` (Windows) gives every program the global versions.** It sets
   `JAVA_HOME` and the other `*_HOME` variables in your user environment to jkit's global links,
   and puts their `bin` folders first on your user `PATH`, so cmd.exe, IDEs and programs started

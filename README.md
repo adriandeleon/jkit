@@ -97,6 +97,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS      # Good signature, key A9444E8F5048FE
 sha256sum -c SHA256SUMS --ignore-missing    # <file>: OK
 ```
 
+From 0.5.0 the key is also on each release page, as `jkit-release-key.asc`.
 [SECURITY.md](SECURITY.md#verifying-a-download) explains each step, gpg's "not certified" warning,
 and the macOS and Windows commands. `gh attestation verify <file> --repo adriandeleon/jkit` shows
 where a file was built. From 0.5.0, the `.deb`
