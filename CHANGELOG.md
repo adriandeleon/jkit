@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`jkit prune` keeps builds a running program uses**, such as a JVM, an IDE or a Gradle daemon,
   and says which process; `--json` lists them as `inUse`. A `jkit use` in another shell that runs
   nothing from the build still can't be seen.
+- **jkit runs on Alpine.** Each release has static Linux binaries linked against musl,
+  `jkit-<version>-linux-x64-musl.tar.gz` and `-linux-aarch64-musl.tar.gz`, which need nothing
+  from the system (they also run on glibc distributions older than the 2.34 the other builds
+  need). `jkit self-update` on a musl system picks them; before, it refused. They contain musl
+  libc and zlib, whose licenses are in `THIRD-PARTY-NOTICES`.
 - `CONTRIBUTING.md` and issue and pull request templates. The README says why you might pick jkit
   over SDKMAN, mise or asdf (and what it doesn't do), and which hosts jkit contacts, and when: no
   telemetry, no background update checks.

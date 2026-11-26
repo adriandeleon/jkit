@@ -138,14 +138,11 @@ public final class SelfUpdate {
 
     /**
      * The release SHA256SUMS describes, for {@code platform}: the .tar.gz (the .zip on Windows)
-     * named {@code jkit-<version>-<os>-<arch>}. Linux builds are glibc only.
+     * named {@code jkit-<version>-<platform>}, where a musl Linux platform ends in {@code -musl}
+     * (jkit-0.4.0-linux-x64-musl.tar.gz).
      */
     public static Release parse(String sums, Platform platform) {
-        if (platform.libc() != null && platform.libc().equals("musl")) {
-            throw new JkitException("there is no jkit build for musl Linux (Alpine)",
-                    "jkit needs glibc 2.34 or newer");
-        }
-        String suffix = "-" + platform.os() + "-" + platform.arch() + (platform.isWindows() ? ".zip" : ".tar.gz");
+        String suffix = "-" + platform.id() + (platform.isWindows() ? ".zip" : ".tar.gz");
         for (String line : sums.lines().toList()) {
             Matcher m = SUM_LINE.matcher(line.strip());
             if (!m.matches()) {
@@ -160,7 +157,7 @@ public final class SelfUpdate {
                 return new Release(Version.parse(raw), name, m.group(1).toLowerCase(Locale.ROOT));
             }
         }
-        throw new JkitException("the newest jkit release has no build for " + platform.os() + "-" + platform.arch(),
+        throw new JkitException("the newest jkit release has no build for " + platform.id(),
                 "see " + DEFAULT_BASE);
     }
 
@@ -222,7 +219,9 @@ public final class SelfUpdate {
         if (!says.equals("jkit " + release.version().raw())) {
             throw new JkitException("the new jkit binary doesn't run here (jkit --version said: "
                     + Visible.of(says.isEmpty() ? "nothing" : says) + "); nothing was changed",
-                    "Linux builds need glibc 2.34 or newer; macOS builds need macOS 15 or newer");
+                    platform.isLinux() && "musl".equals(platform.libc())
+                            ? "the musl Linux builds are static and need nothing from the system"
+                            : "Linux builds need glibc 2.34 or newer; macOS builds need macOS 15 or newer");
         }
         return binary;
     }

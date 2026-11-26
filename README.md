@@ -71,13 +71,15 @@ JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows su
 | Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository, so `apt upgrade` keeps it current ([setup](https://jkit-project.dev/install/#apt)); or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
 | Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
+| Alpine and other musl Linux (x64, arm64) | the `-linux-x64-musl` or `-linux-aarch64-musl` `.tar.gz` from the releases (from the release after 0.4.0) |
 | Anything else | a `.tar.gz` or `.zip` from the releases |
 
 Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
 anywhere on your `PATH`. From the release after 0.4.0, the Windows `.zip` also holds
 `vcruntime140.dll` and `vcruntime140_1.dll`, the Visual C++ runtime `jkit.exe` needs: keep them
 next to it, in a folder of its own. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
-(Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04, RHEL 8 or Alpine);
+(Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04 or RHEL 8); the `-musl` builds are static
+and need nothing from the system, so they also run on Alpine and on older glibc distributions;
 macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
 hyphen) are on the releases page only.
 
