@@ -290,23 +290,23 @@ final class Changes {
         return this;
     }
 
-    /** Whether nothing the user would see changed: jkit's own JKIT_* variables don't count. */
+    /**
+     * Whether nothing a program reads changed: jkit's own JKIT_* variables don't count here, though
+     * they are still printed, as every change to the shell is.
+     */
     boolean isEmpty() {
         return changes.stream().allMatch(Changes::bookkeeping);
     }
 
     /**
      * Whether a change is jkit's own bookkeeping in the shell (JKIT_PROJECT, JKIT_SHELL_JDK,
-     * JKIT_USER_JDK...): it changes nothing the user's programs read, so only --json lists it.
+     * JKIT_USER_JDK...), which no other program reads.
      */
     private static boolean bookkeeping(Change c) {
         return c.kind().equals("env") && c.name().startsWith("JKIT_");
     }
 
-    /**
-     * Indented lines: one per change (cached files folded into one line, jkit's own JKIT_*
-     * variables left out), then the notes.
-     */
+    /** Indented lines: one per change (cached files folded into one line), then the notes. */
     void print(PrintStream out) {
         int listsCreated = 0;
         int listsUpdated = 0;
@@ -314,9 +314,6 @@ final class Changes {
         Set<String> hosts = new LinkedHashSet<>();
         Path index = ctx.home.index().toAbsolutePath();
         for (Change c : changes) {
-            if (bookkeeping(c)) {
-                continue;
-            }
             if (named != null && c.kind().equals("folder") && c.action().equals("create")
                     && named.startsWith(Path.of(c.name()).normalize())) {
                 continue; // the message names this folder, or one inside it

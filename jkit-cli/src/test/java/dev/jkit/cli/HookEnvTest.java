@@ -153,7 +153,7 @@ class HookEnvTest {
                 .doesNotContainKey("JKIT_PROJECT_JDK").doesNotContainKey("JKIT_PROJECT");
         assertThat(env.get("PATH")).doesNotContain(temurin21.toString());
         assertThat(said()).contains("jkit: left the project in").contains("back to the global versions")
-                .doesNotContain("JKIT_PROJECT").contains("PATH   - " + temurin21.resolve("bin"));
+                .contains("unset  JKIT_PROJECT_JDK").contains("PATH   - " + temurin21.resolve("bin"));
         assertThat(cd(elsewhere)).isEmpty();
     }
 
@@ -163,7 +163,7 @@ class HookEnvTest {
         env.put("JAVA_HOME", "/opt/my-jdk");
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", temurin21.toString()).containsEntry("JKIT_USER_JDK", "/opt/my-jdk");
-        assertThat(said()).doesNotContain("set    JKIT_").contains("your own JAVA_HOME is kept in JKIT_USER_JDK");
+        assertThat(said()).contains("set    JKIT_USER_JDK=/opt/my-jdk").contains("your own JAVA_HOME is kept in JKIT_USER_JDK");
         cd(elsewhere);
         assertThat(env).containsEntry("JAVA_HOME", "/opt/my-jdk").doesNotContainKey("JKIT_USER_JDK");
         assertThat(env.get("PATH")).doesNotContain(temurin21.toString());
@@ -195,7 +195,7 @@ class HookEnvTest {
         assertThat(said()).isEmpty(); // looked again, nothing new: quiet
         cd(elsewhere); // leaving: nothing had changed, but jkit's note of the project goes, and that is said
         assertThat(said()).contains("left the project in").contains("it had changed no versions")
-                .doesNotContain("JKIT_PROJECT");
+                .contains("unset  JKIT_PROJECT");
         assertThat(env).doesNotContainKey("JKIT_PROJECT");
         cd(project);
         Path jdk11 = install("jdk", "11.0.25+9-temurin", "version=11.0.25+9\nvendor=temurin\n");
@@ -236,7 +236,7 @@ class HookEnvTest {
         Files.writeString(project.resolve("jkit.toml"), "[tools\njdk = \"21\"\n");
         cd(project);
         assertThat(said()).startsWith("jkit: ").contains("jkit.toml").contains("this shell's versions are unchanged")
-                .doesNotContain("JKIT_PROJECT=");
+                .contains("set    JKIT_PROJECT=");
         assertThat(env).containsEntry("JAVA_HOME", home.resolve("global/jdk").toString()).containsKey("JKIT_PROJECT");
         assertThat(cd(project)).isEmpty();
         assertThat(said()).isEmpty();

@@ -63,7 +63,7 @@ class ChangesTest {
     }
 
     @Test
-    void jkitsOwnVariablesAreOnlyInTheJson() {
+    void jkitsOwnVariablesArePrintedButDontCountAsAChange() {
         Context ctx = context(Map.of("JKIT_GRAALVM_FOLLOWS_JDK", "1", "PATH", "/usr/bin"));
         Map<String, String> updates = new LinkedHashMap<>();
         updates.put("JKIT_GRAALVM_FOLLOWS_JDK", null);
@@ -74,10 +74,9 @@ class ChangesTest {
 
         Changes changes = new Changes(ctx).env(updates);
 
-        assertThat(print(changes)).isEqualTo("""
-                  set    JAVA_HOME=/j/tools/jdk/21
-                  PATH   + /j/tools/jdk/21/bin
-                """);
+        // every change to the shell is printed, jkit's own variables included
+        assertThat(print(changes)).contains("unset  JKIT_GRAALVM_FOLLOWS_JDK", "set    JKIT_PROJECT=/p/jkit.toml:1795667886909",
+                "set    JKIT_PROJECT_JDK=/j/tools/jdk/21", "set    JAVA_HOME=/j/tools/jdk/21", "PATH   + /j/tools/jdk/21/bin");
         assertThat(changes.json()).hasSize(5);
         assertThat(changes.isEmpty()).isFalse();
         Map<String, String> onlyJkits = new HashMap<>();
