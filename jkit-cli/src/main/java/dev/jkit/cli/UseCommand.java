@@ -64,7 +64,7 @@ final class UseCommand implements Callable<Integer> {
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
             throw new JkitException("the jkit shell hook is not active, so this shell can't be changed",
-                    "load it in new shells: " + Changes.HOOK_SETUP,
+                    Changes.hookHint(ctx),
                     "or set the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText) + " --global",
                     "or run one command with it: jkit exec " + spec + (vendorText == null ? "" : " " + vendorText) + " -- <command>");
         }

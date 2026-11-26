@@ -137,8 +137,8 @@ final class ProjectShell {
         report.env(plan.changes());
         // not in a shell whose hook can't switch on cd: turning auto_switch on there only adds a warning
         if (plan.applies() && !ctx.config.autoSwitch() && Changes.shellWithoutAutoSwitch(ctx) == null) {
-            report.note("to switch to a project's versions on cd: add auto_switch = true under [shell] in "
-                    + Changes.tilde(ctx.home.config().toString()) + ", then open a new shell");
+            report.note("to switch to a project's versions on cd: jkit config set shell.auto_switch true, "
+                    + "then open a new shell");
         }
     }
 

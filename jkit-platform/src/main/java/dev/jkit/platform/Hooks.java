@@ -36,8 +36,10 @@ final class Hooks {
                   # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
                   case $__jkit_t in sbt) __jkit_h=${SBT_HOME-} ;; gradle) __jkit_h=${GRADLE_HOME-} ;;
                     maven) __jkit_h=${MAVEN_HOME-} ;; *) __jkit_h=${JAVA_HOME-} ;; esac
+                  # without a trailing /, so PATH gets /x/jdk/bin as jkit writes it, not /x/jdk//bin
+                  __jkit_h=${__jkit_h%%/}
                   __jkit_b="$__jkit_g/$__jkit_t/bin"
-                  case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t"|"$__jkit_g/$__jkit_t/") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
+                  case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
                   case ":$PATH:" in *":$__jkit_b:"*) ;; *) PATH="$__jkit_b:$PATH" ;; esac
                 done
                 export PATH
@@ -141,8 +143,10 @@ final class Hooks {
                   set -l v (string upper -- $t)_HOME
                   test $t = jdk; and set v JAVA_HOME
                   set -l h $$v
+                  # without a trailing /, so PATH gets /x/jdk/bin as jkit writes it, not /x/jdk//bin
+                  test -n "$h"; and set h (string trim -r -c / -- "$h")
                   set -l b $__jkit_g/$t/bin
-                  if test -n "$h"; and not contains -- "$h" $__jkit_g/$t $__jkit_g/$t/; and test -d "$h/bin"
+                  if test -n "$h"; and not contains -- "$h" $__jkit_g/$t; and test -d "$h/bin"
                     set b "$h/bin"
                   end
                   contains -- $b $PATH; or set -gx PATH $b $PATH
@@ -203,7 +207,9 @@ final class Hooks {
                     $bin = Join-Path (Join-Path $g $pair[0]) 'bin'
                     # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
                     $own = [Environment]::GetEnvironmentVariable($pair[1])
-                    if ($own -and $own.TrimEnd('\\', '/') -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
+                    # without a trailing slash or backslash, so its bin goes on PATH as jkit writes it
+                    if ($own) { $own = $own.TrimEnd('\\', '/') }
+                    if ($own -and $own -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
                       $bin = Join-Path $own 'bin'
                     }
                     if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }

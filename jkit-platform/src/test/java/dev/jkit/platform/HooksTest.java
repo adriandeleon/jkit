@@ -68,6 +68,52 @@ class HooksTest {
                         + ":" + root.resolve("global/sbt/bin") + ":/usr/bin:/bin");
     }
 
+    /** A JAVA_HOME written with a trailing slash puts its bin on PATH as jkit writes it: no //. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookDropsATrailingSlashFromTheUsersJavaHome() throws Exception {
+        Path root = tmp.resolve("home/.jkit");
+        Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, "set -u\n" + Hooks.posix("bash", root) + "\nprintf '%s\\n' \"$PATH\"\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("JAVA_HOME", mine + "/");
+        pb.environment().put("PATH", "/usr/bin:/bin");
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out).as(out).startsWith(mine.resolve("bin") + ":").doesNotContain("//");
+    }
+
+    /** The same in PowerShell, where the hook trims the slash or backslash. */
+    @Test
+    void powershellHookDropsATrailingSlashFromTheUsersJavaHome() throws Exception {
+        Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
+        String script = Hooks.powershell(tmp.resolve("root"), null) + "\n$env:PATH\n";
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        int ran = 0;
+        for (String shell : new String[] {"powershell", "pwsh"}) {
+            ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
+                    .redirectErrorStream(true);
+            withoutToolHomes(pb);
+            pb.environment().put("JAVA_HOME", mine + File.separator);
+            Process p;
+            try {
+                p = pb.start();
+            } catch (IOException notInstalled) {
+                continue;
+            }
+            ran++;
+            p.getOutputStream().close();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
+            assertThat(out).as(shell).startsWith(mine.resolve("bin") + File.pathSeparator);
+        }
+        assumeTrue(ran > 0, "no PowerShell on this machine");
+    }
+
     private static void withoutToolHomes(ProcessBuilder pb) {
         for (String v : new String[] {"JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME", "SBT_HOME", "GRAALVM_HOME",
                 "PROMPT_COMMAND", "JKIT_PROJECT", "JKIT_ENV_FILE"}) {

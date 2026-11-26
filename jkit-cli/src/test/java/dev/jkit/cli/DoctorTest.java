@@ -125,6 +125,16 @@ class DoctorTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aTemporaryFileNextToALinkedStartupFileIsReported() throws Exception {
+        Path dotfiles = Files.createDirectories(tmp.resolve("user/dotfiles"));
+        Files.createSymbolicLink(tmp.resolve("user/.bashrc"), Files.writeString(dotfiles.resolve("bashrc"), ""));
+        Path left = Files.writeString(dotfiles.resolve(".bashrc.81.jkit-tmp"), "half");
+        assertThat(of(run(), "temp-files")).extracting(Finding::message)
+                .containsExactly("a temporary file an interrupted jkit write left: " + Changes.tilde(left.toString()));
+    }
+
+    @Test
     void missingHookSaysWhatToAddForTheUsersShell() {
         env.remove("JKIT_SHELL");
         env.put("SHELL", "/usr/bin/zsh");
