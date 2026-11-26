@@ -204,6 +204,22 @@ public final class ShellEnv {
         return out;
     }
 
+    /**
+     * Gives a shell whose {@code tool} *_HOME is unset the global link, as the hook does when it
+     * loads: *_HOME names the link, and its bin goes first on PATH unless PATH has it already.
+     * For a first install in a shell whose hook loaded before there was anything to link to.
+     */
+    public static Map<String, String> global(Map<String, String> env, JkitHome home, Tool tool) {
+        Map<String, String> out = new LinkedHashMap<>();
+        out.put(tool.homeVariable(), home.global(tool).toString());
+        String bin = home.global(tool).resolve("bin").toString();
+        if (tool.onPath() && !onPath(env, bin)) {
+            String path = env.getOrDefault("PATH", "");
+            out.put("PATH", path.isEmpty() ? bin : bin + File.pathSeparator + path);
+        }
+        return out;
+    }
+
     /** Per tool, the install this shell has: its own choice, else the project's. */
     private static Map<Tool, String> active(Map<String, String> env) {
         Map<Tool, String> active = new EnumMap<>(Tool.class);

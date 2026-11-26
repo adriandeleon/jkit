@@ -63,7 +63,7 @@ class ChangesTest {
     }
 
     @Test
-    void globalEffectWarnsAboutAShellChoice() {
+    void globalEffectWarnsAboutAShellChoice() throws Exception {
         Context ctx = context(Map.of("JKIT_SHELL", "bash", "JKIT_SHELL_JDK", "/x/jdk"));
         String out = print(new Changes(ctx).globalEffect(Tool.JDK));
         assertThat(out).contains("new shells with the jkit hook: JAVA_HOME=").contains("PATH includes")
@@ -71,23 +71,54 @@ class ChangesTest {
     }
 
     @Test
-    void globalEffectSaysThisShellFollowsTheLink() {
+    void globalEffectSaysThisShellFollowsTheLink() throws Exception {
         Context ctx = context(Map.of("JKIT_SHELL", "bash", "JAVA_HOME", home.resolve("global/jdk").toString()));
         assertThat(print(new Changes(ctx).globalEffect(Tool.JDK))).contains("this shell follows it already");
     }
 
     @Test
-    void globalEffectWarnsAboutAHomeVariableSetOutsideJkit() {
+    void globalEffectWarnsAboutAHomeVariableSetOutsideJkit() throws Exception {
         Context ctx = context(Map.of("JKIT_SHELL", "bash", "JAVA_HOME", "/usr/lib/jvm/java-17"));
         assertThat(print(new Changes(ctx).globalEffect(Tool.JDK)))
                 .contains("warning: JAVA_HOME=/usr/lib/jvm/java-17 is set outside jkit");
     }
 
     @Test
-    void globalEffectWithoutTheHook() {
+    void globalEffectWithoutTheHook() throws Exception {
         Context ctx = context(Map.of());
         String out = print(new Changes(ctx).globalEffect(Tool.GRAALVM));
         assertThat(out).doesNotContain("PATH includes").contains("the jkit hook is not loaded");
+    }
+
+    @Test
+    void aFirstInstallSetsTheUnsetHomeInAShellWithTheHook() throws Exception {
+        Path link = Files.createDirectories(home.resolve("global")).resolve("jdk");
+        Files.createSymbolicLink(link, Files.createDirectories(home.resolve("tools/jdk/21")));
+        Path envFile = home.resolve("env.sh");
+        Context ctx = context(Map.of("JKIT_SHELL", "bash", "JKIT_ENV_FILE", envFile.toString(),
+                "PATH", link.resolve("bin") + File.pathSeparator + "/usr/bin"));
+
+        String out = print(new Changes(ctx).globalEffect(Tool.JDK));
+
+        // the hook loaded before there was a link, so it set no JAVA_HOME: jkit sets it now, and says so
+        assertThat(out).contains("set    JAVA_HOME=" + link).doesNotContain("PATH   +").doesNotContain("jkit reset");
+        assertThat(Files.readString(envFile)).startsWith("export JAVA_HOME=").contains(link.toString())
+                .doesNotContain("PATH");
+    }
+
+    @Test
+    void anUnsetHomeWithoutTheHooksFileGetsAHintThatWorks() throws Exception {
+        Context ctx = context(Map.of("JKIT_SHELL", "bash"));
+        String out = print(new Changes(ctx).globalEffect(Tool.JDK));
+        assertThat(out).contains("JAVA_HOME is not set in this shell; open a new shell, or: eval \"$(jkit env)\"")
+                .doesNotContain("jkit reset");
+    }
+
+    @Test
+    void globalEffectInAProjectSaysTheProjectsVersionStays() throws Exception {
+        Context ctx = context(Map.of("JKIT_SHELL", "bash", "JKIT_PROJECT_JDK", "/x/jdk", "JAVA_HOME", "/x/jdk"));
+        assertThat(print(new Changes(ctx).globalEffect(Tool.JDK)))
+                .contains("this shell keeps the project's jdk").doesNotContain("set outside jkit");
     }
 
     @Test

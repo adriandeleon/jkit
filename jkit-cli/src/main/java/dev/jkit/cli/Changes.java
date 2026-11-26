@@ -6,6 +6,7 @@ import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -181,9 +182,11 @@ final class Changes {
     /**
      * After the global link for {@code tool} moved: which variables follow it in new shells, and
      * whether this shell picks it up, keeps its own choice, or is overridden by a variable set
-     * outside jkit.
+     * outside jkit. A shell with the hook whose *_HOME is unset, and no choice of jkit's, gets the
+     * global link now, through the hook's file: the hook only sets it when it loads, and on a
+     * first install there was nothing to link to then.
      */
-    Changes globalEffect(Tool tool) {
+    Changes globalEffect(Tool tool) throws IOException {
         JkitHome home = ctx.home;
         String link = tilde(home.global(tool));
         String var = tool.homeVariable();
@@ -197,10 +200,15 @@ final class Changes {
             note("for programs started outside PowerShell (cmd.exe, IDEs) too: jkit env --install");
         }
         String shellChoice = ctx.env.get(ShellEnv.stateVariable(tool));
+        String projectChoice = ctx.env.get(ShellEnv.projectVariable(tool));
         String current = ctx.env.get(var);
+        String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (shellChoice != null && !shellChoice.isBlank()) {
             note("this shell keeps its own " + tool + " (" + tilde(Path.of(shellChoice))
                     + "); to follow the global one: jkit reset " + tool);
+        } else if (projectChoice != null && !projectChoice.isBlank() && current != null && !current.isBlank()) {
+            note("this shell keeps the project's " + tool + " (" + tilde(Path.of(projectChoice))
+                    + ") while it is in the project");
         } else if (Fs.path(current) != null && Fs.path(current).toAbsolutePath().normalize()
                 .equals(home.global(tool).toAbsolutePath().normalize())) {
             note("this shell follows it already: " + var + "=" + link);
@@ -210,8 +218,12 @@ final class Changes {
         } else if (ctx.env.get("JKIT_SHELL") == null) {
             note("the jkit hook is not loaded in this shell, so nothing sets " + var
                     + "; load it in new shells: " + HOOK_SETUP);
+        } else if (envFile != null && !ShellEnv.hasChoice(ctx.env, tool)) {
+            Map<String, String> updates = ShellEnv.global(ctx.env, home, tool);
+            ProjectShell.writeEnvFile(ctx, envFile, updates);
+            env(updates);
         } else {
-            note(var + " is not set in this shell yet; open a new shell, or: jkit reset " + tool);
+            note(var + " is not set in this shell; open a new shell, or: eval \"$(jkit env)\"");
         }
         return this;
     }
