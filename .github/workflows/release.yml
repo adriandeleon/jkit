@@ -64,6 +64,7 @@ jobs:
             graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_macos-aarch64_bin.tar.gz
             graalvm_sha256: 54369d4a5931a5a2101c7c52444a4e7e6647a3a4e041335053cda6fd22295e0c
             profiles: native
+            macos_target: '14.0'
           - runner: macos-15-intel
             platform: macos-x64
             arch: x86_64
@@ -71,6 +72,7 @@ jobs:
             graalvm_url: https://github.com/bell-sw/LibericaNIK/releases/download/jdk-25.0.5.0.3%2B6/bellsoft-liberica-vm-openjdk25.0.5.0.3%2B6-25.0.5.0.3%2B1-macos-amd64.tar.gz
             graalvm_sha256: 3c6d64062b7795849f76f209a8e571e5a7205ac482b40ef511f150ef83bb729e
             profiles: native
+            macos_target: '14.0'
           # No windows-aarch64: GraalVM has no native-image for Windows on ARM, and winget
           # installs this x64 build there instead, which runs under emulation.
           - runner: windows-2025
@@ -123,6 +125,17 @@ jobs:
           echo "GRAALVM_HOME=$home" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$home" >> "$GITHUB_ENV"
           echo "$home${{ matrix.exe && '\bin' || '/bin' }}" >> "$GITHUB_PATH"
+
+      # The oldest macOS the binary runs on. Without it the linker uses the runner's own version
+      # (15), and older Macs refuse the binary. jkit-cli/pom.xml passes it on to native-image's
+      # linker (-E); the smoke test checks the binary's minos.
+      - name: Set the macOS deployment target
+        if: runner.os == 'macOS'
+        env:
+          MACOS_TARGET: ${{ matrix.macos_target }}
+        run: |
+          [ -n "$MACOS_TARGET" ] || { echo "::error::no macos_target for this platform"; exit 1; }
+          echo "MACOSX_DEPLOYMENT_TARGET=$MACOS_TARGET" >> "$GITHUB_ENV"
 
       - name: Set the version from the tag
         run: |
@@ -223,7 +236,13 @@ jobs:
           if command -v file > /dev/null; then file "$jkit"; fi
           if [ "$RUNNER_OS" = macOS ]; then
             lipo -archs jkit-cli/target/jkit | grep -Fx "${{ matrix.arch }}"
-            otool -l jkit-cli/target/jkit | grep -A3 LC_BUILD_VERSION | grep minos
+            # the oldest macOS it runs on: the deployment target, not the runner's version
+            minos=$(otool -l jkit-cli/target/jkit | awk '/LC_BUILD_VERSION/ { b = 1 } b && $1 == "minos" { print $2; exit }')
+            echo "minos $minos"
+            if [ "$minos" != "$MACOSX_DEPLOYMENT_TARGET" ]; then
+              echo "::error::the binary needs macOS $minos, not $MACOSX_DEPLOYMENT_TARGET (MACOSX_DEPLOYMENT_TARGET)"
+              exit 1
+            fi
           fi
 
       # jkit.exe links the Visual C++ runtime (VCRUNTIME140.dll and VCRUNTIME140_1.dll), which
