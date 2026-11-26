@@ -37,6 +37,16 @@
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>
+    <!-- also on the classpath through jkit-core; declared because jkit-cli uses them itself
+         (JsonOut, and the TOML types ProjectFile.parseToml returns) -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.tomlj</groupId>
+      <artifactId>tomlj</artifactId>
+    </dependency>
   </dependencies>
 
   <build>
@@ -70,10 +80,19 @@
               <version>${picocli.version}</version>
             </path>
           </annotationProcessorPaths>
-          <compilerArgs combine.children="append">
-            <arg>-Aproject=${project.groupId}/${project.artifactId}</arg>
-          </compilerArgs>
         </configuration>
+        <executions>
+          <!-- picocli-codegen reads -Aproject only for the main classes; testCompile would warn
+               that no processor recognized it -->
+          <execution>
+            <id>default-compile</id>
+            <configuration>
+              <compilerArgs combine.children="append">
+                <arg>-Aproject=${project.groupId}/${project.artifactId}</arg>
+              </compilerArgs>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

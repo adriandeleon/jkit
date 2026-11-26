@@ -39,7 +39,8 @@ final class ArchiveScan {
      * {@code maxEntries} entries, at most {@code maxBytes} of data in all.
      */
     static void tarGz(Path archive, int maxEntries, long maxBytes) throws IOException {
-        try (InputStream in = new GzipCompressorInputStream(new BufferedInputStream(Files.newInputStream(archive)), true)) {
+        try (InputStream in = GzipCompressorInputStream.builder()
+                .setInputStream(new BufferedInputStream(Files.newInputStream(archive))).setDecompressConcatenated(true).get()) {
             byte[] header = new byte[512];
             int entries = 0;
             long total = 0;
