@@ -26,7 +26,7 @@ class FallbackTest {
         assertThat(print(CP437, false, "installed temurin 21 \u2192 ~/.jkit/tools/jdk/21"))
                 .isEqualTo("installed temurin 21 -> ~/.jkit/tools/jdk/21");
         assertThat(print(CP437, false, "\u2713 \u25cb \u25cf \u203e \u2193 \u2026 \u2013"))
-                .isEqualTo("+ o * ~ v ... -");
+                .isEqualTo("+ o @ ~ v ... -");
         // what 437 has stays as it is: \u00e9, \u00b7 and box drawing
         assertThat(print(CP437, false, "Jos\u00e9 \u00b7 \u2500")).isEqualTo("Jos\u00e9 \u00b7 \u2500");
         // anything else is still ?, a character past U+FFFF once, not once per half
