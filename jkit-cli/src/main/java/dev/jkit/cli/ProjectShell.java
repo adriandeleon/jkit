@@ -8,18 +8,25 @@ import dev.jkit.core.TextFiles;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Project-file steps shared by pin, unpin and sync: which file to edit, and applying a project to this shell. */
 final class ProjectShell {
@@ -48,12 +55,32 @@ final class ProjectShell {
      * Writes the shell code the hook sources next. For PowerShell with a UTF-8 byte-order mark:
      * Windows PowerShell 5.1 reads a script without one in the ANSI code page, which garbles
      * C:\\Users\\José in JAVA_HOME and PATH.
+     *
+     * <p>The bash, zsh and fish hooks make the file with mktemp (readable by its owner only), and
+     * it is written as it is. The PowerShell hook only names one, in the temp folder: jkit creates
+     * it, as a new file (never through something put there under that name), and on Linux and
+     * macOS readable by its owner only, since that folder is /tmp, which every user can list.
      */
     static void writeEnvFile(Context ctx, String envFile, Map<String, String> changes) throws IOException {
         String shell = ctx.env.getOrDefault("JKIT_SHELL", "bash");
         String text = ShellEnv.format(changes, shell);
         boolean pwsh = shell.equals("pwsh") || shell.equals("powershell");
-        Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, StandardCharsets.UTF_8);
+        byte[] bytes = (pwsh ? "\uFEFF" + text : text).getBytes(StandardCharsets.UTF_8);
+        Path file = Path.of(envFile);
+        if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            Files.write(file, bytes);
+            return;
+        }
+        FileAttribute<?>[] ownerOnly = Perms.posix()
+                ? new FileAttribute<?>[] {PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))}
+                : new FileAttribute<?>[0];
+        try (SeekableByteChannel out = Files.newByteChannel(file,
+                Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), ownerOnly)) {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) {
+                out.write(buffer);
+            }
+        }
     }
 
     /**

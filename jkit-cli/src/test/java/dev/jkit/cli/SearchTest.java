@@ -113,8 +113,9 @@ class SearchTest {
 
     @Test
     void aVendorThatStoppedUpdatingAReleaseIsMarkedBehind(@TempDir Path tmp) throws Exception {
+        // the newest update counts once two vendors have it
         List<String> pkgs = List.of(foojayPkg("o21", "oracle_open_jdk", "21.0.2+13"),
-                foojayPkg("t21", "temurin", "21.0.9+10"));
+                foojayPkg("t21", "temurin", "21.0.9+10"), foojayPkg("z21", "zulu", "21.0.9+10"));
         String rows = search(tmp.resolve("a"), "jdk@21", null, false, pkgs, List.of());
         assertThat(rows).contains("openjdk          21.0.2+13").contains("↓ behind: newest 21 is 21.0.9+10")
                 .contains("↓ behind: the vendor stopped updating this release; other vendors have newer builds");

@@ -50,15 +50,16 @@ graalvm = { version = "25", vendor = "graalvm-ce" }
 
 jkit reads these so existing repositories work unchanged, and never writes them. Several in one
 folder are read together: the first file in this list that mentions a tool decides it, even when
-jkit can't read that entry (a later file doesn't stand in for it). Within `.sdkmanrc` and
-`.tool-versions`, the first line for a tool decides, and a later one is ignored with a warning.
+jkit can't read that entry (a later file doesn't stand in for it). Within `.sdkmanrc` the last
+line for a tool decides, as `sdk env` runs `sdk use` for each line in turn; within `.tool-versions`
+the first one does, as in asdf. The other is ignored with a warning.
 Hints and warnings name the file that set each tool.
 
 | File | Example | Notes |
 |---|---|---|
 | `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9` | SDKMAN's vendor suffixes map to jkit's vendors (`tem` temurin, `zulu`, `amzn` corretto, `librca` liberica, `ms` microsoft, `sapmchn` sapmachine, `sem` semeru, `graalce` graalvm-ce, `graal` graalvm, `nik` liberica-nik, `mandrel`, `oracle`, `open` openjdk, `kona`, `albba` dragonwell, `jbr` jetbrains, `trava` trava, `bsg` bisheng). `21.0.5.fx-zulu` means a JavaFX build. Other candidates are skipped with one warning. |
 | `.tool-versions` (asdf, mise) | `java temurin-21.0.5+11.0.LTS`, `maven 3.9.9` | asdf names map to jkit's (`adoptopenjdk` temurin, `graalvm-community` graalvm-ce, …). Only the first version on a line counts. `system`, `ref:` and `path:` are skipped. Corretto's `21.0.5.11.1` reads as 21.0.5 (`8.432.06.1` as 8.0.432), Semeru's `_openj9-…` is dropped, `mandrel-23.1.5.0-Final-java21` is Mandrel for Java 21, `-javafx` / `-fx` asks for JavaFX, and `-jre`, `-lite` and `-musl` are pinned as the full JDK with a warning (the C library follows the machine). A Zulu release number (`zulu-21.38.21`) pins only the major, with a warning: write the Java version (`zulu-21.0.5`) to be exact. `semeru-certified` is pinned as open Semeru, with a warning. Old GraalVM release ids (`graalvm-22.3.0+java17`) are skipped, and an unknown vendor gets a warning. |
-| `.java-version` | `21`, `17.0.2`, `temurin64-21.0.5` | jdk only; `1.8` reads as 8, and a plain number means any vendor. jenv's names (`<vendor>64-<version>`) pin that vendor, read like `.tool-versions` ids (`corretto64-21` is Corretto 21); `openjdk64-17.0.2` pins 17.0.2 from any vendor, since jenv gives that name to any build that only says OpenJDK. |
+| `.java-version` | `21`, `17.0.2`, `temurin64-21.0.5` | jdk only; `1.8` reads as 8, and a plain number means any vendor. jenv's names (`<vendor>64-<version>`) pin that vendor, read like `.tool-versions` ids (`corretto64-21` is Corretto 21); `openjdk64-17.0.2` pins 17.0.2 from any vendor, since jenv gives that name to any build that only says OpenJDK. `oracle64-1.8.0.202` and other Oracle JDK 8 and 11 names are skipped with a warning: Oracle offers those only after a sign-in, so jkit can't install them. |
 
 ## Which file applies
 

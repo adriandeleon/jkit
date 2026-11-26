@@ -62,23 +62,50 @@ public final class SelfUpdate {
             this.command = command;
         }
 
-        /** The command that updates this kind of install to {@code release}; null for an archive (jkit does it). */
-        public String command(Release release, Platform platform) {
+        /**
+         * Whether the command needs the release's signed SHA256SUMS: an .rpm or .deb installed from
+         * a file, which dnf and apt don't check a signature of (dnf's localpkg_gpgcheck is off by
+         * default, and apt checks only its repositories), so the command checks the file's hash.
+         */
+        public boolean needsSignedSums() {
+            return this == RPM || this == DEB_FILE;
+        }
+
+        /** The .rpm or .deb this kind of install updates from, as the release publishes it; null for the others. */
+        public String packageFile(Release release, Platform platform) {
             // the packages' versions have "~" for "-" (1.2.0~rc.1), which GitHub's asset names turn into "."
             String pkgVersion = release.version().raw().replace('-', '.');
             boolean arm = platform.arch().equals("aarch64");
-            if (this == RPM) {
-                return "sudo dnf install " + release.url(DEFAULT_BASE,
-                        "jkit-" + pkgVersion + "-1." + (arm ? "aarch64" : "x86_64") + ".rpm");
+            return switch (this) {
+                case RPM -> "jkit-" + pkgVersion + "-1." + (arm ? "aarch64" : "x86_64") + ".rpm";
+                case DEB_FILE -> "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
+                default -> null;
+            };
+        }
+
+        /**
+         * The command that updates this kind of install to {@code release}; null for an archive
+         * (jkit does it). For an .rpm or .deb from a file, {@code sums} is the release's
+         * SHA256SUMS, which the caller has checked the signature of ({@link #requireSigned}): the
+         * command downloads the package into a new folder of the user's own and installs it only if
+         * its SHA-256 is the one listed there. A new folder, not a fixed name in /tmp: another user
+         * could create that file first, writable by them, and swap in their own package before sudo
+         * reads it.
+         */
+        public String command(Release release, Platform platform, String sums) {
+            String file = packageFile(release, platform);
+            if (file == null) {
+                return command;
             }
-            if (this == DEB_FILE) {
-                String file = "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
-                // a new folder of the user's own, not a fixed name in /tmp: another user could create
-                // that file first, writable by them, and swap in their own .deb before sudo apt reads it
-                return "d=$(mktemp -d) && curl -fLo \"$d/" + file + "\" " + release.url(DEFAULT_BASE, file)
-                        + " && sudo apt install \"$d/" + file + "\"";
+            String sha256 = SelfUpdate.sha256(sums, file);
+            if (sha256 == null) {
+                throw new JkitException("jkit " + release.version() + " has no " + file + " in its SHA256SUMS",
+                        "see " + DEFAULT_BASE);
             }
-            return command;
+            String path = "\"$d/" + file + "\"";
+            return "d=$(mktemp -d) && curl -fLo " + path + " " + release.url(DEFAULT_BASE, file)
+                    + " && echo '" + sha256 + "  '" + path + " | sha256sum -c -"
+                    + " && sudo " + (this == RPM ? "dnf" : "apt") + " install " + path;
         }
 
         public String id() {
@@ -129,6 +156,17 @@ public final class SelfUpdate {
             throw new JkitException(what + " isn't signed by jkit's release key (" + result.detail()
                     + "); nothing was changed", hint);
         }
+    }
+
+    /** The SHA-256 {@code sums} lists for exactly {@code file}, lower case; null when it lists none. */
+    static String sha256(String sums, String file) {
+        for (String line : sums.lines().toList()) {
+            Matcher m = SUM_LINE.matcher(line.strip());
+            if (m.matches() && m.group(2).equals(file)) {
+                return m.group(1).toLowerCase(Locale.ROOT);
+            }
+        }
+        return null;
     }
 
     /** Where the newest release's SHA256SUMS is. */
@@ -188,12 +226,17 @@ public final class SelfUpdate {
         return Kind.ARCHIVE;
     }
 
-    /** Whether {@code latest} is newer than {@code current}; an unreadable current version counts as older. */
+    /**
+     * Whether {@code latest} is newer than {@code current}; an unreadable current version counts as
+     * older. A pre-release is newer only than a pre-release: a release candidate marked as the
+     * latest release, by mistake or not, mustn't move everyone on a release onto it.
+     */
     public static boolean newer(Release latest, String current) {
-        if (current == null || !Version.isSafeText(current)) {
-            return true;
+        boolean readable = current != null && Version.isSafeText(current);
+        if (latest.version().isPreRelease() && !(readable && Version.parse(current).isPreRelease())) {
+            return false;
         }
-        return latest.version().compareTo(Version.parse(current)) > 0;
+        return !readable || latest.version().compareTo(Version.parse(current)) > 0;
     }
 
     /**

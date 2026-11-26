@@ -491,7 +491,8 @@ class InstallerTest {
             other.start();
             Installer.Result result = new Installer(home, counting, said::add).install(build, Http.Progress.NONE,
                     Installer.Verification.REQUIRED);
-            assertThat(said).containsExactly("another jkit is installing " + build.label() + "; waiting for it to finish…");
+            assertThat(said).containsExactly("another jkit is installing " + build.label()
+                    + "; waiting for it to finish… (Ctrl-C to stop)");
             assertThat(result.fresh()).isFalse();
             assertThat(downloads[0]).isZero();
         } finally {
@@ -506,6 +507,34 @@ class InstallerTest {
                     Installer.Verification.REQUIRED).fresh()).isTrue();
         } finally {
             WorkDirs.remove(different);
+        }
+    }
+
+    @Test
+    void anInstallWaitsOnlyForTheSameBuildNotOneWhoseNameStartsTheSame() throws Exception {
+        Path tmpDir = Files.createDirectories(tmp.resolve("home/tmp"));
+        String zulu = "install-jdk-" + Installed.dirName(Version.parse("21.0.9+10"), Vendor.of("zulu"), false) + "-";
+        String zuluFx = "install-jdk-" + Installed.dirName(Version.parse("21.0.9+10"), Vendor.of("zulu"), true) + "-";
+        String maven = "install-maven-" + Installed.dirName(Version.parse("4.0.0"), null, false) + "-";
+        String mavenRc = "install-maven-" + Installed.dirName(Version.parse("4.0.0-rc-4"), null, false) + "-";
+        // another jkit downloading the JavaFX build, and a Maven release candidate
+        Path fx = WorkDirs.create(tmpDir, zuluFx);
+        Path rc = WorkDirs.create(tmpDir, mavenRc);
+        try {
+            assertThat(fx.getFileName().toString()).startsWith(zulu); // what the old check took for the plain build
+            assertThat(Installer.downloading(tmpDir, zulu)).isFalse();
+            assertThat(Installer.downloading(tmpDir, maven)).isFalse();
+            assertThat(Installer.downloading(tmpDir, zuluFx)).isTrue();
+            assertThat(Installer.downloading(tmpDir, mavenRc)).isTrue();
+            Path plain = WorkDirs.create(tmpDir, zulu);
+            try {
+                assertThat(Installer.downloading(tmpDir, zulu)).isTrue();
+            } finally {
+                WorkDirs.remove(plain);
+            }
+        } finally {
+            WorkDirs.remove(fx);
+            WorkDirs.remove(rc);
         }
     }
 

@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -206,14 +207,28 @@ public final class FoojaySource {
     }
 
     /**
+     * The vendors whose downloads must be on the vendor's own server ({@link #onVendorHost}): those
+     * jkit has keys for, and the others whose download servers are stable enough to name. For
+     * those others the checksum comes from foojay too, so without this a compromised foojay could
+     * pick both the file and its checksum. Each was checked against the download links foojay
+     * listed for it in November 2026 (over 2,500 builds across versions, platforms and JavaFX).
+     */
+    static final Set<String> PINNED_VENDORS = Set.of("temurin", "microsoft", "corretto", "zulu", "liberica",
+            "sap_machine", "semeru", "semeru_certified", "oracle", "graalvm_community", "graalvm", "mandrel");
+
+    /**
      * Whether {@code download} is where {@code vendor} publishes its builds, in the exact shape of
-     * the vendor's own links and ending in the build's file name. Only asked for the vendors jkit
-     * has keys for: a release asset in one of Adoptium's temurin&lt;N&gt;-binaries repositories,
-     * aka.ms/download-jdk/, or corretto.aws/downloads/resources/&lt;version&gt;/ (or
-     * &lt;version&gt;/ on Amazon's old CloudFront host, which still serves its 2019 builds). foojay
-     * lists every build of theirs at one of these. Checking the host alone isn't enough: github.com
-     * serves any commit of a fork from the original repository's path
-     * (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
+     * the vendor's own links and ending in the build's file name. Only asked for
+     * {@link #PINNED_VENDORS}: a release asset in one of Adoptium's temurin&lt;N&gt;-binaries
+     * repositories, aka.ms/download-jdk/, corretto.aws/downloads/resources/&lt;version&gt;/ (or
+     * &lt;version&gt;/ on Amazon's old CloudFront host, which still serves its 2019 builds), Azul's
+     * cdn.azul.com/zulu/bin/ (zulu-embedded/bin/ for some ARM builds), a release asset of
+     * bell-sw/Liberica, SAP/SapMachine, IBM's semeru&lt;N&gt;-binaries (and -certified-binaries),
+     * graalvm/graalvm-ce-builds or graalvm/mandrel on GitHub, or Oracle's download.oracle.com
+     * (/java/, /graalvm/) or its gds.oracle.com download service, whose links name an artifact,
+     * not a file. foojay lists every build of these vendors at one of these. Checking the host alone
+     * isn't enough on GitHub: github.com serves any commit of a fork from the original
+     * repository's path (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
      * <p>
      * Only the address foojay names is checked. The vendor's server then redirects (aka.ms to
      * download.visualstudio.microsoft.com, GitHub to its release-assets host); foojay doesn't decide
@@ -226,16 +241,35 @@ public final class FoojaySource {
                 && download.getRawFragment() == null && !path.contains("..")
                 && !path.toLowerCase(Locale.ROOT).contains("%2e");
         int slash = path.lastIndexOf('/');
-        if (!plain || slash < 0 || !path.substring(slash + 1).equals(fileName)) {
+        if (!plain || slash < 0) {
+            return false;
+        }
+        if ((vendor.equals("graalvm_community") || vendor.equals("graalvm")) && host.equals("gds.oracle.com")
+                && path.matches("/api/[0-9]{8}/artifacts/[0-9A-Fa-f]{32}/content")) {
+            return true; // Oracle's download service: the link names the artifact, not the file
+        }
+        // GitHub writes the + of a file name as %2B (sapmachine-jdk-11%2B28_osx-x64_bin.tar.gz)
+        String name = path.substring(slash + 1);
+        if (!name.equals(fileName) && !name.replaceAll("%2[Bb]", "+").equals(fileName)) {
             return false;
         }
         String folder = path.substring(0, slash);
+        String release = "/releases/download/[^/]+";
         return switch (vendor) {
-            case "temurin" -> host.equals("github.com")
-                    && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries/releases/download/[^/]+");
+            case "temurin" -> host.equals("github.com") && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries" + release);
             case "microsoft" -> host.equals("aka.ms") && folder.equals("/download-jdk");
             case "corretto" -> host.equals("corretto.aws") && folder.matches("/downloads/resources/[^/]+")
                     || host.equals(CORRETTO_2019_HOST) && folder.matches("/[^/]+");
+            case "zulu" -> host.equals("cdn.azul.com") && (folder.equals("/zulu/bin") || folder.equals("/zulu-embedded/bin"));
+            case "liberica" -> host.equals("github.com") && folder.matches("/bell-sw/Liberica" + release)
+                    || host.equals("download.bell-sw.com") && folder.matches("(/[^/]+)+");
+            case "sap_machine" -> host.equals("github.com") && folder.matches("/SAP/SapMachine" + release);
+            case "semeru", "semeru_certified" -> host.equals("github.com")
+                    && folder.matches("/ibmruntimes/semeru[0-9]{1,3}(-certified)?-binaries" + release);
+            case "oracle" -> host.equals("download.oracle.com") && folder.matches("/java(/[^/]+)+");
+            case "graalvm_community" -> host.equals("github.com") && folder.matches("/graalvm/graalvm-ce-builds" + release);
+            case "graalvm" -> host.equals("download.oracle.com") && folder.matches("/graalvm(/[^/]+)+");
+            case "mandrel" -> host.equals("github.com") && folder.matches("/graalvm/mandrel" + release);
             default -> false; // callers ask only about the vendors above
         };
     }
@@ -246,16 +280,26 @@ public final class FoojaySource {
             case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/releases/)";
             case "microsoft" -> "aka.ms/download-jdk/";
             case "corretto" -> "corretto.aws/downloads/resources/";
+            case "zulu" -> "cdn.azul.com/zulu/bin/";
+            case "liberica" -> "BellSoft's GitHub releases (github.com/bell-sw/Liberica/releases/)";
+            case "sap_machine" -> "SAP's GitHub releases (github.com/SAP/SapMachine/releases/)";
+            case "semeru", "semeru_certified" -> "IBM's GitHub releases (github.com/ibmruntimes/semeru<N>-binaries/releases/)";
+            case "oracle" -> "download.oracle.com/java/";
+            case "graalvm_community" -> "GraalVM's GitHub releases (github.com/graalvm/graalvm-ce-builds/releases/)"
+                    + " or gds.oracle.com";
+            case "graalvm" -> "download.oracle.com/graalvm/ or gds.oracle.com";
+            case "mandrel" -> "Mandrel's GitHub releases (github.com/graalvm/mandrel/releases/)";
             default -> throw new IllegalArgumentException("no download host known for " + vendor);
         };
     }
 
     /**
-     * The download link in a build's foojay answer, or null when there is none. For a vendor jkit
-     * has keys for, the link must be on that vendor's own server ({@link #onVendorHost}), or the
-     * build is refused. A signature by the vendor's key would be checked wherever the file comes
-     * from, but a Temurin build from before Adoptium started signing has only its checksum, which
-     * also comes from foojay; requiring Adoptium's server keeps the file itself coming from Adoptium.
+     * The download link in a build's foojay answer, or null when there is none. For
+     * {@link #PINNED_VENDORS}, the link must be on that vendor's own server ({@link #onVendorHost}),
+     * or the build is refused. A signature by the vendor's key would be checked wherever the file
+     * comes from, but a Temurin build from before Adoptium started signing, like every build of a
+     * vendor jkit has no key for, has only its checksum, which also comes from foojay; requiring
+     * the vendor's server keeps the file itself coming from the vendor.
      * <p>
      * A foojay mirror you run ({@code JKIT_SOURCES_FOOJAY_URL}) may serve the builds the vendor
      * signed from its own server, with their .sig next to them. The signature, which install then
@@ -276,13 +320,15 @@ public final class FoojaySource {
             return null;
         }
         boolean mirror = !base.equals(DEFAULT_BASE);
-        boolean pinned = SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+        boolean pinned = PINNED_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
                 && (!mirror || !vendorSigns(pkg.vendor(), pkg.version()));
         if (pinned && !onVendorHost(vendor, download, pkg.fileName())) {
+            String unsigned = SIGNING_VENDORS.contains(vendor) ? " builds the vendor didn't sign"
+                    : " builds, which jkit has no key to check,";
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
                     + pkg.version() + " at " + Visible.of(download.toString()) + ", not on "
                     + vendorHost(vendor) + "; refusing it", mirror
-                    ? "jkit downloads " + pkg.vendor() + " builds the vendor didn't sign only from there: your foojay"
+                    ? "jkit downloads " + pkg.vendor() + unsigned + " only from there: your foojay"
                             + " mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links, or pick another version or vendor"
                     : "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
         }
@@ -308,31 +354,62 @@ public final class FoojaySource {
      * Checks a vendor against foojay's distribution list (names and their synonyms, so "SAP
      * Machine" or "OpenJDK" work too) and returns it under foojay's name. An unknown name fails
      * with the closest match, before any version request can come back as a bare HTTP 400.
+     * <p>
+     * The vendor decides which key a signature must be made by and which server a download must
+     * come from, so foojay's synonyms can only add names, never move one: the vendors jkit has keys
+     * for are known without asking foojay; a distribution's own name, or a name jkit reads as
+     * another one (adoptium is temurin), always means that one; and a synonym two distributions
+     * both claim is ignored. Otherwise a list naming "temurin" a synonym of Zulu would make
+     * {@code jkit install jdk temurin} install Zulu builds without Temurin's signature.
      *
      * @param source how the name was given, for the message: "" when typed, else e.g. "your
      *               default vendor (jdk.vendor)"
      */
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
-        JsonNode root = Json.fetch(http, base.resolve(
-                "distributions?include_versions=false&include_synonyms=true"));
-        Map<String, String> bySynonym = new HashMap<>();
-        TreeSet<String> names = new TreeSet<>();
-        for (JsonNode d : root.path("result")) {
-            String param = Json.text(d, "api_parameter");
-            if (!Vendor.isSafeName(param)) {
-                continue;
-            }
-            Vendor known = Vendor.fromFoojay(param);
-            if (known.isRetired()) {
-                continue;
-            }
-            names.add(known.name());
-            bySynonym.put(param, param);
-            bySynonym.put(known.name(), param);
-            for (JsonNode syn : d.path("synonyms")) {
-                bySynonym.put(syn.asText().toLowerCase(Locale.ROOT), param);
+        Vendor typedVendor = Vendor.of(typed);
+        for (Vendor local : List.of(vendor, typedVendor)) {
+            if (SIGNING_VENDORS.contains(local.foojayName())) {
+                return Vendor.fromFoojay(local.foojayName());
             }
         }
+        JsonNode root = Json.fetch(http, base.resolve(
+                "distributions?include_versions=false&include_synonyms=true"));
+        Map<String, JsonNode> listed = new LinkedHashMap<>();
+        for (JsonNode d : root.path("result")) {
+            String param = Json.text(d, "api_parameter");
+            if (Vendor.isSafeName(param) && !Vendor.fromFoojay(param).isRetired()) {
+                listed.putIfAbsent(param, d);
+            }
+        }
+        TreeSet<String> names = new TreeSet<>();
+        for (String param : listed.keySet()) {
+            names.add(Vendor.fromFoojay(param).name());
+        }
+        // exact names first: foojay's own, and the name jkit reads the text as
+        for (Vendor local : List.of(vendor, typedVendor)) {
+            if (listed.containsKey(local.foojayName())) {
+                return Vendor.fromFoojay(local.foojayName());
+            }
+        }
+        Map<String, String> bySynonym = new HashMap<>();
+        Set<String> claimedTwice = new HashSet<>();
+        for (Map.Entry<String, JsonNode> d : listed.entrySet()) {
+            for (JsonNode syn : d.getValue().path("synonyms")) {
+                String name = syn.asText().toLowerCase(Locale.ROOT).trim();
+                // what jkit makes of the name by itself: an alias (adoptium, sapmachine) if it is one
+                String local = Vendor.of(name).foojayName();
+                boolean alias = !local.equals(name.replace('-', '_'));
+                if (name.isEmpty() || SIGNING_VENDORS.contains(local)
+                        || (alias || listed.containsKey(local)) && !local.equals(d.getKey())) {
+                    continue; // a name that already means a vendor: a synonym can't move it
+                }
+                String other = bySynonym.putIfAbsent(name, d.getKey());
+                if (other != null && !other.equals(d.getKey())) {
+                    claimedTwice.add(name);
+                }
+            }
+        }
+        bySynonym.keySet().removeAll(claimedTwice);
         String match = bySynonym.get(vendor.foojayName());
         if (match == null) {
             match = bySynonym.get(typed.toLowerCase(Locale.ROOT).trim());
@@ -461,7 +538,9 @@ public final class FoojaySource {
             List<Pkg> newest;
             try {
                 newest = newestPerVendorAndMajor(platform, fx, pre).stream()
-                        .filter(p -> p.vendor().foojayName().equals(vendor.foojayName()) && p.major() == major)
+                        // the same checks as builds(): the vendor and version decide which checks apply
+                        .filter(p -> p.vendor().foojayName().equals(vendor.foojayName()) && p.major() == major
+                                && p.version().part(0) == major)
                         .filter(p -> p.version().matches(versionSpec) && (pre || !p.version().isPreRelease()))
                         .toList();
             } catch (IOException | JkitException e) {
@@ -652,44 +731,78 @@ public final class FoojaySource {
     static final int BEHIND_UPDATES = 2;
 
     /**
+     * The same for JDK 8 (and older), as a difference in update numbers: those move by about 10 a
+     * quarter (8u452, 8u462), and a respin by 1 or 2 (8u512, 8u514), so 20 is two quarterly releases.
+     */
+    static final int BEHIND_UPDATES_8 = 20;
+
+    /**
      * The builds of {@code index} (each vendor's newest per major, {@link #newestPerVendorAndMajor})
-     * that are at least {@link #BEHIND_UPDATES} updates older than the newest release of their
-     * major from another vendor: a vendor that stopped updating that release, such as openjdk
-     * (Oracle's jdk.java.net builds), which publishes only the first updates of each release. A
-     * vendor a single update behind is likely just later with the newest one. Pre-releases, and
-     * Mandrel, whose versions carry only the feature number ({@link #version}), don't count.
+     * whose vendor's newest build of that major is at least {@link #BEHIND_UPDATES} updates
+     * ({@link #BEHIND_UPDATES_8} update numbers for JDK 8) older than the newest update at least two
+     * vendors have: a vendor that stopped updating that release, such as openjdk (Oracle's
+     * jdk.java.net builds), which publishes only the first updates of each release. A vendor a
+     * single update behind is likely just later with the newest one, and an update only one vendor
+     * has may be that vendor's own.
+     * <p>
+     * Only versions that are OpenJDK updates count (21.0.13, 8.0.462): not pre-releases, not
+     * Mandrel's ({@link #version}), and not the ones some GraalVM distributions list under their
+     * own release numbers (Gluon's 21.1, GraalVM CE's 25.1.3). GraalVM-based distributions can be
+     * behind, but don't set the newest update: their numbering is their own.
      */
     public static Map<Pkg, Behind> behind(List<Pkg> index) {
-        Map<Integer, Pkg> newest = new HashMap<>();
+        Map<Integer, Map<String, Integer>> best = new HashMap<>(); // major -> vendor -> newest update
         for (Pkg p : index) {
             if (comparable(p)) {
-                newest.merge(p.major(), p, (a, b) -> update(b) > update(a) ? b : a);
+                best.computeIfAbsent(p.major(), k -> new HashMap<>()).merge(p.vendor().name(), update(p), Math::max);
+            }
+        }
+        Map<Integer, Integer> newest = new HashMap<>();
+        for (Map.Entry<Integer, Map<String, Integer>> major : best.entrySet()) {
+            List<Integer> updates = index.stream()
+                    .filter(p -> p.major() == major.getKey() && comparable(p) && !p.vendor().isGraalVmBased())
+                    .map(p -> p.vendor().name()).distinct()
+                    .map(major.getValue()::get).sorted(Comparator.reverseOrder()).toList();
+            if (updates.size() >= 2) {
+                newest.put(major.getKey(), updates.get(1)); // the newest update two vendors have
             }
         }
         Map<Pkg, Behind> out = new HashMap<>();
         for (Pkg p : index) {
-            Pkg top = newest.get(p.major());
-            if (top == null || !comparable(p) || update(top) - update(p) < BEHIND_UPDATES) {
+            Integer top = newest.get(p.major());
+            int lag = p.major() <= 8 ? BEHIND_UPDATES_8 : BEHIND_UPDATES;
+            if (top == null || !comparable(p) || top - best.get(p.major()).get(p.vendor().name()) < lag) {
                 continue;
             }
             TreeSet<String> from = new TreeSet<>();
+            Version version = null;
             for (Pkg q : index) {
-                if (q.major() == p.major() && comparable(q) && update(q) == update(top)) {
+                if (q.major() == p.major() && comparable(q) && !q.vendor().isGraalVmBased() && update(q) >= top) {
                     from.add(q.vendor().name());
+                    if (update(q) == top && (version == null || q.version().compareTo(version) > 0)) {
+                        version = q.version();
+                    }
                 }
             }
-            out.put(p, new Behind(top.version(), List.copyOf(from)));
+            out.put(p, new Behind(version, List.copyOf(from)));
         }
         return out;
     }
 
+    /**
+     * Whether the build's version is an OpenJDK update of its major (21.0.13, 8.0.462), which
+     * {@link #behind} compares: not Mandrel's or Gluon's, whose versions are their own (Mandrel's
+     * the feature number alone, Gluon's its GraalVM release, 21.1 or 22.0.0.3).
+     */
     private static boolean comparable(Pkg p) {
-        return !p.version().isPreRelease() && !p.vendor().foojayName().equals("mandrel");
+        String vendor = p.vendor().foojayName();
+        return !p.version().isPreRelease() && !vendor.equals("mandrel") && !vendor.equals("gluon_graalvm")
+                && p.version().part(0) == p.major() && p.version().part(1) == 0;
     }
 
-    /** The interim and update numbers of a build as one number: 21.0.9 is 9, 8.0.462 is 462. */
-    private static long update(Pkg p) {
-        return (long) p.version().part(1) * 100_000 + p.version().part(2);
+    /** The update number of a build: 21.0.9 is 9, 8.0.462 is 462. */
+    private static int update(Pkg p) {
+        return p.version().part(2);
     }
 
     /**

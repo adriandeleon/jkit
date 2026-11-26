@@ -5,6 +5,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -73,7 +74,12 @@ public final class Main implements Runnable {
         }
         if (args.length == 0 || !MACHINE_STDOUT.contains(args[0]) && !own.contains(JsonOut.FLAG)) {
             System.setOut(SafeOutput.wrap(System.out));
+        } else if (own.contains(JsonOut.FLAG)) {
+            // a character the console's code page can't hold is a JSON escape in the document, not a ?
+            System.setOut(new PrintStream(System.out, true, Fallback.of(System.out.charset(), true)));
         }
+        // Shell code (hook, env) is left as it is: a stand-in would change a path, and the
+        // PowerShell code is ASCII already.
         if (!cwdExists()) {
             // The folder was deleted under the shell. Say so plainly instead of failing with a
             // stack trace.

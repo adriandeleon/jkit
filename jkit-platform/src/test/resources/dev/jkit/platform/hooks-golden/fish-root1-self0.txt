@@ -1,19 +1,37 @@
 # jkit shell hook (fish)
 set -gx JKIT_SHELL fish
-set -l __jkit_g '/tmp/o\'brien $HOME `x` \\ "q" ‘t’/.jkit/global'
-for t in sbt gradle maven jdk
-  # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
-  set -l v (string upper -- $t)_HOME
-  test $t = jdk; and set v JAVA_HOME
-  set -l h $$v
-  # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
-  test -n "$h"; and set h (string trim -r -c / -- "$h")
-  set -l b $__jkit_g/$t/bin
-  if test -n "$h"; and not contains -- "$h" $__jkit_g/$t; and test -d "$h/bin"
-    set b "$h/bin"
+function __jkit_path
+  set -l g '/tmp/o\'brien $HOME `x` \\ "q" ‘t’/.jkit/global'
+  for t in sbt gradle maven jdk
+    # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+    set -l v (string upper -- $t)_HOME
+    test $t = jdk; and set v JAVA_HOME
+    set -l h $$v
+    # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
+    test -n "$h"; and set h (string trim -r -c / -- "$h")
+    set -l b $g/$t/bin
+    if test -n "$h"; and not contains -- "$h" $g/$t; and test -d "$h/bin"
+      set b "$h/bin"
+    end
+    # first on PATH, also when it is there already but further back: its other places, with or
+    # without a trailing /, go
+    set -l rest
+    for d in $PATH
+      test "$d" = "$b"; or test "$d" = "$b/"; or set -a rest "$d"
+    end
+    set -gx PATH $b $rest
   end
-  contains -- $b $PATH; or set -gx PATH $b $PATH
 end
+__jkit_path
+if status is-interactive
+  # conf.d files run before config.fish, where a line such as Homebrew's fish_add_path --move
+  # can put its bin ahead again: once, at the first prompt, the order is put back
+  function __jkit_first_prompt --on-event fish_prompt
+    functions -e __jkit_first_prompt
+    __jkit_path
+  end
+end
+set -l __jkit_g '/tmp/o\'brien $HOME `x` \\ "q" ‘t’/.jkit/global'
 if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end
 if not set -q MAVEN_HOME; and test -e $__jkit_g/maven; set -gx MAVEN_HOME $__jkit_g/maven; end
 if not set -q GRADLE_HOME; and test -e $__jkit_g/gradle; set -gx GRADLE_HOME $__jkit_g/gradle; end
@@ -25,10 +43,11 @@ set -g __jkit_root '/tmp/o\'brien $HOME `x` \\ "q" ‘t’/.jkit'
 function __jkit_run
   if test -z "$__jkit_bin"; or not test -x "$__jkit_bin"
     # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
-    # skipping folders under jkit's root, where a tool's bin could hold some other jkit
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit, and
+    # relative entries (. or bin), which would run a ./jkit or bin/jkit of the folder cd went to
     set -g __jkit_bin ''
     for d in $PATH
-      if test (string sub -l (string length -- "$__jkit_root/") -- "$d/") != "$__jkit_root/"; and test -x $d/jkit
+      if string match -q -- '/*' "$d"; and test (string sub -l (string length -- "$__jkit_root/") -- "$d/") != "$__jkit_root/"; and test -x $d/jkit
         set -g __jkit_bin $d/jkit
         break
       end
