@@ -5,6 +5,7 @@ import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import java.io.File;
@@ -320,10 +321,12 @@ final class PruneCommand implements Callable<Integer> {
     /**
      * Folders interrupted installs and removals left: {@code tmp/install-*} and {@code tmp/remove-*},
      * and next to installs, {@code .remove-*} and {@code .*.partial} (when tools/ is on another disk).
+     * Not the folder an install running right now downloads into, which it holds (WorkDirs).
      */
     static List<Path> leftovers(Context ctx) throws IOException {
         List<Path> found = new ArrayList<>();
         collect(ctx.home.tmp(), name -> name.startsWith("install-") || name.startsWith("remove-"), found);
+        found.removeIf(WorkDirs::inUse);
         for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             collect(ctx.home.tools(tool), name -> name.startsWith(".remove-")
                     || name.startsWith(".") && name.endsWith(".partial"), found);

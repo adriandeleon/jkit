@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.Tool;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -189,6 +190,20 @@ class PruneTest {
         assertThat(oldList).doesNotExist();
         assertThat(recent).exists(); // still serves --offline
         assertThat(keepTmp).exists();
+    }
+
+    @Test
+    void theFolderARunningInstallDownloadsIntoIsNoLeftover() throws Exception {
+        // installs download outside the install lock, in a folder they hold
+        Path running = WorkDirs.create(Files.createDirectories(home.resolve("tmp")), "install-");
+        try {
+            prune(true);
+            assertThat(output()).doesNotContain("install-").contains("nothing to prune");
+            prune(false);
+            assertThat(running).isDirectory();
+        } finally {
+            WorkDirs.remove(running);
+        }
     }
 
     @Test
