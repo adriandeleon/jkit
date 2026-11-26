@@ -119,6 +119,16 @@ class ExecTest {
     }
 
     @Test
+    void anotherVendorsInstallIsOfferedAsAnExecCommand() {
+        assertThatThrownBy(() -> plan("jdk@17"))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("no installed JDK matches 17 from temurin (default vendor)")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                        "install it:          jkit install jdk@17",
+                        "or use installed:    jkit exec jdk@17 zulu -- <command>"));
+    }
+
+    @Test
     void theCallingShellsStateDoesNotLeakIn() throws Exception {
         env.put(ShellEnv.stateVariable(Tool.MAVEN), home.resolve("tools/maven/3.9.11").toString());
         env.put("MAVEN_HOME", home.resolve("tools/maven/3.9.11").toString());
