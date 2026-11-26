@@ -266,6 +266,10 @@ class ShellEnvTest {
         assertThat(ShellEnv.format(changes, "bash")).isEqualTo("export JAVA_HOME='/it'\\''s here'\nunset OLD\n");
         assertThat(ShellEnv.format(changes, "fish")).startsWith("set -gx JAVA_HOME ");
         assertThat(ShellEnv.format(changes, "pwsh")).startsWith("$env:JAVA_HOME = ");
+        // PowerShell reads jkit env's output in the OEM code page, not the one jkit writes in: ASCII only
+        assertThat(ShellEnv.format(Map.of("JAVA_HOME", "C:\\Users\\Jos\u00e9"), "pwsh"))
+                .isEqualTo("$env:JAVA_HOME = ('C:\\Users\\Jos' + [char]0x00E9)\n");
+        assertThat(ShellEnv.format(Map.of("JAVA_HOME", "/home/jos\u00e9"), "bash")).isEqualTo("export JAVA_HOME='/home/jos\u00e9'\n");
     }
 
     @Test
@@ -332,5 +336,58 @@ class ShellEnvTest {
         Path maven = Path.of("/h/.jkit/tools/maven/3.9.11");
         assertThat(ShellEnv.use(env, home, Tool.MAVEN, maven, false).get("PATH"))
                 .isEqualTo(path(bin(jdk21), bin(maven), "/usr/bin"));
+    }
+
+    /**
+     * The global bin on PATH but behind the system's (the Windows user PATH comes after the system
+     * one; macOS's path_helper in a nested login shell): when the global JDK comes back, its bin is
+     * moved to the front, so java is $JAVA_HOME/bin/java. Another tool's choice leaves it alone.
+     */
+    @Test
+    void theGlobalBinThatComesBackIsMovedAheadOfTheSystemsOne(@TempDir Path tmp) throws Exception {
+        JkitHome own = new JkitHome(tmp.resolve(".jkit"));
+        Files.createDirectories(own.global(Tool.JDK).getParent());
+        Files.createSymbolicLink(own.global(Tool.JDK), Files.createDirectories(tmp.resolve("jdk")));
+        String global = own.global(Tool.JDK).resolve("bin").toString();
+        Path jdk = Files.createDirectories(own.toolsRoot().resolve("jdk/21"));
+        Path maven = Files.createDirectories(own.toolsRoot().resolve("maven/3.9.11"));
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path(p("/sys"), p("/usr/bin"), global),
+                "JAVA_HOME", own.global(Tool.JDK).toString()));
+        // jkit use maven: the JDK's place on PATH is not this command's business
+        assertThat(ShellEnv.use(env, own, Tool.MAVEN, maven, false).get("PATH"))
+                .isEqualTo(path(bin(maven), p("/sys"), p("/usr/bin"), global));
+
+        apply(env, ShellEnv.use(env, own, Tool.JDK, jdk, false));
+        assertThat(env.get("PATH")).isEqualTo(path(bin(jdk), p("/sys"), p("/usr/bin"), global));
+        Map<String, String> reset = ShellEnv.reset(env, own, Tool.JDK);
+        assertThat(reset).containsEntry("JAVA_HOME", own.global(Tool.JDK).toString());
+        assertThat(reset.get("PATH")).isEqualTo(path(global, p("/sys"), p("/usr/bin")));
+
+        // written with a trailing separator: moved as it is written, not added a second time
+        env.put("PATH", path(p("/usr/bin"), global + File.separator));
+        apply(env, ShellEnv.use(env, own, Tool.JDK, jdk, false));
+        assertThat(ShellEnv.reset(env, own, Tool.JDK).get("PATH")).isEqualTo(path(global + File.separator, p("/usr/bin")));
+    }
+
+    /** The same for a first install in a hooked shell: the global bin is moved to the front. */
+    @Test
+    void globalMovesTheGlobalBinToTheFront() {
+        String global = p("/h/.jkit/global/jdk/bin");
+        Map<String, String> behind = Map.of("PATH", path(p("/sys"), p("/usr/bin"), global));
+        assertThat(ShellEnv.global(behind, home, Tool.JDK))
+                .containsEntry("JAVA_HOME", p("/h/.jkit/global/jdk"))
+                .containsEntry("PATH", path(global, p("/sys"), p("/usr/bin")));
+        // first already: PATH is left as it is
+        assertThat(ShellEnv.global(Map.of("PATH", path(global, p("/usr/bin"))), home, Tool.JDK)).doesNotContainKey("PATH");
+        // not there: added; an empty entry (the current folder) stays where it is
+        assertThat(ShellEnv.global(Map.of("PATH", path(p("/usr/bin"), "")), home, Tool.JDK))
+                .containsEntry("PATH", path(global, p("/usr/bin"), ""));
+        assertThat(ShellEnv.global(Map.of("PATH", ""), home, Tool.JDK)).containsEntry("PATH", global);
+        if (File.separatorChar == '\\') {
+            // C:\h\.jkit\GLOBAL\JDK\BIN\ is the same folder on Windows: moved, as it is written
+            String other = global.toUpperCase(Locale.ROOT) + "\\";
+            assertThat(ShellEnv.global(Map.of("PATH", path("C:\\Windows", other)), home, Tool.JDK))
+                    .containsEntry("PATH", path(other, "C:\\Windows"));
+        }
     }
 }

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -224,6 +225,173 @@ class HooksTest {
         assertThat(Hooks.powershell(Path.of("/home/u/.jkit"), self)).contains("$global:__jkit_bin = '/opt/jk it''s/bin/jkit'");
     }
 
+    /**
+     * A global bin that PATH has already, but behind the system's (macOS's path_helper in a nested
+     * login shell puts /usr/bin first): the hook moves it to the front, written once. Empty
+     * entries (the current folder) and the rest keep their order.
+     */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookMovesAGlobalBinThatIsFurtherBackToTheFront() throws Exception {
+        Path root = tmp.resolve("home/.jkit");
+        Files.createDirectories(root.resolve("global"));
+        Files.createSymbolicLink(root.resolve("global/jdk"), Files.createDirectories(tmp.resolve("jdk")));
+        String g = root.resolve("global").toString();
+        String globals = g + "/jdk/bin:" + g + "/maven/bin:" + g + "/gradle/bin:" + g + "/sbt/bin";
+        assertThat(bashPath(root, "/sys:/usr/bin:" + g + "/jdk/bin", null)).isEqualTo(globals + ":/sys:/usr/bin");
+        // with a trailing /, twice, and around empty entries
+        assertThat(bashPath(root, "/sys::" + g + "/jdk/bin/:" + g + "/jdk/bin:/usr/bin:", null))
+                .isEqualTo(globals + ":/sys::/usr/bin:");
+        assertThat(bashPath(root, g + "/jdk/bin", null)).isEqualTo(globals);
+        assertThat(bashPath(root, globals + ":/usr/bin", null)).isEqualTo(globals + ":/usr/bin");
+        // an empty PATH is one empty entry, the current folder, as before
+        assertThat(bashPath(root, "", null)).isEqualTo(globals + ":");
+        // a JAVA_HOME of the user's own: its bin is the one moved to the front
+        Path mine = Files.createDirectories(tmp.resolve("my jdk [x]/bin")).getParent();
+        assertThat(bashPath(root, "/usr/bin:" + mine + "/bin", mine.toString()))
+                .isEqualTo(mine + "/bin:" + g + "/maven/bin:" + g + "/gradle/bin:" + g + "/sbt/bin:/usr/bin");
+    }
+
+    /** PATH after the bash hook loads with {@code path} and, if not null, JAVA_HOME. */
+    private String bashPath(Path root, String path, String javaHome) throws Exception {
+        Path script = tmp.resolve("hook-path.sh");
+        Files.writeString(script, "set -u\n" + Hooks.posix("bash", root) + "\nprintf '%s\\n' \"$PATH\"\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("PATH", path);
+        if (javaHome != null) {
+            pb.environment().put("JAVA_HOME", javaHome);
+        }
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(p.exitValue()).as(out).isZero();
+        return out.stripTrailing();
+    }
+
+    /**
+     * The same in PowerShell, where jkit env --install puts the global bin on the user PATH, which
+     * Windows puts after the system one: java would be the system's while JAVA_HOME is jkit's.
+     */
+    @Test
+    void powershellHookMovesAGlobalBinThatIsFurtherBackToTheFront() throws Exception {
+        Path root = tmp.resolve("root");
+        Files.createDirectories(root.resolve("global/jdk/bin"));
+        String sep = File.pathSeparator;
+        Path g = root.resolve("global");
+        String jdkBin = g.resolve("jdk").resolve("bin").toString();
+        String sys = tmp.resolve("sys").toString();
+        String usr = tmp.resolve("usr").toString();
+        // the PowerShell itself must still start: the machine's PATH comes after
+        String machine = System.getenv().getOrDefault("PATH", "");
+        // on Windows the same folder in another case and with a trailing backslash goes too
+        String later = File.separatorChar == '\\' ? jdkBin.toUpperCase(Locale.ROOT) + "\\" : jdkBin + "/";
+        String out = powershellPath(root, String.join(sep, sys, usr, later, jdkBin, machine));
+        // pwsh 7 puts its own folder first on PATH as it starts, so it comes right after what the hook moved
+        String globals = String.join(sep, jdkBin, g.resolve("maven").resolve("bin").toString(),
+                g.resolve("gradle").resolve("bin").toString(), g.resolve("sbt").resolve("bin").toString());
+        assertThat(out).startsWith(globals + sep);
+        String rest = out.substring(globals.length() + 1);
+        if (!rest.startsWith(sys + sep)) {
+            rest = rest.substring(rest.indexOf(sep) + 1);
+        }
+        assertThat(rest).isEqualTo(String.join(sep, sys, usr, machine));
+    }
+
+    /** PATH after the PowerShell hook loads with {@code path}, the same from each PowerShell on this machine. */
+    private String powershellPath(Path root, String path) throws Exception {
+        String script = "$ProgressPreference = 'SilentlyContinue'\n" + Hooks.powershell(root, null) + "\n$env:PATH\n";
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        String last = null;
+        for (String shell : new String[] {"powershell", "pwsh"}) {
+            Path err = tmp.resolve(shell + ".err");
+            ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
+                    .redirectError(err.toFile());
+            withoutToolHomes(pb);
+            pb.environment().put("PATH", path);
+            Process p;
+            try {
+                p = pb.start();
+            } catch (IOException notInstalled) {
+                continue;
+            }
+            p.getOutputStream().close();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
+            String before = last;
+            assertThat(before == null || before.equals(out)).as(() -> shell + ": " + out + ", stderr: " + read(err))
+                    .isTrue();
+            last = out;
+        }
+        assumeTrue(last != null, "no PowerShell on this machine");
+        return last;
+    }
+
+    /**
+     * PowerShell decodes a program's output in the OEM code page and Java writes the ANSI one, so
+     * the hook is ASCII only; a path with an accent, a typographic quote and a character past
+     * U+FFFF still comes out exactly as it is.
+     */
+    @Test
+    void powershellHookIsAsciiAndKeepsEveryCharacterOfItsPaths() throws Exception {
+        Path root = Files.createDirectories(tmp.resolve("José 😀 o'b’").resolve(".jkit"));
+        Files.createDirectories(root.resolve("global/jdk/bin"));
+        String self = root.resolveSibling("bin").resolve("jkité").toString();
+        String hook = Hooks.powershell(root, self);
+        assertThat(hook.chars().filter(c -> c >= 0x80).count()).as(hook).isZero();
+        String script = "$ProgressPreference = 'SilentlyContinue'\n" + hook
+                + "\n[Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
+                + "[Console]::Out.WriteLine($global:__jkit_root)\n[Console]::Out.WriteLine($global:__jkit_bin)\n"
+                + "[Console]::Out.WriteLine($env:JAVA_HOME)\n";
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        int ran = 0;
+        for (String shell : new String[] {"powershell", "pwsh"}) {
+            Path err = tmp.resolve(shell + ".err");
+            ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
+                    .redirectError(err.toFile());
+            withoutToolHomes(pb);
+            Process p;
+            try {
+                p = pb.start();
+            } catch (IOException notInstalled) {
+                continue;
+            }
+            ran++;
+            p.getOutputStream().close();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
+            assertThat(out.lines().map(l -> l.replace("﻿", "")).toList()).as(() -> shell + ", stderr: " + read(err))
+                    .containsExactly(root.toString(), self, root.resolve("global").resolve("jdk").toString());
+        }
+        assumeTrue(ran > 0, "no PowerShell on this machine");
+    }
+
+    /**
+     * The fallback when the saved jkit is gone skips relative PATH entries: with . or bin on PATH,
+     * a cd into a repository with a ./jkit or bin/jkit would run that.
+     */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookFallbackSkipsRelativePathEntries() throws Exception {
+        Path repo = Files.createDirectories(tmp.resolve("repo/bin")).getParent();
+        Path real = Files.createDirectories(tmp.resolve("real"));
+        for (Path p : new Path[] {repo.resolve("bin/jkit"), repo.resolve("jkit"), real.resolve("jkit")}) {
+            Files.writeString(p, "#!/bin/sh\necho \"" + p + "\"\n");
+            p.toFile().setExecutable(true);
+        }
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, Hooks.posix("bash", tmp.resolve("home"), tmp.resolve("gone/jkit").toString())
+                + "cd '" + repo + "'\njkit x\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString()).redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("PATH", "bin:.::" + real + ":/usr/bin:/bin");
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out.lines().toList()).as(out).containsExactly(real.resolve("jkit").toString());
+    }
+
     /** The saved path runs while it exists; once it's gone (Scoop moved it), jkit on PATH does. */
     @Test
     @DisabledOnOs(OS.WINDOWS)
@@ -287,7 +455,7 @@ class HooksTest {
     @Test
     void powershellHookAddsTheGlobalsAndQuotesThePath() {
         String ps = Hooks.powershell(Path.of("C:\\Users\\O'Brien\\.jkit"));
-        assertThat(ps).contains("'C:\\Users\\O''Brien\\.jkit").contains("$env:PATH = $bin")
+        assertThat(ps).contains("'C:\\Users\\O''Brien\\.jkit").contains("$env:PATH = (@($bin) + $rest) -join $sep")
                 .contains("JAVA_HOME").contains("GRAALVM_HOME");
     }
 
