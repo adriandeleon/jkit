@@ -206,14 +206,28 @@ public final class FoojaySource {
     }
 
     /**
+     * The vendors whose downloads must be on the vendor's own server ({@link #onVendorHost}): those
+     * jkit has keys for, and the others whose download servers are stable enough to name. For
+     * those others the checksum comes from foojay too, so without this a compromised foojay could
+     * pick both the file and its checksum. Each was checked against the download links foojay
+     * listed for it in November 2026 (over 2,500 builds across versions, platforms and JavaFX).
+     */
+    static final Set<String> PINNED_VENDORS = Set.of("temurin", "microsoft", "corretto", "zulu", "liberica",
+            "sap_machine", "semeru", "semeru_certified", "oracle", "graalvm_community", "graalvm", "mandrel");
+
+    /**
      * Whether {@code download} is where {@code vendor} publishes its builds, in the exact shape of
-     * the vendor's own links and ending in the build's file name. Only asked for the vendors jkit
-     * has keys for: a release asset in one of Adoptium's temurin&lt;N&gt;-binaries repositories,
-     * aka.ms/download-jdk/, or corretto.aws/downloads/resources/&lt;version&gt;/ (or
-     * &lt;version&gt;/ on Amazon's old CloudFront host, which still serves its 2019 builds). foojay
-     * lists every build of theirs at one of these. Checking the host alone isn't enough: github.com
-     * serves any commit of a fork from the original repository's path
-     * (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
+     * the vendor's own links and ending in the build's file name. Only asked for
+     * {@link #PINNED_VENDORS}: a release asset in one of Adoptium's temurin&lt;N&gt;-binaries
+     * repositories, aka.ms/download-jdk/, corretto.aws/downloads/resources/&lt;version&gt;/ (or
+     * &lt;version&gt;/ on Amazon's old CloudFront host, which still serves its 2019 builds), Azul's
+     * cdn.azul.com/zulu/bin/ (zulu-embedded/bin/ for some ARM builds), a release asset of
+     * bell-sw/Liberica, SAP/SapMachine, IBM's semeru&lt;N&gt;-binaries (and -certified-binaries),
+     * graalvm/graalvm-ce-builds or graalvm/mandrel on GitHub, or Oracle's download.oracle.com
+     * (/java/, /graalvm/) or its gds.oracle.com download service, whose links name an artifact,
+     * not a file. foojay lists every build of these vendors at one of these. Checking the host alone
+     * isn't enough on GitHub: github.com serves any commit of a fork from the original
+     * repository's path (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
      * <p>
      * Only the address foojay names is checked. The vendor's server then redirects (aka.ms to
      * download.visualstudio.microsoft.com, GitHub to its release-assets host); foojay doesn't decide
@@ -226,16 +240,35 @@ public final class FoojaySource {
                 && download.getRawFragment() == null && !path.contains("..")
                 && !path.toLowerCase(Locale.ROOT).contains("%2e");
         int slash = path.lastIndexOf('/');
-        if (!plain || slash < 0 || !path.substring(slash + 1).equals(fileName)) {
+        if (!plain || slash < 0) {
+            return false;
+        }
+        if ((vendor.equals("graalvm_community") || vendor.equals("graalvm")) && host.equals("gds.oracle.com")
+                && path.matches("/api/[0-9]{8}/artifacts/[0-9A-Fa-f]{32}/content")) {
+            return true; // Oracle's download service: the link names the artifact, not the file
+        }
+        // GitHub writes the + of a file name as %2B (sapmachine-jdk-11%2B28_osx-x64_bin.tar.gz)
+        String name = path.substring(slash + 1);
+        if (!name.equals(fileName) && !name.replaceAll("%2[Bb]", "+").equals(fileName)) {
             return false;
         }
         String folder = path.substring(0, slash);
+        String release = "/releases/download/[^/]+";
         return switch (vendor) {
-            case "temurin" -> host.equals("github.com")
-                    && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries/releases/download/[^/]+");
+            case "temurin" -> host.equals("github.com") && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries" + release);
             case "microsoft" -> host.equals("aka.ms") && folder.equals("/download-jdk");
             case "corretto" -> host.equals("corretto.aws") && folder.matches("/downloads/resources/[^/]+")
                     || host.equals(CORRETTO_2019_HOST) && folder.matches("/[^/]+");
+            case "zulu" -> host.equals("cdn.azul.com") && (folder.equals("/zulu/bin") || folder.equals("/zulu-embedded/bin"));
+            case "liberica" -> host.equals("github.com") && folder.matches("/bell-sw/Liberica" + release)
+                    || host.equals("download.bell-sw.com") && folder.matches("(/[^/]+)+");
+            case "sap_machine" -> host.equals("github.com") && folder.matches("/SAP/SapMachine" + release);
+            case "semeru", "semeru_certified" -> host.equals("github.com")
+                    && folder.matches("/ibmruntimes/semeru[0-9]{1,3}(-certified)?-binaries" + release);
+            case "oracle" -> host.equals("download.oracle.com") && folder.matches("/java(/[^/]+)+");
+            case "graalvm_community" -> host.equals("github.com") && folder.matches("/graalvm/graalvm-ce-builds" + release);
+            case "graalvm" -> host.equals("download.oracle.com") && folder.matches("/graalvm(/[^/]+)+");
+            case "mandrel" -> host.equals("github.com") && folder.matches("/graalvm/mandrel" + release);
             default -> false; // callers ask only about the vendors above
         };
     }
@@ -246,16 +279,26 @@ public final class FoojaySource {
             case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/releases/)";
             case "microsoft" -> "aka.ms/download-jdk/";
             case "corretto" -> "corretto.aws/downloads/resources/";
+            case "zulu" -> "cdn.azul.com/zulu/bin/";
+            case "liberica" -> "BellSoft's GitHub releases (github.com/bell-sw/Liberica/releases/)";
+            case "sap_machine" -> "SAP's GitHub releases (github.com/SAP/SapMachine/releases/)";
+            case "semeru", "semeru_certified" -> "IBM's GitHub releases (github.com/ibmruntimes/semeru<N>-binaries/releases/)";
+            case "oracle" -> "download.oracle.com/java/";
+            case "graalvm_community" -> "GraalVM's GitHub releases (github.com/graalvm/graalvm-ce-builds/releases/)"
+                    + " or gds.oracle.com";
+            case "graalvm" -> "download.oracle.com/graalvm/ or gds.oracle.com";
+            case "mandrel" -> "Mandrel's GitHub releases (github.com/graalvm/mandrel/releases/)";
             default -> throw new IllegalArgumentException("no download host known for " + vendor);
         };
     }
 
     /**
-     * The download link in a build's foojay answer, or null when there is none. For a vendor jkit
-     * has keys for, the link must be on that vendor's own server ({@link #onVendorHost}), or the
-     * build is refused. A signature by the vendor's key would be checked wherever the file comes
-     * from, but a Temurin build from before Adoptium started signing has only its checksum, which
-     * also comes from foojay; requiring Adoptium's server keeps the file itself coming from Adoptium.
+     * The download link in a build's foojay answer, or null when there is none. For
+     * {@link #PINNED_VENDORS}, the link must be on that vendor's own server ({@link #onVendorHost}),
+     * or the build is refused. A signature by the vendor's key would be checked wherever the file
+     * comes from, but a Temurin build from before Adoptium started signing, like every build of a
+     * vendor jkit has no key for, has only its checksum, which also comes from foojay; requiring
+     * the vendor's server keeps the file itself coming from the vendor.
      * <p>
      * A foojay mirror you run ({@code JKIT_SOURCES_FOOJAY_URL}) may serve the builds the vendor
      * signed from its own server, with their .sig next to them. The signature, which install then
@@ -276,13 +319,15 @@ public final class FoojaySource {
             return null;
         }
         boolean mirror = !base.equals(DEFAULT_BASE);
-        boolean pinned = SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+        boolean pinned = PINNED_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
                 && (!mirror || !vendorSigns(pkg.vendor(), pkg.version()));
         if (pinned && !onVendorHost(vendor, download, pkg.fileName())) {
+            String unsigned = SIGNING_VENDORS.contains(vendor) ? " builds the vendor didn't sign"
+                    : " builds, which jkit has no key to check,";
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
                     + pkg.version() + " at " + Visible.of(download.toString()) + ", not on "
                     + vendorHost(vendor) + "; refusing it", mirror
-                    ? "jkit downloads " + pkg.vendor() + " builds the vendor didn't sign only from there: your foojay"
+                    ? "jkit downloads " + pkg.vendor() + unsigned + " only from there: your foojay"
                             + " mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links, or pick another version or vendor"
                     : "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
         }

@@ -11,12 +11,14 @@ import dev.jkit.model.Version;
 import dev.jkit.sources.FoojaySource.Pkg;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -172,8 +174,9 @@ class SourcesTest {
         Pkg b = new Pkg("b", Vendor.of("temurin"), 21, Version.parse("21.0.13+9"), "b.tar.gz", "tar.gz", "lts", true);
         assertThatThrownBy(() -> new FoojaySource(fake(Map.of("ids/b", info("https://example.invalid/b.tar.gz", ""))),
                 FoojaySource.DEFAULT_BASE).availability(b)).hasMessageContaining("refusing it");
-        // other vendors' downloads are wherever they host them; a mirror on this machine serves its own
-        assertThat(one("zulu", "21.0.13", info("https://example.invalid/z.tar.gz", "")).url().getHost())
+        // vendors whose servers aren't known are downloaded wherever foojay says; a mirror on this
+        // machine serves its own
+        assertThat(one("kona", "21.0.13", info("https://example.invalid/k.tar.gz", "")).url().getHost())
                 .isEqualTo("example.invalid");
         String builds = "{\"result\":[" + pkg("b", "temurin", 21, "21.0.13+9", "glibc", "") + "]}";
         assertThat(new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info("http://127.0.0.1:9/b.tar.gz", ""))),
@@ -329,9 +332,9 @@ class SourcesTest {
         assertThatThrownBy(() -> one("temurin", "17.0.3+7", info(old, "http://example.invalid/x.sig")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("refusing a signature over http");
         // other vendors' links are never fetched: a bad one is dropped
-        assertThat(one("zulu", "21.0.13", info("https://example.invalid/z.tar.gz", "http://example.invalid/z.sig"))
-                .signature()).isNull();
-        assertThat(one("zulu", "21.0.13", info("https://example.invalid/z.tar.gz", "https://example.invalid/z.sig"))
+        String zulu = "https://cdn.azul.com/zulu/bin/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz";
+        assertThat(one("zulu", "21.0.13", info(zulu, "http://example.invalid/z.sig")).signature()).isNull();
+        assertThat(one("zulu", "21.0.13", info(zulu, "https://example.invalid/z.sig"))
                 .signature()).hasToString("https://example.invalid/z.sig");
     }
 
@@ -349,6 +352,88 @@ class SourcesTest {
                 "x.tar.gz")).isTrue();
         assertThat(FoojaySource.onVendorHost("corretto", URI.create(
                 "https://corretto.aws/downloads/resources/21.0.9.10.1/x.tar.gz"), "x.tar.gz")).isTrue();
+        assertThat(FoojaySource.PINNED_VENDORS).containsAll(FoojaySource.SIGNING_VENDORS);
+    }
+
+    /** A file next to this class in the test resources, as text. */
+    static String resource(String name) throws IOException {
+        try (var in = SourcesTest.class.getResourceAsStream(name)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void theRealDownloadLinksOfEveryVendorWithAKnownServerPass() throws IOException {
+        // links foojay listed, file names as it listed them (some with + where the link has %2B),
+        // across versions, platforms, JavaFX and Oracle's gds.oracle.com links: a pin these don't
+        // pass would break installs of that vendor
+        List<String[]> links = resource("foojay-download-links.txt").lines()
+                .filter(l -> !l.startsWith("#") && !l.isBlank()).map(l -> l.split(" ")).toList();
+        assertThat(links).hasSizeGreaterThan(300);
+        TreeSet<String> vendors = new TreeSet<>();
+        for (String[] link : links) {
+            vendors.add(link[0]);
+            assertThat(FoojaySource.onVendorHost(link[0], URI.create(link[2]), link[1])).as(String.join(" ", link)).isTrue();
+            if (!link[2].endsWith("/content")) {
+                // another file name is another file
+                assertThat(FoojaySource.onVendorHost(link[0], URI.create(link[2]), "x" + link[1])).as(link[2]).isFalse();
+            }
+            assertThat(FoojaySource.vendorHost(link[0])).isNotBlank();
+        }
+        assertThat(vendors).containsExactlyInAnyOrderElementsOf(FoojaySource.PINNED_VENDORS);
+    }
+
+    @Test
+    void aDownloadOfAVendorJkitHasNoKeyForMustStillBeOnItsServer() throws IOException {
+        // its checksum comes from foojay too: a foojay that could also name the file could pick both
+        String zulu = "https://cdn.azul.com/zulu/bin/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz";
+        assertThat(one("zulu", "21.0.13", info(zulu, "")).url()).hasToString(zulu);
+        for (String elsewhere : new String[] {"https://example.invalid/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz",
+                "https://cdn.azul.com.example.invalid/zulu/bin/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz",
+                "https://cdn.azul.com/zulu/pdf/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz",
+                "https://cdn.azul.com/zulu/bin/x/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz",
+                "https://cdn.azul.com:8443/zulu/bin/zulu21.46.19-ca-jdk21.0.13-linux_x64.tar.gz"}) {
+            assertThatThrownBy(() -> one("zulu", "21.0.13", info(elsewhere, ""))).as(elsewhere)
+                    .isInstanceOf(JkitException.class)
+                    .hasMessageContaining("not on cdn.azul.com/zulu/bin/; refusing it")
+                    .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                            "jkit downloads zulu builds only from there: try again later, or pick another vendor"));
+        }
+        // on GitHub, the vendor's own repository's releases, not a fork's or an archive of a commit
+        String liberica = "https://github.com/bell-sw/Liberica/releases/download/21.0.13%2B11/bellsoft-jdk21.0.13+11-linux-amd64.tar.gz";
+        assertThat(one("liberica", "21.0.13+11", info(liberica, "")).url()).hasToString(liberica);
+        for (String elsewhere : new String[] {
+                "https://github.com/someone/Liberica/releases/download/21.0.13%2B11/bellsoft-jdk21.0.13+11-linux-amd64.tar.gz",
+                "https://github.com/bell-sw/Liberica/archive/bellsoft-jdk21.0.13+11-linux-amd64.tar.gz",
+                "https://github.com/bell-sw/Liberica/raw/main/bellsoft-jdk21.0.13+11-linux-amd64.tar.gz"}) {
+            assertThatThrownBy(() -> one("liberica", "21.0.13+11", info(elsewhere, ""))).as(elsewhere)
+                    .hasMessageContaining("not on BellSoft's GitHub releases");
+        }
+        assertThatThrownBy(() -> one("semeru", "21.0.13", info("https://github.com/ibmruntimes/openj9/releases/download/x/"
+                + "ibm-semeru-open-jdk_x64_linux_21.0.13.tar.gz", ""))).hasMessageContaining("refusing it");
+        assertThatThrownBy(() -> one("sap_machine", "21.0.13", info("https://github.com/SAP/other/releases/download/x/"
+                + "sapmachine-jdk-21.0.13_linux-x64_bin.tar.gz", ""))).hasMessageContaining("refusing it");
+        assertThatThrownBy(() -> one("oracle", "21.0.13", info("https://download.oracle.com.example.invalid/java/21/archive/"
+                + "jdk-21.0.13_linux-x64_bin.tar.gz", ""))).hasMessageContaining("not on download.oracle.com/java/");
+        // gds.oracle.com links name an artifact: only for Oracle's GraalVM builds, and only in that shape
+        String gds = "https://gds.oracle.com/api/20220101/artifacts/42B0A0415697484BABDF56B3892CABA6/content";
+        assertThat(FoojaySource.onVendorHost("graalvm_community", URI.create(gds), "graalvm.tar.gz")).isTrue();
+        assertThat(FoojaySource.onVendorHost("oracle", URI.create(gds), "jdk.tar.gz")).isFalse();
+        assertThat(FoojaySource.onVendorHost("graalvm_community", URI.create(gds.replace("/content", "/x")), "x")).isFalse();
+        assertThat(FoojaySource.onVendorHost("graalvm_community", URI.create(gds + "?a=b"), "content")).isFalse();
+        // a foojay mirror that rehosts them must keep the vendor's links, as for unsigned Temurin builds
+        URI mirror = URI.create("https://foojay.corp.example/disco/v3.0");
+        assertThatThrownBy(() -> one(mirror, "zulu", "21.0.13", info("https://files.corp.example/jdk/z.tar.gz", "")))
+                .hasMessageContaining("foojay.corp.example lists the download of zulu 21.0.13 at https://files.corp.example/jdk/z.tar.gz")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .contains("zulu builds, which jkit has no key to check, only from there: your foojay mirror"
+                                + " (JKIT_SOURCES_FOOJAY_URL) must keep their links"));
+        assertThat(one(mirror, "zulu", "21.0.13", info(zulu, "")).url()).hasToString(zulu);
+        // one on this machine serves what it likes
+        String builds = "{\"result\":[" + pkg("b", "zulu", 21, "21.0.13", "glibc", "") + "]}";
+        assertThat(new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info("http://127.0.0.1:9/b.tar.gz", ""))),
+                URI.create("http://127.0.0.1:9/disco/")).resolve(Tool.JDK, "21", Vendor.of("zulu"),
+                Platform.LINUX_X64, false, false).url()).hasToString("http://127.0.0.1:9/b.tar.gz");
     }
 
     @Test
@@ -658,7 +743,7 @@ class SourcesTest {
             routes.put("ids/o" + u, none);
         }
         routes.put("jdk_version=17", "{\"result\":[" + String.join(",", pkgs) + "]}");
-        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o9.tar.gz\",\"checksum\":\"\"}]}");
+        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://download.oracle.com/java/17/archive/o9.tar.gz\",\"checksum\":\"\"}]}");
         Artifact a = new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
                 .resolve(Tool.JDK, "17", Vendor.of("oracle"), Platform.LINUX_X64, false, false);
         assertThat(a.version().raw()).isEqualTo("17.0.9"); // the 32nd build looked up
@@ -716,7 +801,7 @@ class SourcesTest {
             routes.put("ids/o" + u, none);
         }
         routes.put("jdk_version=17", "{\"result\":[" + String.join(",", pkgs) + "]}");
-        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o9.tar.gz\",\"checksum\":\"\"}]}");
+        routes.put("ids/o9", "{\"result\":[{\"direct_download_uri\":\"https://download.oracle.com/java/17/archive/o9.tar.gz\",\"checksum\":\"\"}]}");
         FoojaySource foojay = new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE);
         Pkg newest = foojay.builds(17, Vendor.of("oracle"), Platform.LINUX_X64, false, false).getFirst();
         FoojaySource.Availability a = foojay.availability(newest, "17", Platform.LINUX_X64, false, false);
@@ -724,7 +809,7 @@ class SourcesTest {
         assertThat(a.checksum()).isFalse();
 
         routes.put("ids/o9", none);
-        routes.put("ids/o8", "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/o8.tar.gz\"}]}");
+        routes.put("ids/o8", "{\"result\":[{\"direct_download_uri\":\"https://download.oracle.com/java/17/archive/o8.tar.gz\"}]}");
         // install gives up after 32 builds, and so does search
         assertThat(new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
                 .availability(newest, "17", Platform.LINUX_X64, false, false).downloadable()).isFalse();
