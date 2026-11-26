@@ -703,14 +703,32 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      # Only the file that says which key jkit trusts: the release job runs no build code
-      - name: Check out jkit's release key fingerprint
+      # Only the file that says which key jkit trusts, and what the release notes are made from:
+      # the release job runs no build code
+      - name: Check out jkit's release key fingerprint and changelog
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src
           persist-credentials: false
-          sparse-checkout: jkit-core/src/main/java/dev/jkit/core/Signatures.java
+          sparse-checkout: |
+            jkit-core/src/main/java/dev/jkit/core/Signatures.java
+            CHANGELOG.md
+            packaging/release-notes.sh
           sparse-checkout-cone-mode: false
+
+      # The release's text: this version's CHANGELOG.md section and how to install it. With no
+      # section (a pre-release, say), GitHub's generated notes instead.
+      - name: Release notes
+        run: |
+          set +e
+          bash src/packaging/release-notes.sh "${GITHUB_REF_NAME#v}" src/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          status=$?
+          set -e
+          case $status in
+            0) cat "$RUNNER_TEMP/notes.md" ;;
+            3) rm "$RUNNER_TEMP/notes.md"; echo "::warning::no CHANGELOG.md section for $GITHUB_REF_NAME: using generated notes" ;;
+            *) exit "$status" ;;
+          esac
 
       # jkit self-update refuses a release whose SHA256SUMS isn't signed by the key built into it.
       # JKIT_RELEASE_KEY is that key's armored secret key, without a passphrase
@@ -773,8 +791,13 @@ jobs:
               exit 1
             fi
             rm -f view.err
+            if [ -f "$RUNNER_TEMP/notes.md" ]; then
+              flags+=(--notes-file "$RUNNER_TEMP/notes.md")
+            else
+              flags+=(--generate-notes)
+            fi
             gh release create "$tag" * --draft \
-              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+              --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "jkit ${tag#v}" "${flags[@]}"
           fi
           # "Latest" only for the highest version: a later 0.2.x patch must not take it from 0.3.0
