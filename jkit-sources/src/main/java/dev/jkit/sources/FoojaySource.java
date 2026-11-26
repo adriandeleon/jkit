@@ -132,7 +132,9 @@ public final class FoojaySource {
             if (next == null) {
                 throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " " + pkg.version()
                         + " as " + Visible.of(download.toString()) + ", where jkit can't find its signature; refusing it",
-                        "try again later, or pick another vendor");
+                        base.equals(DEFAULT_BASE) ? "try again later, or pick another vendor"
+                                : "your foojay mirror (JKIT_SOURCES_FOOJAY_URL) must link each file by its path,"
+                                        + " with its .sig next to it; or pick another vendor");
             }
             return next;
         }
@@ -228,8 +230,13 @@ public final class FoojaySource {
      * keys for it must be on that vendor's own server ({@link #onVendorHost}), or the build is
      * refused: a signature by the vendor's key is checked wherever the file comes from, but a
      * Temurin build from before Adoptium signed has only its checksum, which comes from foojay,
-     * and this keeps the file itself coming from Adoptium. A local mirror on this machine
-     * ({@code JKIT_SOURCES_FOOJAY_URL=http://localhost...}) is yours, and may serve the files itself.
+     * and this keeps the file itself coming from Adoptium.
+     * <p>
+     * A foojay mirror of your own ({@code JKIT_SOURCES_FOOJAY_URL}) may serve the builds the
+     * vendor signed itself, with their .sig next to them: the signature, which install then
+     * requires, and the version check after it are what make those safe, not the host. Only the
+     * builds without a signature must keep the vendor's links. A mirror on this machine
+     * ({@code http://localhost...}) may serve those too.
      */
     private URI download(JsonNode info, Pkg pkg) {
         String url = Json.text(info, "direct_download_uri");
@@ -241,12 +248,16 @@ public final class FoojaySource {
         if (vendor.equals("corretto") && download.getRawPath() != null && download.getRawPath().contains("/latest/")) {
             return null; // what packages() skips, should a list name it otherwise
         }
-        if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
-                && !onVendorHost(vendor, download, pkg.fileName())) {
+        boolean mirror = !base.equals(DEFAULT_BASE);
+        boolean pinned = SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+                && (!mirror || !vendorSigns(pkg.vendor(), pkg.version()));
+        if (pinned && !onVendorHost(vendor, download, pkg.fileName())) {
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
                     + pkg.version() + " at " + Visible.of(download.toString()) + ", not on "
-                    + vendorHost(vendor) + "; refusing it",
-                    "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
+                    + vendorHost(vendor) + "; refusing it", mirror
+                    ? "jkit downloads " + pkg.vendor() + " builds the vendor didn't sign only from there: your foojay"
+                            + " mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links, or pick another version or vendor"
+                    : "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
         }
         return download;
     }

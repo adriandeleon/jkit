@@ -74,11 +74,16 @@ class SourcesTest {
 
     /** What install finds for one build of {@code vendor} whose foojay answer is {@code info}. */
     private static Artifact one(String vendor, String version, String info) throws IOException {
+        return one(FoojaySource.DEFAULT_BASE, vendor, version, info);
+    }
+
+    /** The same, through the foojay at {@code base}. */
+    private static Artifact one(URI base, String vendor, String version, String info) throws IOException {
         // listed under the download's own file name, as foojay lists them
         Matcher link = Pattern.compile("\"direct_download_uri\":\"[^\"?#]*/([A-Za-z0-9][^\"/?#]*)[\"?#]").matcher(info);
         String builds = "{\"result\":[" + pkg("b", vendor, Version.parse(version).part(0), version, "glibc", "")
                 .replace("\"b.tar.gz\"", "\"" + (link.find() ? link.group(1) : "b.tar.gz") + "\"") + "]}";
-        return new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info)), FoojaySource.DEFAULT_BASE)
+        return new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info)), base)
                 .resolve(Tool.JDK, version, Vendor.of(vendor), Platform.LINUX_X64, false, false);
     }
 
@@ -174,6 +179,38 @@ class SourcesTest {
         assertThat(new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info("http://127.0.0.1:9/b.tar.gz", ""))),
                 URI.create("http://127.0.0.1:9/disco/")).resolve(Tool.JDK, "21", Vendor.of("temurin"),
                 Platform.LINUX_X64, false, false).url()).hasToString("http://127.0.0.1:9/b.tar.gz");
+    }
+
+    @Test
+    void aFoojayMirrorMayServeTheBuildsAVendorSignedButNotTheOthers() throws IOException {
+        // a company's own foojay, which rehosts the files: a signed build is checked by its
+        // signature, next to the mirror's copy, and its version, wherever it comes from
+        URI mirror = URI.create("https://foojay.corp.example/disco/v3.0");
+        String temurin = "https://files.corp.example/jdk/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz";
+        assertThat(one(mirror, "temurin", "21.0.13+9", info(temurin, "")).signature()).hasToString(temurin + ".sig");
+        String microsoft = "https://files.corp.example/jdk/microsoft-jdk-21.0.13.1-linux-x64.tar.gz";
+        assertThat(one(mirror, "microsoft", "21.0.13.1", info(microsoft, "")).signature()).hasToString(microsoft + ".sig");
+        String corretto = "https://files.corp.example/jdk/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz";
+        assertThat(one(mirror, "corretto", "21.0.13.1+2", info(corretto, "")).signature()).hasToString(corretto + ".sig");
+        // a Temurin build from before Adoptium signed has only the mirror's checksum: Adoptium's links only
+        String old = "https://files.corp.example/jdk/OpenJDK17U-jdk_x64_linux_hotspot_17.0.3_7.tar.gz";
+        assertThatThrownBy(() -> one(mirror, "temurin", "17.0.3+7", info(old, "")))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("foojay.corp.example lists the download of temurin 17.0.3+7 at " + old)
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .contains("your foojay mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links"));
+        String adoptium = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/"
+                + "OpenJDK17U-jdk_x64_linux_hotspot_17.0.3_7.tar.gz";
+        assertThat(one(mirror, "temurin", "17.0.3+7", info(adoptium, "")).url()).hasToString(adoptium);
+        // a signed build still needs a .sig jkit can find
+        assertThatThrownBy(() -> one(mirror, "temurin", "21.0.13+9", info("https://files.corp.example/get?id=1", "")))
+                .hasMessageContaining("where jkit can't find its signature")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .contains("JKIT_SOURCES_FOOJAY_URL"));
+        // the default foojay keeps every build of these vendors on the vendor's server
+        assertThatThrownBy(() -> one("temurin", "21.0.13+9", info(temurin, ""))).hasMessageContaining("refusing it")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .doesNotContain("JKIT_SOURCES_FOOJAY_URL"));
     }
 
     @Test

@@ -80,8 +80,11 @@ matters:
     `corretto.aws/downloads/resources/<version>/<file>` (or `d3pxv6yz143wms.cloudfront.net/<version>/<file>`,
     where Amazon still serves its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
     names, and the redirects the vendor's server answers with are checked only to stay on HTTPS.
-    A foojay mirror (`JKIT_SOURCES_FOOJAY_URL`) must keep those links; one on this machine
-    (`http://localhost`) may serve the files itself.
+    A foojay mirror of your own (`JKIT_SOURCES_FOOJAY_URL`) may serve the builds these vendors
+    signed itself, with each `.sig` next to its file: the signature, which is still required, and
+    the version check after it are what make those safe, not the host. It must keep the vendor's
+    links for the builds they didn't sign (Temurin before July 2022). A mirror on this machine
+    (`http://localhost`) may serve those too.
   - What that leaves a compromised foojay: it can choose which build of the vendor and major you
     asked for is installed, an older one included (with no version given, also which major), and
     for a Temurin build from before July 2022 it supplies the checksum. Such a build still comes
