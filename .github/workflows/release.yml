@@ -15,8 +15,8 @@ name: Release
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
 # publishing anything: signing, release, homebrew and winget only run for a pushed tag, so the
 # macOS archives of a manual run are unsigned. Every push to main and every pull request that
-# changes the build or the packaging gets the same dry run, so a native-image regression or a
-# plugin bump fails there and not on the release tag.
+# changes the build or the packaging gets the same dry run (a push that only changes docs
+# doesn't), so a native-image regression or a plugin bump fails there and not on the release tag.
 #
 # If homebrew or winget fails after the release is published (a missing token, an outage), fix
 # the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
@@ -27,6 +27,10 @@ on:
   push:
     tags: ['v*']
     branches: [main]   # a dry run: the native binaries of what was merged
+    # not for a merge that only changes docs. Path filters apply to the branch push only: GitHub
+    # doesn't evaluate them for tag pushes, so every v* tag still builds and releases.
+    paths-ignore: ['**.md', 'docs/**', 'branding/**', '.github/ISSUE_TEMPLATE/**',
+                   '.github/workflows/ci.yml', '.github/workflows/notify-vitrina.yml']
   workflow_dispatch:
   pull_request:
     # also the native-image metadata (the JVM tests in ci.yml don't exercise it) and what the packages ship
@@ -269,10 +273,18 @@ jobs:
           "$python" -m http.server "$port" --bind 127.0.0.1 --directory "$mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
           server=$!
           trap 'kill "$server" 2> /dev/null || true' EXIT
+          up=false
           for _ in $(seq 50); do
-            if curl -fs -o /dev/null "http://127.0.0.1:$port/good/org/apache/maven/apache-maven/maven-metadata.xml"; then break; fi
+            if curl -fs -o /dev/null "http://127.0.0.1:$port/good/org/apache/maven/apache-maven/maven-metadata.xml"; then
+              up=true; break
+            fi
             sleep 0.2
           done
+          if [ "$up" != true ]; then
+            cat "$RUNNER_TEMP/mirror.log"
+            echo "::error::local mirror didn't start"
+            exit 1
+          fi
 
           export JKIT_SOURCES_MAVEN_URL="http://127.0.0.1:$port/good/"
           export JKIT_HOME="$RUNNER_TEMP/jkit-mirror-good"
@@ -691,14 +703,32 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      # Only the file that says which key jkit trusts: the release job runs no build code
-      - name: Check out jkit's release key fingerprint
+      # Only the file that says which key jkit trusts, and what the release notes are made from:
+      # the release job runs no build code
+      - name: Check out jkit's release key fingerprint and changelog
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src
           persist-credentials: false
-          sparse-checkout: jkit-core/src/main/java/dev/jkit/core/Signatures.java
+          sparse-checkout: |
+            jkit-core/src/main/java/dev/jkit/core/Signatures.java
+            CHANGELOG.md
+            packaging/release-notes.sh
           sparse-checkout-cone-mode: false
+
+      # The release's text: this version's CHANGELOG.md section and how to install it. With no
+      # section (a pre-release, say), GitHub's generated notes instead.
+      - name: Release notes
+        run: |
+          set +e
+          bash src/packaging/release-notes.sh "${GITHUB_REF_NAME#v}" src/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          status=$?
+          set -e
+          case $status in
+            0) cat "$RUNNER_TEMP/notes.md" ;;
+            3) rm "$RUNNER_TEMP/notes.md"; echo "::warning::no CHANGELOG.md section for $GITHUB_REF_NAME: using generated notes" ;;
+            *) exit "$status" ;;
+          esac
 
       # jkit self-update refuses a release whose SHA256SUMS isn't signed by the key built into it.
       # JKIT_RELEASE_KEY is that key's armored secret key, without a passphrase
@@ -761,8 +791,13 @@ jobs:
               exit 1
             fi
             rm -f view.err
+            if [ -f "$RUNNER_TEMP/notes.md" ]; then
+              flags+=(--notes-file "$RUNNER_TEMP/notes.md")
+            else
+              flags+=(--generate-notes)
+            fi
             gh release create "$tag" * --draft \
-              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+              --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "jkit ${tag#v}" "${flags[@]}"
           fi
           # "Latest" only for the highest version: a later 0.2.x patch must not take it from 0.3.0

@@ -222,7 +222,7 @@ public final class SelfUpdate {
         if (!says.equals("jkit " + release.version().raw())) {
             throw new JkitException("the new jkit binary doesn't run here (jkit --version said: "
                     + Visible.of(says.isEmpty() ? "nothing" : says) + "); nothing was changed",
-                    "Linux builds need glibc 2.34 or newer; macOS builds need macOS 15 or newer");
+                    "Linux builds need glibc 2.34 or newer; macOS builds need macOS 14 or newer");
         }
         return binary;
     }

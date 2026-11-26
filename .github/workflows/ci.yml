@@ -66,6 +66,10 @@ jobs:
         if: runner.os == 'Linux'
         run: packaging/third-party-notices.sh --check
 
+      - name: Check the release notes
+        if: runner.os == 'Linux'
+        run: packaging/release-notes.sh --check
+
       - name: Dry-run the packaging scripts
         if: runner.os == 'Linux'
         run: |
