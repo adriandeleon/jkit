@@ -76,13 +76,13 @@ final class UserEnvSetup {
                         // saved first: if writing the new value fails, the old one is still on record
                         String saved = savedVariable(tool);
                         writes.put(saved, before);
-                        report.userEnv(saved, "set", before);
+                        report.userEnv(Changes.Change.Type.USER_ENV_SET, saved, before);
                         report.note("replaced " + var + "=" + before + ", which was set before; it is kept in " + saved
                                 + ", and jkit env --uninstall puts it back");
                     }
                 }
                 writes.put(var, link.toString());
-                report.userEnv(var, "set", link.toString());
+                report.userEnv(Changes.Change.Type.USER_ENV_SET, var, link.toString());
             }
             if (tool.onPath()) {
                 bins.add(link.resolve("bin").toString());
@@ -93,7 +93,7 @@ final class UserEnvSetup {
         for (String bin : bins) {
             if (path.stream().noneMatch(e -> same(e, bin))) {
                 added.add(bin);
-                report.userEnv("PATH", "add", bin);
+                report.userEnv(Changes.Change.Type.USER_ENV_PATH_ADD, "PATH", bin);
             }
         }
         if (!added.isEmpty()) {
@@ -139,7 +139,8 @@ final class UserEnvSetup {
                     restore = false;
                 }
                 writes.put(var, restore ? before : null);
-                report.userEnv(var, restore ? "set" : "unset", restore ? before : null);
+                report.userEnv(restore ? Changes.Change.Type.USER_ENV_SET : Changes.Change.Type.USER_ENV_UNSET, var,
+                        restore ? before : null);
                 if (restore) {
                     report.note("put back " + var + "=" + before + ", which was set before jkit env --install");
                 }
@@ -149,7 +150,7 @@ final class UserEnvSetup {
             }
             if (current.containsKey(saved)) {
                 writes.put(saved, null);
-                report.userEnv(saved, "unset", null);
+                report.userEnv(Changes.Change.Type.USER_ENV_UNSET, saved, null);
             }
             if (tool.onPath()) {
                 bins.add(Path.of(link, "bin").toString());
@@ -161,7 +162,7 @@ final class UserEnvSetup {
         List<String> kept = new ArrayList<>();
         for (String entry : parts) {
             if (!entry.isBlank() && bins.stream().anyMatch(b -> same(entry, b))) {
-                report.userEnv("PATH", "remove", entry);
+                report.userEnv(Changes.Change.Type.USER_ENV_PATH_REMOVE, "PATH", entry);
             } else {
                 kept.add(entry);
             }
