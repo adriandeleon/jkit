@@ -252,7 +252,17 @@ public final class ShellEnv {
         }
     }
 
-    private static boolean isGlobal(String value, JkitHome home, Tool tool) {
+    /**
+     * Whether jkit chose {@code tool} in this shell: with jkit use, from a project, or by keeping the
+     * user's own *_HOME aside. Without one, a reset has nothing to take away.
+     */
+    public static boolean hasChoice(Map<String, String> env, Tool tool) {
+        return blankToNull(env.get(stateVariable(tool))) != null || env.containsKey(projectVariable(tool))
+                || env.containsKey(userVariable(tool));
+    }
+
+    /** Whether a *_HOME value is the global link, as the hook sets it. */
+    public static boolean isGlobal(String value, JkitHome home, Tool tool) {
         Path path = Fs.path(value);
         return path != null && path.toAbsolutePath().normalize().equals(home.global(tool).toAbsolutePath().normalize());
     }

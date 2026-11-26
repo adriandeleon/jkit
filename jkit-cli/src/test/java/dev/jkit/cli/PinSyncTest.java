@@ -220,6 +220,25 @@ class PinSyncTest {
     }
 
     @Test
+    void resetWithoutAJkitChoiceLeavesTheUsersJavaHomeAlone() throws Exception {
+        env.put("JKIT_ENV_FILE", envFile.toString());
+        env.put("JAVA_HOME", "/opt/my-jdk");
+        ResetCommand reset = new ResetCommand();
+        reset.tool = Tool.JDK;
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(envFile).doesNotExist();
+        assertThat(output()).contains("nothing to reset: this shell has no jdk from jkit use or a project")
+                .contains("JAVA_HOME stays as you set it: /opt/my-jdk");
+
+        // with a jkit use on top, the user's comes back
+        env.put("JKIT_SHELL_JDK", temurin21.toString());
+        env.put("JKIT_USER_JDK", "/opt/my-jdk");
+        env.put("JAVA_HOME", temurin21.toString());
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(Files.readString(envFile)).contains("export JAVA_HOME='/opt/my-jdk'").contains("unset JKIT_USER_JDK");
+    }
+
+    @Test
     void syncWithoutAProjectFileFails() {
         assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
                 .isInstanceOf(JkitException.class).hasMessageStartingWith("no jkit.toml");

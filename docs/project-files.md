@@ -107,7 +107,7 @@ when you leave, printing every variable they change. PowerShell doesn't switch o
 - A `JAVA_HOME` (or other `*_HOME`) you set yourself, outside jkit, is kept in `JKIT_USER_JDK`
   (`JKIT_USER_MAVEN`, ...) when a project or `jkit use` first replaces it. It comes back, instead of
   the global version, once neither applies any more (you leave the project, `jkit reset jdk`), and
-  jkit says so each time.
+  jkit says so each time. In a shell where jkit chose no JDK, `jkit reset jdk` changes nothing.
 
 ## Commands
 
