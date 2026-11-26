@@ -66,12 +66,12 @@ final class InstallCommand implements Callable<Integer> {
     /**
      * Downloads and installs {@code artifact}, first telling the user what can't be checked.
      *
-     * <p>A download with no checksum at all is refused unless {@code allowUnverified}, so that a
-     * project's jkit sync never installs unchecked code without being asked to; {@code retry} is
-     * the command line that allows it. An md5 or sha1 checksum only gets a warning. If the
-     * publisher signs its downloads with a key built into jkit, the signature must check out too,
-     * unless {@code allowUnverified}. For downloads without a checksum (Corretto) the signature is
-     * the only check.
+     * <p>The Installer enforces the rules ({@link Installer.Verification}): a download with no
+     * checksum at all is refused unless {@code allowUnverified}, so that a project's jkit sync never
+     * installs unchecked code without being asked to; {@code retry} is the command line that allows
+     * it. An md5 or sha1 checksum only gets a warning. If the publisher signs its downloads with a
+     * key built into jkit, the signature must check out too, unless {@code allowUnverified}. For
+     * downloads without a checksum (Corretto) the signature is the only check.
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
@@ -80,20 +80,14 @@ final class InstallCommand implements Callable<Integer> {
                     "run the command without --offline");
         }
         String signer = signer(artifact);
-        // When the publisher signs its downloads, a signature jkit can't fetch or check refuses the
-        // install: whoever can replace a download can usually replace the checksum next to it too.
-        boolean signatureRequired = signer != null && !allowUnverified;
         if (artifact.checksum() == null && signer != null) {
             ctx.err.println("note: " + artifact.label() + " has no published checksum; checking " + signer
                     + "'s signature instead");
         } else if (artifact.checksum() == null) {
-            if (!allowUnverified) {
-                throw new JkitException(artifact.label() + " from " + artifact.url().getHost()
-                        + " has no published checksum, so jkit can't check the download; nothing installed",
-                        "install it anyway: " + retry, "or pick another version or vendor");
+            if (allowUnverified) { // otherwise the Installer refuses it
+                ctx.err.println("warning: " + artifact.label() + " has no published checksum; installing it unchecked"
+                        + " (--allow-unverified)");
             }
-            ctx.err.println("warning: " + artifact.label() + " has no published checksum; installing it unchecked"
-                    + " (--allow-unverified)");
         } else if (!isStrong(artifact.checksumAlgorithm())) {
             ctx.err.println("warning: only a " + artifact.checksumAlgorithm() + " checksum is published for "
                     + artifact.label() + ": it catches a broken download, not a tampered one");
@@ -103,8 +97,9 @@ final class InstallCommand implements Callable<Integer> {
         ProgressBar progress = new ProgressBar(ctx.err,
                 "downloading " + artifact.label() + " from " + artifact.url().getHost());
         try {
-            return ctx.installer().install(artifact, progress, signatureRequired);
-        } catch (Installer.SignatureRequired e) {
+            return ctx.installer().install(artifact, progress,
+                    allowUnverified ? Installer.Verification.ALLOW_UNVERIFIED : Installer.Verification.REQUIRED);
+        } catch (Installer.VerificationRequired e) {
             throw new JkitException(e.getMessage(), "install it anyway: " + retry,
                     "or pick another version or vendor");
         }
@@ -158,7 +153,7 @@ final class InstallCommand implements Callable<Integer> {
         if (result.fresh() && first && !noDefault) {
             // Checked and set under the link lock, since another jkit may set a default or remove this
             // install in the meantime.
-            try (AutoCloseable lock = ctx.store.linkLock()) {
+            try (var _ = ctx.store.linkLock()) {
                 if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, LinkOption.NOFOLLOW_LINKS)
                         && Files.isRegularFile(result.installed().home().resolve(Store.MARKER),
                                 LinkOption.NOFOLLOW_LINKS)) {
