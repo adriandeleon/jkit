@@ -25,28 +25,28 @@ import java.util.Map;
 final class Fallback extends Charset {
     /** Each one's ASCII stand-in: the characters jkit's own messages use, and common punctuation. */
     private static final Map<Character, String> ASCII = Map.ofEntries(
-            Map.entry('→', "->"), // →
-            Map.entry('←', "<-"), // ←
-            Map.entry('↑', "^"), // ↑
-            Map.entry('↓', "v"), // ↓
-            Map.entry('…', "..."), // …
-            Map.entry('✓', "+"), // ✓
-            Map.entry('✗', "x"), // ✗
-            Map.entry('○', "o"), // ○
-            Map.entry('●', "*"), // ●
-            Map.entry('•', "*"), // •
-            Map.entry('‾', "~"), // ‾
-            Map.entry('·', "-"), // ·
-            Map.entry('–', "-"), // –
-            Map.entry('—', "--"), // —
-            Map.entry('‘', "'"), // ‘
-            Map.entry('’', "'"), // ’
-            Map.entry('“', "\""), // “
-            Map.entry('”', "\""), // ”
-            Map.entry('×', "x"), // ×
-            Map.entry('≤', "<="), // ≤
-            Map.entry('≥', ">="), // ≥
-            Map.entry(' ', " ")); // no-break space
+            Map.entry('\u2192', "->"), // →
+            Map.entry('\u2190', "<-"), // ←
+            Map.entry('\u2191', "^"), // ↑
+            Map.entry('\u2193', "v"), // ↓
+            Map.entry('\u2026', "..."), // …
+            Map.entry('\u2713', "+"), // ✓
+            Map.entry('\u2717', "x"), // ✗
+            Map.entry('\u25CB', "o"), // ○
+            Map.entry('\u25CF', "*"), // ●
+            Map.entry('\u2022', "*"), // •
+            Map.entry('\u203E', "~"), // ‾
+            Map.entry('\u00B7', "-"), // ·
+            Map.entry('\u2013', "-"), // –
+            Map.entry('\u2014', "--"), // —
+            Map.entry('\u2018', "'"), // ‘
+            Map.entry('\u2019', "'"), // ’
+            Map.entry('\u201C', "\""), // “
+            Map.entry('\u201D', "\""), // ”
+            Map.entry('\u00D7', "x"), // ×
+            Map.entry('\u2264', "<="), // ≤
+            Map.entry('\u2265', ">="), // ≥
+            Map.entry('\u00A0', " ")); // no-break space
 
     /** U+00C0 to U+00FF without their accents (À is A, ñ is n), for a charset with no letters past ASCII. */
     static final String LATIN1_LETTERS = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUY?saaaaaaaceeeeiiiidnooooo?ouuuuy?y";

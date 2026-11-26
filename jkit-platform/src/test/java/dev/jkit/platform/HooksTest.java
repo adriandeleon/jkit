@@ -335,9 +335,9 @@ class HooksTest {
      */
     @Test
     void powershellHookIsAsciiAndKeepsEveryCharacterOfItsPaths() throws Exception {
-        Path root = Files.createDirectories(tmp.resolve("José 😀 o'b’").resolve(".jkit"));
+        Path root = Files.createDirectories(tmp.resolve("Jos\u00E9 \uD83D\uDE00 o'b\u2019").resolve(".jkit"));
         Files.createDirectories(root.resolve("global/jdk/bin"));
-        String self = root.resolveSibling("bin").resolve("jkité").toString();
+        String self = root.resolveSibling("bin").resolve("jkit\u00E9").toString();
         String hook = Hooks.powershell(root, self);
         assertThat(hook.chars().filter(c -> c >= 0x80).count()).as(hook).isZero();
         String script = "$ProgressPreference = 'SilentlyContinue'\n" + hook
@@ -361,7 +361,7 @@ class HooksTest {
             p.getOutputStream().close();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
-            assertThat(out.lines().map(l -> l.replace("﻿", "")).toList()).as(() -> shell + ", stderr: " + read(err))
+            assertThat(out.lines().map(l -> l.replace("\uFEFF", "")).toList()).as(() -> shell + ", stderr: " + read(err))
                     .containsExactly(root.toString(), self, root.resolve("global").resolve("jdk").toString());
         }
         assumeTrue(ran > 0, "no PowerShell on this machine");

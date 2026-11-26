@@ -54,7 +54,7 @@ public final class TextFiles {
     public static void write(Path file, String text, boolean followLinks) throws IOException {
         Encoding encoding = !followLinks && Files.isSymbolicLink(file) ? Encoding.UTF_8 : encoding(file);
         try {
-            AtomicFile.write(file, encoding.bom() ? "﻿" + text : text, encoding.charset(), followLinks);
+            AtomicFile.write(file, encoding.bom() ? "\uFEFF" + text : text, encoding.charset(), followLinks);
         } catch (CharacterCodingException e) {
             throw new JkitException(file + " is in " + encoding.charset().name() + ", which can't hold the new text;"
                     + " nothing changed", "save it as UTF-8, then run the command again");

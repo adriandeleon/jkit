@@ -174,7 +174,7 @@ class ChangesTest {
 
         assertThat(out).contains("set    JAVA_HOME=" + link).contains("PATH   moved " + bin);
         String text = Files.readString(envFile);
-        assertThat(text).startsWith("﻿$env:JAVA_HOME = ")
+        assertThat(text).startsWith("\uFEFF$env:JAVA_HOME = ")
                 .contains("$env:PATH = '" + bin + File.pathSeparator + sys + "'");
         if (dev.jkit.model.Perms.posix()) {
             assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(envFile)))

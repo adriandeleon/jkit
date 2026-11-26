@@ -85,7 +85,7 @@ class RobustnessTest {
         System.arraycopy(utf8, 0, withBom, 3, utf8.length);
         Files.write(home.config(), withBom);
         assertThat(Config.load(home, Map.of()).defaultVendor(Tool.JDK).name()).isEqualTo("zulu");
-        Files.writeString(home.config(), "﻿" + toml, StandardCharsets.UTF_16LE);
+        Files.writeString(home.config(), "\uFEFF" + toml, StandardCharsets.UTF_16LE);
         assertThat(Config.load(home, Map.of()).defaultVendor(Tool.JDK).name()).isEqualTo("zulu");
     }
 
