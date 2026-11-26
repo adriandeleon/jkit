@@ -56,9 +56,19 @@ jobs:
           base=${pom%-SNAPSHOT}
           [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::pom.xml version '$pom' is not x.y.z-SNAPSHOT"; exit 1; }
           # releases only: a pre-release tag (v0.5.0-rc.1) of the next version is fine
+          # a repository with no release tags yet (a fork) has nothing to compare with
           latest=$(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's:.*refs/tags/v::' \
-            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            | { grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -1)
           echo "pom.xml: $pom, latest release: ${latest:-none}"
+          # the release commit itself still says X.Y.Z-SNAPSHOT (releases take the version from the
+          # tag), so a run on the commit the latest tag points at is fine
+          if [ -n "$latest" ]; then
+            tagged=$(git ls-remote --tags origin "refs/tags/v$latest" "refs/tags/v$latest^{}" | awk '{print $1}')
+            if grep -qx "$(git rev-parse HEAD)" <<<"$tagged"; then
+              echo "this is the v$latest release commit"
+              exit 0
+            fi
+          fi
           newest=$(printf '%s\n%s\n' "$latest" "$base" | sort -V | tail -1)
           if [ -n "$latest" ] && { [ "$newest" != "$base" ] || [ "$latest" = "$base" ]; }; then
             echo "::error::pom.xml says $pom but v$latest is released: bump every pom.xml past $latest (e.g. to the next minor -SNAPSHOT)"
