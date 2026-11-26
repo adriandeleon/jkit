@@ -141,6 +141,11 @@ final class WindowsOs implements OsServices {
         if (shell.equals("pwsh") || shell.equals("powershell")) {
             return Hooks.powershell(root, self);
         }
+        if (shell.equals("bash") || shell.equals("zsh") || shell.equals("fish")) {
+            // an older jkit's hook --install added this to Git Bash's ~/.bashrc
+            throw new JkitException("unsupported shell on Windows: " + shell, "shells: pwsh, powershell",
+                    "if your " + shell + " startup file runs this, take it out: jkit hook " + shell + " --uninstall");
+        }
         throw new JkitException("unsupported shell on Windows: " + shell, "shells: pwsh, powershell");
     }
 }
