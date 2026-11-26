@@ -1,5 +1,6 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.Installer;
 import dev.jkit.core.Signatures;
@@ -10,6 +11,7 @@ import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -173,11 +175,24 @@ final class InstallCommand implements Callable<Integer> {
                     result.fresh() ? result.signedBy() : null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
-        if (!madeDefault) {
+        if (!madeDefault && !isDefault(ctx, globalLink, result.installed().home())) {
             ctx.out.println("  make it the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText)
                     + (fx ? " --fx" : "") + " --global");
         }
         return 0;
+    }
+
+    /**
+     * Whether the global link points at {@code home} now: the jkit that won an install race may
+     * have made it the default meanwhile, and then saying how to make it one is wrong.
+     */
+    static boolean isDefault(Context ctx, Path link, Path home) {
+        try {
+            Path target = ctx.os.readLink(link);
+            return target != null && Fs.same(target, home);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /** The download for {@code spec}: from foojay for JDKs and GraalVM, else the tool's own source. */
