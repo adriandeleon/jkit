@@ -21,10 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`jkit prune` keeps builds a running program uses**, such as a JVM, an IDE or a Gradle daemon,
   and says which process; `--json` lists them as `inUse`. A `jkit use` in another shell that runs
   nothing from the build still can't be seen.
-- **jkit runs on Alpine.** Each release has static Linux binaries linked against musl,
-  `jkit-<version>-linux-x64-musl.tar.gz` and `-linux-aarch64-musl.tar.gz`, which need nothing
-  from the system (they also run on glibc distributions older than the 2.34 the other builds
-  need). `jkit self-update` on a musl system picks them; before, it refused. They contain musl
+- **jkit runs on Alpine (x64).** Each release has a static Linux x64 binary linked against musl,
+  `jkit-<version>-linux-x64-musl.tar.gz`, which needs nothing from the system (it also runs on
+  glibc distributions older than the 2.34 the other builds need). `jkit self-update` on a musl
+  system picks it; before, it refused. There's no arm64 musl build: GraalVM's native-image can't
+  make one yet. It contains musl
   libc and zlib, whose licenses are in `THIRD-PARTY-NOTICES`.
 - **The `.deb` and `.rpm` are signed** with the key the Vitrina apt repository signs with
   (`8486A7AF4FC8FEE93D83CDB4EA5FA138C2C09C4A`, at https://vitrina-project.dev/vitrina.asc), so
