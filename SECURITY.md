@@ -62,12 +62,24 @@ matters:
     have no signature either. jkit installs these on their checksum and says only the checksum was
     checked. Other JDK vendors aren't checked (they publish no signatures, or none with a key jkit
     has), nor is Gradle, which publishes none.
-  - jkit doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: it looks
-    for the `.sig` next to whatever download foojay names, whether or not foojay lists one (it
-    leaves it out for some builds that have one). So a compromised foojay entry can't skip the
-    check by leaving the signature out or pointing the download elsewhere: the install then
-    stops, as for any signature jkit can't fetch. A signature link foojay lists over plain http is
-    refused, not ignored.
+  - JDK builds are found through the foojay API, and jkit trusts it as little as it can. It
+    doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: it looks for
+    the `.sig` next to the download whether or not foojay lists one (it leaves it out for some
+    builds that have one), and a signature link foojay lists over plain http is refused, not
+    ignored. It takes only builds foojay lists under the vendor and major version you asked for,
+    so an answer can't call a Temurin build "Zulu", or a Temurin 21 build 17.0.3, to have it
+    installed without the signature check. And a build of these three vendors must download from
+    the vendor's own server, or it is refused: Adoptium's GitHub releases (`github.com/adoptium/`),
+    `aka.ms`, and `corretto.aws` (or `d3pxv6yz143wms.cloudfront.net`, where Amazon still serves
+    its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
+    names, and the redirects the vendor's server answers with are checked only to stay on HTTPS.
+    A foojay mirror (`JKIT_SOURCES_FOOJAY_URL`) must keep those links; one on this machine
+    (`http://localhost`) may serve the files itself.
+  - What that leaves a compromised foojay: it can choose which build of the vendor and major you
+    asked for is installed, an older one included (with no version given, also which major), and
+    for a Temurin build from before July 2022 it supplies the checksum. Such a build still comes
+    from Adoptium's GitHub releases, but only its checksum is checked, and jkit can't tell which
+    of Adoptium's builds it is. For a signed build it can only make the install fail.
   - Where there is a checksum, the signature is checked as well, never instead of it. Corretto
     publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
@@ -138,6 +150,7 @@ user profile.
 
 ## Release artifacts
 
-Each release lists SHA-256 checksums in `SHA256SUMS`, carries a GitHub build provenance
+Each release lists SHA-256 checksums in `SHA256SUMS`, signed with jkit's release key in
+`SHA256SUMS.asc` (from 0.4.0; the key is above, under `jkit self-update`), carries a GitHub build provenance
 attestation (`gh attestation verify <file> --repo adriandeleon/jkit`) and a CycloneDX SBOM. The
 macOS binaries are signed and notarized by Apple.

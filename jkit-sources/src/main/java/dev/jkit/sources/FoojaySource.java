@@ -7,6 +7,7 @@ import dev.jkit.model.Suggest;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -79,7 +80,12 @@ public final class FoojaySource {
         return packages(platform, "latest=available&release_status=ga" + (pre ? "&release_status=ea" : ""), fx);
     }
 
-    /** Every build of one major from one vendor, newest first. */
+    /**
+     * Every build of one major from one vendor, newest first. Only those: the vendor a build is
+     * listed under decides which key its signature must be by, or whether jkit looks for one, and
+     * its version whether Temurin signed it. A list that answers a question about Temurin 21 with a
+     * build it calls Zulu, or Temurin 17.0.3, would otherwise choose to skip the signature check.
+     */
     public List<Pkg> builds(int major, Vendor vendor, Platform platform, boolean fx, boolean pre)
             throws IOException {
         String status = pre ? "release_status=ga&release_status=ea" : "release_status=ga";
@@ -87,6 +93,9 @@ public final class FoojaySource {
                 "jdk_version=" + major + "&distribution="
                         + URLEncoder.encode(vendor.foojayName(), StandardCharsets.UTF_8)
                         + "&" + status, fx);
+        // vendor names come back as foojay's own (requireKnown turns synonyms into those)
+        all.removeIf(p -> !p.vendor().foojayName().equals(vendor.foojayName())
+                || p.major() != major || p.version().part(0) != major);
         all.sort(Comparator.comparing(Pkg::version).reversed());
         return all;
     }
@@ -146,6 +155,61 @@ public final class FoojaySource {
             }
             default -> false;
         };
+    }
+
+    /**
+     * Whether {@code download} is where {@code vendor} publishes its builds, for the vendors jkit
+     * has keys for: Adoptium's GitHub releases, aka.ms, and corretto.aws (with Amazon's older
+     * CloudFront host, which still serves its 2019 builds). That is every build foojay lists for
+     * them. Only the address foojay names is checked: from there the vendor's own server redirects
+     * (aka.ms to download.visualstudio.microsoft.com, GitHub to its release-assets host), which
+     * foojay doesn't decide, and Http checks each hop stays https.
+     */
+    static boolean onVendorHost(String vendor, URI download) {
+        String host = download.getHost() == null ? "" : download.getHost().toLowerCase(Locale.ROOT);
+        String path = download.getRawPath() == null ? "" : download.getRawPath();
+        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null
+                && !path.contains("..") && !path.toLowerCase(Locale.ROOT).contains("%2e");
+        return plain && switch (vendor) {
+            case "temurin" -> host.equals("github.com") && path.startsWith("/adoptium/");
+            case "microsoft" -> host.equals("aka.ms");
+            case "corretto" -> host.equals("corretto.aws") || host.equals("d3pxv6yz143wms.cloudfront.net");
+            default -> true;
+        };
+    }
+
+    /** "Adoptium's GitHub releases": where {@link #onVendorHost} expects the vendor's downloads. */
+    private static String vendorHost(String vendor) {
+        return switch (vendor) {
+            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/)";
+            case "microsoft" -> "aka.ms";
+            default -> "corretto.aws";
+        };
+    }
+
+    /**
+     * The download link in a build's foojay answer, null when there is none. For a vendor jkit has
+     * keys for it must be on that vendor's own server ({@link #onVendorHost}), or the build is
+     * refused: a signature by the vendor's key is checked wherever the file comes from, but a
+     * Temurin build from before Adoptium signed has only its checksum, which comes from foojay,
+     * and this keeps the file itself coming from Adoptium. A local mirror on this machine
+     * ({@code JKIT_SOURCES_FOOJAY_URL=http://localhost...}) is yours, and may serve the files itself.
+     */
+    private URI download(JsonNode info, Pkg pkg) {
+        String url = Json.text(info, "direct_download_uri");
+        if (url.isEmpty()) {
+            return null;
+        }
+        URI download = Http.sent(url, "a download", base);
+        String vendor = pkg.vendor().foojayName();
+        if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+                && !onVendorHost(vendor, download)) {
+            throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
+                    + pkg.version() + " at " + Visible.of(String.valueOf(download.getHost())) + ", not "
+                    + vendorHost(vendor) + "; refusing it",
+                    "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
+        }
+        return download;
     }
 
     /** {@code <download>.sig}: the file name with {@code .sig} added, on the same server. */
@@ -257,8 +321,8 @@ public final class FoojaySource {
             // this answer carries the download link and often the checksum itself, so https too
             JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id())))
                     .path("result").path(0);
-            String url = Json.text(info, "direct_download_uri");
-            if (url.isEmpty()) {
+            URI download = download(info, pkg);
+            if (download == null) {
                 continue;
             }
             Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
@@ -272,7 +336,6 @@ public final class FoojaySource {
                         ? Checksum.parseStrict(http.getFresh(uri), pkg.fileName(), named)
                         : Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
-            URI download = Http.sent(url, "a download", base);
             return new Artifact(tool, pkg.version(), pkg.vendor(), download, pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
                     checksum == null ? null : checksum.hash(), fx, signature(info, download, base, pkg));
@@ -298,13 +361,12 @@ public final class FoojaySource {
      */
     public Availability availability(Pkg pkg) throws IOException {
         JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id()))).path("result").path(0);
-        String url = Json.text(info, "direct_download_uri");
-        if (url.isEmpty()) {
+        URI download = download(info, pkg);
+        if (download == null) {
             return Availability.NONE;
         }
         boolean checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type")) != null
                 || !Json.text(info, "checksum_uri").isEmpty();
-        URI download = Http.sent(url, "a download", base);
         return new Availability(pkg, checksum, signature(info, download, base, pkg));
     }
 
