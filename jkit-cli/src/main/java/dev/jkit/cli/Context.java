@@ -7,6 +7,7 @@ import dev.jkit.core.Store;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
+import dev.jkit.model.Visible;
 import dev.jkit.platform.OsServices;
 import dev.jkit.sources.CachingHttp;
 import dev.jkit.sources.FoojaySource;
@@ -27,6 +28,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Everything a command needs, built once from the environment. */
 final class Context {
@@ -120,17 +122,22 @@ final class Context {
 
                         @Override
                         public void stale(String message) {
-                            err.println("warning: " + message);
+                            err.println("warning: " + shown(message));
                         }
 
-                        private boolean warned;
+                        // search looks up from several threads
+                        private final AtomicBoolean warned = new AtomicBoolean();
 
                         @Override
                         public void notStored(String message) {
-                            if (!warned) { // once: a command may make several lookups
-                                warned = true;
-                                err.println("warning: " + message);
+                            if (warned.compareAndSet(false, true)) { // once: a command may make several lookups
+                                err.println("warning: " + shown(message));
                             }
+                        }
+
+                        /** The cache folder as ~/.jkit/index, as jkit's other messages show paths. */
+                        private String shown(String message) {
+                            return Main.homeAsTilde(Visible.of(message), System.getProperty("user.home"));
                         }
                     });
         }
