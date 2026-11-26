@@ -35,7 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Installs don't wait on each other's downloads.** The install lock is held only to look at and
   change `tools/`, so parallel installs (two terminals, CI jobs sharing a home) download side by
   side, and `remove`, `prune` and `self-update` don't wait for a download. `prune` and `doctor`
-  leave alone the folder a running install downloads into.
+  leave alone the folder a running install downloads into. On file systems without locks (some
+  NFS), they name the folders they can't tell about, with their age, and delete none of them.
+- **A first install in a shell with the hook sets `JAVA_HOME` right away** (or the tool's
+  `*_HOME`), and says so; `jkit use … --global` does the same when it was unset. Before, it
+  suggested `jkit reset jdk`, which did nothing. Right after `jkit hook --install`, jkit says to open
+  a new shell instead of suggesting `jkit hook --install` again.
+- **Shorter install output.** No folder lines that the "installed → folder" line already names,
+  and no cache line (`--json` keeps both); an install refused for its signature is refused before
+  the download, and "downloading …" is printed only once it starts.
+- **Every Mandrel build is listed and installable**, as `<java>+<mandrel>` (`graalvm@21 mandrel`
+  → `21+23.1.13`); before, foojay's builds of one Java release showed as one. Existing Mandrel
+  installs keep working, and `jkit upgrade` offers the newest. Builds a vendor re-released under
+  the same version (Corretto 11.0.20.9.1 after 11.0.20.8.1, Zulu, Liberica and others) resolve to
+  the newest instead of whichever foojay listed first.
+- After `pin` and `sync`, the hint for switching on `cd` is `jkit config set shell.auto_switch true`.
+- `jkit doctor` suggests `jkit prune` for leftovers in `tmp/` instead of `rm -rf`.
 - **`jkit install jdk@lts <vendor>`** (and `pin`, and `search` with a vendor) picks that vendor's
   newest LTS release, not the newest LTS of any vendor.
 - **`~/.bashrc`, `~/.zshrc`, fish's file, `config.toml` and `jkit.toml` are written atomically**
@@ -44,13 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows, a file another program has open is retried, then written in place.
 - **PATH follows a `*_HOME` you set yourself.** When the hook loads, and when you leave a project
   or run `jkit reset`, that home's `bin` comes first instead of jkit's global one, so `java` is
-  `$JAVA_HOME/bin/java`.
+  `$JAVA_HOME/bin/java`, also for a home inside `~/.jkit/tools`. A `*_HOME` you change by hand
+  while a project or `jkit use` applies is left as you set it when jkit's choice goes, and jkit
+  says so. A trailing slash on it no longer puts its `bin` on PATH twice.
 - **`export JKIT_AUTO_SWITCH=0` stops switching on `cd` in a shell that's already open**, and the
   `cd` hook does less work when nothing changes.
 - **Ctrl-C stops an install or self-update cleanly.** Ctrl-C, SIGTERM or SIGHUP during a download
   deletes the partial file and says so. Ctrl-C then ends jkit by SIGINT, so a shell script running
   jkit stops too (exit 130 on Windows, or as a container's PID 1); SIGTERM and SIGHUP exit 143 and
-  129. A SIGINT the shell set to be ignored (a background job) stays ignored.
+  129. A SIGINT the shell set to be ignored (a background job) stays ignored. A Ctrl-C while the
+  JDK unpacks no longer races jkit's cleanup: no "file not found" error, nothing left in `tmp/`, no
+  partial install in `tools/`.
 - **Slow downloads start again.** A download that, 30 seconds in, would take more than 10 more
   minutes reconnects once, so a slow CDN edge no longer holds an install for a quarter of an hour.
 - **Progress in CI logs.** Without a terminal, download progress is a line at each quarter and at
@@ -104,6 +123,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jkit use jdk@99` and `jkit exec jdk@99` no longer suggest installing a release that doesn't
   exist.
 - Every bad `jkit config set` argument exits 2, as an unknown vendor already did.
+- `jkit hook --uninstall` refuses, instead of deleting your lines, when a stray `# >>> jkit >>>`
+  marker sits before jkit's block; `jkit doctor` finds the temporary files of an interrupted write
+  next to a startup file that is a symlink.
+- An install that lost a race to another jkit no longer suggests making it the default when it
+  already is.
+- `jkit hook --help` examples line up, and `jkit exec --help` mentions SIGHUP.
 
 ### Security
 
@@ -114,9 +139,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checksum, and jkit says only the checksum was checked. A signing vendor's download link with no
   file name, or one in its query string, is refused rather than installed without a signature.
 - **foojay can't steer a JDK around its signature check.** jkit takes only builds of the vendor and
-  major release you asked for, and downloads Temurin, Microsoft and Corretto builds only from the
-  vendor's own server (Adoptium's GitHub releases, aka.ms, corretto.aws); a build listed anywhere
-  else is refused. [SECURITY.md](SECURITY.md) says what that does and doesn't guarantee.
+  major release you asked for, and takes Temurin, Microsoft and Corretto downloads only from the
+  vendor's own release links, in their exact shape and with the listed file name (Adoptium's
+  GitHub releases, aka.ms/download-jdk, corretto.aws); a build listed anywhere else is refused.
+  GitHub serves a fork's commits under `github.com/adoptium/…/archive/`, so a host check alone
+  wasn't enough. A foojay mirror of your own (`JKIT_SOURCES_FOOJAY_URL`, https) may serve the
+  builds these vendors signed, whose signature and version are still checked.
+  [SECURITY.md](SECURITY.md) says what that does and doesn't guarantee.
 - **A signed build must be the version asked for.** After a good signature, jkit checks every part
   of a JDK's version, and now Maven's (`lib/maven-core-<version>.jar`) and sbt's too, so a build the
   publisher signed for another version is refused.
