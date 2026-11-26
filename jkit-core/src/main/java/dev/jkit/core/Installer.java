@@ -11,8 +11,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -21,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -102,7 +99,7 @@ public final class Installer {
         home.create();
         List<Path> removed;
         Path work;
-        try (Held held = lock()) {
+        try (Store.Lock held = lock()) {
             Result existing = existing(installed, List.of());
             if (existing != null) {
                 return existing;
@@ -166,7 +163,7 @@ public final class Installer {
                 requireSignedVersion(storeTool, toolHome, artifact);
             }
             Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
-            try (Held held = lock()) {
+            try (Store.Lock held = lock()) {
                 // another jkit may have installed the same build meanwhile: theirs stays, ours goes
                 Result existing = existing(installed, removed);
                 if (existing != null) {
@@ -432,32 +429,9 @@ public final class Installer {
         Fs.deleteRecursively(from);
     }
 
-    /** The store lock, held until closed. */
-    private interface Held extends AutoCloseable {
-        @Override
-        void close() throws IOException;
-    }
-
-    /** Takes the store lock; says so on stderr when another jkit holds it, instead of hanging silently. */
-    private Held lock() throws IOException {
-        FileChannel channel = FileChannel.open(home.lockFile(),
-                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
-        try {
-            FileLock lock = channel.tryLock();
-            if (lock == null) {
-                System.err.println("waiting for another jkit to finish installing…");
-                lock = channel.lock();
-            }
-            FileLock held = lock;
-            return () -> {
-                try (channel) {
-                    held.release();
-                }
-            };
-        } catch (IOException | RuntimeException e) {
-            channel.close();
-            throw e;
-        }
+    /** Takes the store lock, as the commands do ({@link Store#lock()}), on the same open file. */
+    private Store.Lock lock() throws IOException {
+        return new Store(home).lock(home.lockFile(), "waiting for another jkit to finish installing…");
     }
 
     /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */

@@ -18,7 +18,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Stream;
 
 /** Reads what is installed under tools/. Each install carries a jkit-install.properties file. */
@@ -99,7 +102,7 @@ public final class Store {
      * Holds jkit's install lock until closed: one process at a time changes tools/. Blocks while
      * another jkit holds it.
      */
-    public AutoCloseable lock() throws IOException {
+    public Lock lock() throws IOException {
         return lock(home.lockFile(), "waiting for another jkit to finish (an install can take a few minutes)…");
     }
 
@@ -108,32 +111,64 @@ public final class Store {
      * one process at a time. Short-lived, so a jkit use --global doesn't wait for a download. Taken
      * after {@link #lock()} when both are needed, never before.
      */
-    public AutoCloseable linkLock() throws IOException {
+    public Lock linkLock() throws IOException {
         return lock(home.linkLockFile(), "waiting for another jkit to finish changing links…");
     }
 
-    private AutoCloseable lock(Path file, String waiting) throws IOException {
+    /** A lock held until closed. */
+    public interface Lock extends AutoCloseable {
+        @Override
+        void close() throws IOException;
+    }
+
+    /** Each lock file's turn within this process: see {@link #lock(Path, String)}. */
+    private static final Map<Path, ReentrantLock> TURNS = new ConcurrentHashMap<>();
+
+    /**
+     * Holds the OS lock on {@code file} until closed, saying {@code waiting} on stderr when another
+     * jkit holds it instead of hanging silently. Within this process the file is opened and locked
+     * once: on Unix, closing any channel to a file lets go of every lock the process has on it, so
+     * a second channel (Installer's and the commands' lock on the same file) would release the
+     * first one's lock when closed. Taken again by the same thread, it is held until both close;
+     * another thread waits its turn.
+     */
+    Lock lock(Path file, String waiting) throws IOException {
         home.create();
-        FileChannel channel = FileChannel.open(file,
-                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE),
-                Perms.file());
-        FileLock lock;
+        ReentrantLock turn = TURNS.computeIfAbsent(file.toAbsolutePath().normalize(), f -> new ReentrantLock());
+        if (!turn.tryLock()) {
+            System.err.println(waiting);
+            turn.lock();
+        }
+        if (turn.getHoldCount() > 1) {
+            return turn::unlock; // this thread holds the file's lock already
+        }
+        FileChannel channel = null;
         try {
-            lock = channel.tryLock();
+            channel = FileChannel.open(file, Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
+            FileLock lock = channel.tryLock();
             if (lock == null) {
                 System.err.println(waiting);
                 lock = channel.lock();
             }
+            FileChannel open = channel;
+            FileLock held = lock;
+            return () -> {
+                try (open) {
+                    held.release();
+                } finally {
+                    turn.unlock();
+                }
+            };
         } catch (IOException | RuntimeException e) {
-            channel.close();
+            try {
+                if (channel != null) {
+                    channel.close();
+                }
+            } finally {
+                turn.unlock();
+            }
             throw e;
         }
-        FileLock held = lock;
-        return () -> {
-            try (channel) {
-                held.release();
-            }
-        };
     }
 
     /** Whose OpenPGP signature the download was checked against, or null: none, or installed before jkit checked them. */
