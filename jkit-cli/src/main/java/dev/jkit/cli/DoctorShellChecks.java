@@ -5,6 +5,7 @@ import dev.jkit.core.Installed;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolState.Source;
 import dev.jkit.core.ToolStates;
+import dev.jkit.model.Platform;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import java.io.File;
@@ -52,7 +53,8 @@ final class DoctorShellChecks {
         } else {
             r.warn(found.size() + " different jkit binaries on PATH, the first wins: "
                     + String.join(", ", found.stream().map(r::tilde).toList()),
-                    "remove the ones you don't use, e.g. an old copy in /usr/local/bin");
+                    "remove the ones you don't use, e.g. "
+                            + (Platform.hostIsWindows() ? "an old jkit.exe unzipped by hand" : "an old copy in /usr/local/bin"));
         }
     }
 
