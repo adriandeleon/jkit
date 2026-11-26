@@ -67,15 +67,22 @@ final class UserEnvSetup {
             String var = tool.homeVariable();
             String before = current.get(var);
             if (!same(before, link.toString())) {
+                if (before != null && !before.isBlank()) {
+                    if (insideTools(home, before)) {
+                        // one of jkit's own installs, set by hand: nothing of the user's to keep
+                        report.note("replaced " + var + "=" + before + ", a jkit install; jkit env --uninstall"
+                                + " won't put it back");
+                    } else {
+                        // saved first: if writing the new value fails, the old one is still on record
+                        String saved = savedVariable(tool);
+                        writes.put(saved, before);
+                        report.userEnv(saved, "set", before);
+                        report.note("replaced " + var + "=" + before + ", which was set before; it is kept in " + saved
+                                + ", and jkit env --uninstall puts it back");
+                    }
+                }
                 writes.put(var, link.toString());
                 report.userEnv(var, "set", link.toString());
-                if (before != null && !before.isBlank()) {
-                    String saved = savedVariable(tool);
-                    writes.put(saved, before);
-                    report.userEnv(saved, "set", before);
-                    report.note("replaced " + var + "=" + before + ", which was set before; it is kept in " + saved
-                            + ", and jkit env --uninstall puts it back");
-                }
             }
             if (tool.onPath()) {
                 bins.add(link.resolve("bin").toString());
@@ -98,6 +105,19 @@ final class UserEnvSetup {
         return writes;
     }
 
+    /** Whether {@code value} names a folder in jkit's tools folder: one of jkit's own installs. */
+    private static boolean insideTools(JkitHome home, String value) {
+        Path path = Fs.path(value);
+        return path != null && path.isAbsolute()
+                && path.normalize().startsWith(home.root().resolve("tools").toAbsolutePath().normalize());
+    }
+
+    /** Whether {@code value} names a folder that exists; true when it can't be told. */
+    private static boolean exists(String value) {
+        Path path = Fs.path(value);
+        return path == null || !path.isAbsolute() || Files.exists(path);
+    }
+
     /**
      * What uninstall writes: only the values install set, so a variable of the user's own stays,
      * and the value install replaced comes back.
@@ -112,6 +132,12 @@ final class UserEnvSetup {
             String before = current.get(saved);
             boolean restore = before != null && !before.isBlank();
             if (same(current.get(var), link)) {
+                if (restore && !exists(before)) {
+                    // a folder that's gone (an old JDK uninstalled since) would only break programs
+                    report.note("didn't put back " + var + "=" + before + ", which was set before jkit env --install:"
+                            + " that folder no longer exists");
+                    restore = false;
+                }
                 writes.put(var, restore ? before : null);
                 report.userEnv(var, restore ? "set" : "unset", restore ? before : null);
                 if (restore) {

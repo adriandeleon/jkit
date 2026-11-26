@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import dev.jkit.platform.UserEnv;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
@@ -107,21 +108,47 @@ class UserEnvSetupTest {
     }
 
     @Test
-    void uninstallPutsBackTheValueInstallReplaced() {
+    void uninstallPutsBackTheValueInstallReplaced() throws Exception {
+        String old = Files.createDirectories(tmp.resolve("jdk-11")).toString();
         Changes report = new Changes(ctx);
-        Map<String, String> current = new HashMap<>(Map.of("JAVA_HOME", "C:\\jdk-11"));
-        current.putAll(UserEnvSetup.install(home, Map.copyOf(current), report));
-        assertThat(current).containsEntry("JAVA_HOME", jdk).containsEntry("JKIT_SAVED_JDK", "C:\\jdk-11");
-        assertThat(printed(report)).contains("user   JKIT_SAVED_JDK=C:\\jdk-11");
+        Map<String, String> current = new HashMap<>(Map.of("JAVA_HOME", old));
+        Map<String, String> writes0 = UserEnvSetup.install(home, Map.copyOf(current), report);
+        // saved before JAVA_HOME changes: a failure in between doesn't lose the old value
+        assertThat(List.copyOf(writes0.keySet()).indexOf("JKIT_SAVED_JDK"))
+                .isLessThan(List.copyOf(writes0.keySet()).indexOf("JAVA_HOME"));
+        current.putAll(writes0);
+        assertThat(current).containsEntry("JAVA_HOME", jdk).containsEntry("JKIT_SAVED_JDK", old);
+        assertThat(printed(report)).contains("user   JKIT_SAVED_JDK=" + old);
 
         // installing again keeps what was saved
         assertThat(UserEnvSetup.install(home, Map.copyOf(current), new Changes(ctx))).doesNotContainKey("JKIT_SAVED_JDK");
 
         Changes undo = new Changes(ctx);
         Map<String, String> writes = UserEnvSetup.uninstall(home, current, undo);
-        assertThat(writes).containsEntry("JAVA_HOME", "C:\\jdk-11").containsEntry("JKIT_SAVED_JDK", null)
+        assertThat(writes).containsEntry("JAVA_HOME", old).containsEntry("JKIT_SAVED_JDK", null)
                 .containsEntry("MAVEN_HOME", null);
-        assertThat(undo.notes()).contains("put back JAVA_HOME=C:\\jdk-11, which was set before jkit env --install");
+        assertThat(undo.notes()).contains("put back JAVA_HOME=" + old + ", which was set before jkit env --install");
+    }
+
+    @Test
+    void uninstallDoesNotPutBackAFolderThatIsGone() {
+        String gone = tmp.resolve("removed-jdk").toAbsolutePath().toString();
+        Map<String, String> current = new HashMap<>(Map.of("JAVA_HOME", jdk, "JKIT_SAVED_JDK", gone));
+        Changes undo = new Changes(ctx);
+        Map<String, String> writes = UserEnvSetup.uninstall(home, current, undo);
+        assertThat(writes).containsEntry("JAVA_HOME", null).containsEntry("JKIT_SAVED_JDK", null);
+        assertThat(undo.notes()).contains("didn't put back JAVA_HOME=" + gone
+                + ", which was set before jkit env --install: that folder no longer exists");
+    }
+
+    @Test
+    void installDoesNotSaveOneOfJkitsOwnInstalls() {
+        String own = home.root().resolve("tools/jdk/21.0.9+10-temurin").toAbsolutePath().toString();
+        Changes report = new Changes(ctx);
+        Map<String, String> writes = UserEnvSetup.install(home, Map.of("JAVA_HOME", own), report);
+        assertThat(writes).containsEntry("JAVA_HOME", jdk).doesNotContainKey("JKIT_SAVED_JDK");
+        assertThat(report.notes()).contains("replaced JAVA_HOME=" + own + ", a jkit install; jkit env --uninstall"
+                + " won't put it back");
     }
 
     @Test
