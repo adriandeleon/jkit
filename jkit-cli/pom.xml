@@ -148,8 +148,8 @@
     <!--
       With native: a fully static Linux binary linked against musl instead of glibc, for Alpine and
       other musl systems (it runs on glibc systems too). Needs a musl toolchain on the PATH
-      (x86_64-linux-musl-gcc or aarch64-linux-musl-gcc) with a static zlib built against it;
-      release.yml builds both from source.
+      (x86_64-linux-musl-gcc) with a static zlib built against it; release.yml builds both from
+      source. x64 only: native-image supports musl for AMD64 alone.
     -->
     <profile>
       <id>musl</id>

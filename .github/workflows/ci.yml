@@ -69,7 +69,7 @@ jobs:
       - name: Dry-run the packaging scripts
         if: runner.os == 'Linux'
         run: |
-          for p in linux-x64 linux-aarch64 linux-x64-musl linux-aarch64-musl macos-aarch64 macos-x64; do
+          for p in linux-x64 linux-aarch64 linux-x64-musl macos-aarch64 macos-x64; do
             echo "$(printf %064d 0)  jkit-1.2.3-$p.tar.gz"
           done > "$RUNNER_TEMP/SHA256SUMS"
           echo "$(printf %064d 0)  jkit-1.2.3-windows-x64.zip" >> "$RUNNER_TEMP/SHA256SUMS"
