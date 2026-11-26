@@ -31,7 +31,9 @@ import picocli.CommandLine.Option;
         "It removes:",
         "- older builds within a release line once a newer one is installed (21.0.5",
         "  once 21.0.9 is in; for Maven, Gradle and sbt the line is the major version,",
-        "  so 3.8.8 once 3.9.11 is in), unless global, used in this shell or pinned here",
+        "  so 3.8.8 once 3.9.11 is in), unless global, used in this shell, pinned here,",
+        "  or used by a running program (a java, a Gradle daemon); a jkit use in another",
+        "  shell that runs nothing from it can't be seen",
         "- folders left by interrupted installs and removals",
         "- cached version lists older than 30 days (newer ones serve --offline)",
         "A project elsewhere that pins an exact old build gets it back with jkit sync.",
@@ -55,17 +57,30 @@ final class PruneCommand implements Callable<Integer> {
     /** One build to remove, the newer build in its line that replaces it, and the bytes it takes. */
     record Superseded(Installed install, Installed newer, long bytes) { }
 
+    /** A running program that uses a build: its process id and command. */
+    record User(long pid, String command) { }
+
     int run(Context ctx, Path cwd, Instant now) throws Exception {
         PrintStream say = json.json ? ctx.err : ctx.out;
         if (!Files.isDirectory(ctx.home.root())) {
             say.println("nothing to prune: " + Changes.tilde(ctx.home.root().toString()) + " doesn't exist yet");
             if (json.json) {
-                ctx.out.println(JsonOut.write(document(List.of(), List.of(), List.of(), 0, new Changes(ctx))));
+                ctx.out.println(JsonOut.write(document(List.of(), List.of(), List.of(), List.of(), 0, new Changes(ctx))));
             }
             return 0;
         }
         ToolStates.Result here = StatusCommand.read(ctx, cwd);
-        List<Superseded> builds = superseded(ctx, here);
+        List<Superseded> builds = new ArrayList<>(superseded(ctx, here));
+        // a build a running program uses stays: deleting it under a JVM or a Gradle daemon breaks it
+        Map<Path, User> inUse = inUse(ctx, builds);
+        List<Superseded> kept = builds.stream().filter(s -> inUse.containsKey(s.install().home())).toList();
+        builds.removeAll(kept);
+        List<Object> keptRows = new ArrayList<>();
+        for (Superseded s : kept) {
+            User user = inUse.get(s.install().home());
+            keptRows.add(JsonOut.fields("install", JsonOut.installed(ctx, s.install()), "newer", s.newer().version().raw(),
+                    "bytes", s.bytes(), "pid", user.pid(), "command", user.command()));
+        }
         List<Path> leftovers = leftovers(ctx);
         List<Path> cache = oldCache(ctx, now);
         long bytes = 0;
@@ -82,6 +97,10 @@ final class PruneCommand implements Callable<Integer> {
             bytes += size(p);
         }
         Changes report = new Changes(ctx);
+        for (Superseded s : kept) {
+            say.println((dryRun ? "would keep " : "kept ") + s.install().tool() + " " + s.install().label()
+                    + ": " + usedBy(inUse.get(s.install().home())));
+        }
         if (builds.isEmpty() && leftovers.isEmpty() && cache.isEmpty()) {
             say.println("nothing to prune");
         } else if (dryRun) {
@@ -103,9 +122,75 @@ final class PruneCommand implements Callable<Integer> {
             say.println("freed " + human(bytes));
         }
         if (json.json) {
-            ctx.out.println(JsonOut.write(document(rows, leftovers, cache, bytes, report)));
+            ctx.out.println(JsonOut.write(document(rows, keptRows, leftovers, cache, bytes, report)));
         }
         return 0;
+    }
+
+    private static String usedBy(User user) {
+        return "a running program uses it (pid " + user.pid()
+                + (user.command() == null ? "" : ", " + Changes.tilde(user.command())) + ")";
+    }
+
+    /**
+     * The builds a running program uses, with one such program each: its executable is in the build
+     * (a java), or an argument names a file in it (a Gradle daemon's or mvn's classpath). Only what
+     * the OS shows of other processes: usually the user's own.
+     */
+    static Map<Path, User> inUse(Context ctx, List<Superseded> builds) {
+        Map<Path, User> found = new LinkedHashMap<>();
+        if (builds.isEmpty()) {
+            return found;
+        }
+        boolean windows = ctx.platform.isWindows();
+        Map<Path, List<String>> folders = new LinkedHashMap<>();
+        for (Superseded s : builds) {
+            List<String> names = new ArrayList<>();
+            Path home = s.install().home().toAbsolutePath().normalize();
+            names.add(folderText(home, windows));
+            try {
+                names.add(folderText(home.toRealPath(), windows)); // ~/.jkit may be a link
+            } catch (IOException | RuntimeException e) {
+                // gone meanwhile: the written path still counts
+            }
+            folders.put(s.install().home(), names);
+        }
+        long self = ProcessHandle.current().pid();
+        try (Stream<ProcessHandle> all = ProcessHandle.allProcesses()) {
+            for (ProcessHandle p : (Iterable<ProcessHandle>) all::iterator) {
+                if (found.size() == folders.size()) {
+                    break;
+                }
+                if (p.pid() == self) {
+                    continue;
+                }
+                ProcessHandle.Info info = p.info();
+                List<String> words = new ArrayList<>();
+                info.command().ifPresent(words::add);
+                info.arguments().ifPresent(a -> words.addAll(List.of(a)));
+                for (Map.Entry<Path, List<String>> f : folders.entrySet()) {
+                    if (!found.containsKey(f.getKey()) && words.stream().anyMatch(w -> names(w, f.getValue(), windows))) {
+                        found.put(f.getKey(), new User(p.pid(), info.command().orElse(null)));
+                    }
+                }
+            }
+        } catch (SecurityException | UnsupportedOperationException e) {
+            // processes can't be listed here: nothing more is kept
+        }
+        return found;
+    }
+
+    /** The folder as text ending in a separator, so 21.0.5+11-temurin doesn't match 21.0.5+11-temurin-fx. */
+    private static String folderText(Path folder, boolean windows) {
+        String text = folder.toString();
+        text = text.endsWith(java.io.File.separator) ? text : text + java.io.File.separator;
+        return windows ? text.toLowerCase(java.util.Locale.ROOT) : text;
+    }
+
+    /** Whether {@code word} (a command, or an argument such as a classpath) names a file in one of {@code folders}. */
+    private static boolean names(String word, List<String> folders, boolean windows) {
+        String w = windows ? word.toLowerCase(java.util.Locale.ROOT).replace('/', '\\') : word;
+        return folders.stream().anyMatch(w::contains);
     }
 
     /**
@@ -124,8 +209,14 @@ final class PruneCommand implements Callable<Integer> {
             for (Superseded s : superseded(ctx, here)) {
                 still.add(s.install().home());
             }
+            Map<Path, User> started = inUse(ctx, builds); // a program that started since the scan
             for (Superseded s : builds) {
                 if (!still.contains(s.install().home())) {
+                    continue;
+                }
+                if (started.containsKey(s.install().home())) {
+                    say.println("kept " + s.install().tool() + " " + s.install().label() + ": "
+                            + usedBy(started.get(s.install().home())));
                     continue;
                 }
                 try {
@@ -281,13 +372,14 @@ final class PruneCommand implements Callable<Integer> {
                 : String.format(java.util.Locale.ROOT, "%.1f GB", mb / 1024);
     }
 
-    private Map<String, Object> document(List<Object> buildRows, List<Path> leftovers, List<Path> cache,
-            long bytes, Changes report) {
+    private Map<String, Object> document(List<Object> buildRows, List<Object> keptRows, List<Path> leftovers,
+            List<Path> cache, long bytes, Changes report) {
         List<Object> changes = new ArrayList<>(removedBuilds);
         changes.addAll(report.json());
         Map<String, Object> doc = JsonOut.document();
         doc.put("dryRun", dryRun);
         doc.put("builds", buildRows);
+        doc.put("inUse", keptRows);
         doc.put("leftovers", leftovers);
         doc.put("cache", cache);
         doc.put("bytes", bytes);

@@ -54,6 +54,57 @@ class PruneTest {
         return out.toString(StandardCharsets.UTF_8);
     }
 
+    /**
+     * A build a running program uses stays, and prune says which program: here a process whose
+     * arguments name a jar in an old Gradle (as a Gradle daemon's classpath does).
+     */
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aBuildARunningProgramUsesIsKept() throws Exception {
+        Path old = install(Tool.GRADLE, "8.14.2", "");
+        install(Tool.GRADLE, "8.14.3", "");
+        Path oldMaven = install(Tool.MAVEN, "3.9.9", "");
+        install(Tool.MAVEN, "3.9.11", "");
+        Process daemon = new ProcessBuilder("/bin/sh", "-c", "sleep 30; exit 0", old.resolve("lib/gradle-daemon.jar").toString())
+                .start();
+        try {
+            prune(true);
+            assertThat(output()).contains("would keep gradle 8.14.2: a running program uses it (pid " + daemon.pid())
+                    .contains("would remove maven 3.9.9").doesNotContain("would remove gradle");
+            prune(false);
+            assertThat(old).exists();
+            assertThat(oldMaven).doesNotExist();
+            assertThat(output()).contains("kept gradle 8.14.2: a running program uses it");
+        } finally {
+            daemon.destroyForcibly().waitFor();
+        }
+        prune(false);
+        assertThat(old).doesNotExist(); // once it has stopped
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aBuildWhoseExecutableIsRunningIsKept() throws Exception {
+        Path old = install(Tool.JDK, "21.0.5+11", "temurin");
+        install(Tool.JDK, "21.0.9+10", "temurin");
+        Path sleep = Path.of(Files.isExecutable(Path.of("/usr/bin/sleep")) ? "/usr/bin/sleep" : "/bin/sleep");
+        Path java = Files.copy(sleep, old.resolve("bin/java"));
+        Process running = new ProcessBuilder(java.toString(), "30").start();
+        try {
+            PruneCommand cmd = new PruneCommand();
+            cmd.json.json = true;
+            out.reset();
+            cmd.run(Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8)), project, now);
+            assertThat(old).exists();
+            com.fasterxml.jackson.databind.JsonNode doc = new com.fasterxml.jackson.databind.ObjectMapper().readTree(output());
+            assertThat(doc.path("builds")).isEmpty();
+            assertThat(doc.path("inUse").path(0).path("pid").asLong()).isEqualTo(running.pid());
+            assertThat(doc.path("inUse").path(0).path("command").asText()).isEqualTo(java.toRealPath().toString());
+        } finally {
+            running.destroyForcibly().waitFor();
+        }
+    }
+
     @Test
     void removesOlderBuildsInALineAndKeepsTheNewest() throws Exception {
         Path old = install(Tool.JDK, "21.0.5+11", "temurin");
