@@ -9,3 +9,6 @@ README.md text eol=lf
 mvnw text eol=lf
 # signed test fixtures: their exact bytes are what the signatures cover
 jkit-core/src/test/resources/dev/jkit/core/release-SHA256SUMS -text
+# the shell hook templates, and the recorded hooks the tests compare them with
+jkit-platform/src/main/resources/dev/jkit/platform/hooks/* text eol=lf
+jkit-platform/src/test/resources/dev/jkit/platform/hooks-golden/* text eol=lf
