@@ -3,6 +3,7 @@ package dev.jkit.cli;
 import dev.jkit.core.Fs;
 import dev.jkit.core.JkitHome;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.model.Envs;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
@@ -70,6 +71,24 @@ final class Changes {
                         + t + " leaves this shell");
             } else if (saved == null && was != null && Objects.equals(updates.get(t.homeVariable()), was)) {
                 note(t.homeVariable() + " is your own again: " + tilde(was));
+            }
+        }
+        // jkit's choice goes, but the user changed *_HOME by hand since jkit set it: it stays
+        Map<String, String> after = Envs.copy(ctx.env);
+        updates.forEach((k, v) -> {
+            if (v == null) {
+                after.remove(k);
+            } else {
+                after.put(k, v);
+            }
+        });
+        for (Tool t : Tool.values()) {
+            if (!updates.containsKey(t.homeVariable()) && ShellEnv.changedByHand(ctx.env, t)
+                    && !ShellEnv.hasChoice(after, t)) {
+                String current = ctx.env.get(t.homeVariable());
+                note(current == null || current.isBlank()
+                        ? t.homeVariable() + " stays unset: you unset it after jkit set it"
+                        : t.homeVariable() + " stays as you set it after jkit did: " + tilde(current));
             }
         }
         return this;

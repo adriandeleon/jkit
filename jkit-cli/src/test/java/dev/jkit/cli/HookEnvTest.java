@@ -173,6 +173,19 @@ class HookEnvTest {
     }
 
     @Test
+    void aJavaHomeChangedByHandInAProjectStaysOnLeavingAndThatIsSaid() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
+        cd(project);
+        env.put("JAVA_HOME", "/opt/by-hand");
+        cd(elsewhere);
+        assertThat(env).containsEntry("JAVA_HOME", "/opt/by-hand").doesNotContainKey("JKIT_PROJECT_JDK");
+        assertThat(env.get("PATH")).doesNotContain(temurin21.toString());
+        assertThat(said()).contains("jdk stays as you set JAVA_HOME").doesNotContain("back to the global")
+                .contains("JAVA_HOME stays as you set it after jkit did: /opt/by-hand")
+                .doesNotContain("set    JAVA_HOME");
+    }
+
+    @Test
     void aMissingInstallIsNotedOnceAndPickedUpOnceInstalled() throws Exception {
         Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"11\"\n");
         cd(project);

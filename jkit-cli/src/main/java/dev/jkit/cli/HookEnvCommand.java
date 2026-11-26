@@ -154,6 +154,8 @@ final class HookEnvCommand implements Callable<Integer> {
                 if (env.containsKey(ShellEnv.projectVariable(t))) {
                     if (env.containsKey(ShellEnv.stateVariable(t))) {
                         own.add(t.toString());
+                    } else if (ShellEnv.changedByHand(env, t)) {
+                        user.add(t + " stays as you set " + t.homeVariable());
                     } else if (env.get(ShellEnv.userVariable(t)) != null && !env.get(ShellEnv.userVariable(t)).isBlank()) {
                         user.add(t + " back to your own " + t.homeVariable());
                     } else {

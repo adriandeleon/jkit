@@ -238,7 +238,8 @@ public final class ShellEnv {
     /**
      * Sets {@code tool}'s *_HOME to {@code value}. The first time jkit replaces one the user set
      * outside jkit (no jkit choice applies to it yet, and it isn't the global link the hook sets),
-     * that value is kept in {@link #userVariable} so {@link #back} can give it back.
+     * that value is kept in {@link #userVariable} so {@link #back} can give it back. So is one the
+     * user set by hand over jkit's choice: it is the user's own now.
      */
     private static void setHome(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool,
                                 String value) {
@@ -247,17 +248,53 @@ public final class ShellEnv {
                 || blankToNull(env.get(projectVariable(tool))) != null
                 || tool == Tool.GRAALVM && env.containsKey(GRAALVM_FOLLOWS)
                 || env.containsKey(userVariable(tool));
-        if (current != null && !jkits && !out.containsKey(userVariable(tool)) && !isGlobal(current, home, tool)) {
+        if (current != null && (!jkits || changedByHand(env, tool)) && !out.containsKey(userVariable(tool))
+                && !isGlobal(current, home, tool)) {
             out.put(userVariable(tool), current);
         }
         out.put(tool.homeVariable(), value);
     }
 
     /**
+     * The *_HOME jkit set for {@code tool} in this shell: its shell choice, else the project's, else
+     * for a GraalVM that follows the JDK, the JDK's. Null when jkit set none.
+     */
+    private static String jkitsHome(Map<String, String> env, Tool tool) {
+        String value = blankToNull(env.get(stateVariable(tool)));
+        if (value == null) {
+            value = blankToNull(env.get(projectVariable(tool)));
+        }
+        if (value == null && tool == Tool.GRAALVM && env.containsKey(GRAALVM_FOLLOWS)) {
+            value = jkitsHome(env, Tool.JDK);
+        }
+        return value;
+    }
+
+    /**
+     * Whether the user changed or unset {@code tool}'s *_HOME by hand since jkit set it: it is then
+     * the user's, and jkit leaves it as it is when its own choice goes.
+     */
+    public static boolean changedByHand(Map<String, String> env, Tool tool) {
+        String jkits = jkitsHome(env, tool);
+        if (jkits == null) {
+            return false;
+        }
+        String current = blankToNull(env.get(tool.homeVariable()));
+        return current == null || !samePathEntry(current, jkits);
+    }
+
+    /**
      * Takes jkit's choice for {@code tool} away: its *_HOME goes back to the user's own value if
-     * {@link #setHome} kept one, else to the global link (unset when there is none).
+     * {@link #setHome} kept one, else to the global link (unset when there is none). A *_HOME the
+     * user changed by hand since jkit set it stays, and the value jkit kept goes.
      */
     private static void back(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool) {
+        if (changedByHand(env, tool)) {
+            if (env.containsKey(userVariable(tool))) {
+                out.put(userVariable(tool), null);
+            }
+            return;
+        }
         String own = blankToNull(env.get(userVariable(tool)));
         if (own != null) {
             out.put(tool.homeVariable(), own);
