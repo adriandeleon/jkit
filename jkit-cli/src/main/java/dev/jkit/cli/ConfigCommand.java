@@ -266,10 +266,8 @@ final class ConfigCommand implements Callable<Integer> {
             return false;
         }
         HookCommand.createParent(ctx, config, report);
-        if (!exists) {
-            Files.createFile(config, dev.jkit.model.Perms.file());
-        }
-        Files.writeString(config, edit.text());
+        // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
+        dev.jkit.core.AtomicFile.write(config, edit.text(), java.nio.charset.StandardCharsets.UTF_8, true);
         report.file(config, !exists);
         return true;
     }
@@ -336,7 +334,8 @@ final class ConfigCommand implements Callable<Integer> {
                     : now.autoSwitch()
                     ? "new shells switch to a project's versions on cd (with the hook: " + Changes.HOOK_SETUP
                             + "); this shell doesn't until you open a new one"
-                    : "new shells no longer switch on cd; this shell still does until you open a new one");
+                    : "new shells no longer switch on cd; this shell still does until you open a new one"
+                            + " (or: export " + Config.AUTO_SWITCH_ENV + "=0)");
         }
     }
 

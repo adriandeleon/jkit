@@ -167,4 +167,43 @@ class ExecTest {
                 .isInstanceOf(JkitException.class)
                 .satisfies(e -> assertThat(((JkitException) e).exitCode()).isEqualTo(127));
     }
+
+    @Test
+    void anExitCodeFromASignalNamesItOnUnixOnly() {
+        assertThat(Signals.endedBy(130, false)).isEqualTo("INT");
+        assertThat(Signals.endedBy(143, false)).isEqualTo("TERM");
+        assertThat(Signals.endedBy(129, false)).isEqualTo("HUP");
+        assertThat(Signals.endedBy(1, false)).isNull();
+        assertThat(Signals.endedBy(137, false)).isNull(); // KILL: jkit only passes on what a shell acts on
+        assertThat(Signals.endedBy(130, true)).isNull();
+    }
+
+    /**
+     * Runs jkit exec in a JVM of its own under perl, which reports the signal that ended it (Java
+     * can't tell a death by SIGINT from exit code 130): a bash script stops on Ctrl-C only on the first.
+     */
+    private String endedBy(String script) throws Exception {
+        Path perl = Path.of("/usr/bin/perl");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(perl), "no perl to tell how a process ended");
+        String jvm = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        ProcessBuilder pb = new ProcessBuilder(perl.toString(), "-e", "system(@ARGV); print(($? & 127) . ' ' . ($? >> 8))",
+                jvm, "-cp", System.getProperty("java.class.path"), "dev.jkit.cli.Main", "exec", "--no-project", "--",
+                "/bin/sh", "-c", script).directory(project.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
+        pb.environment().put("JKIT_HOME", home.toString());
+        pb.environment().put("HOME", tmp.resolve("user").toString());
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+        p.waitFor();
+        return out;
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aCommandEndedByASignalEndsJkitWithTheSameSignal() throws Exception {
+        // the command isn't left ignoring SIGINT, and jkit ends from it too (signal 2, no exit code)
+        assertThat(endedBy("kill -INT $$; echo survived")).isEqualTo("2 0");
+        assertThat(endedBy("kill -TERM $$")).isEqualTo("15 0");
+        // an exit code is passed on as it is
+        assertThat(endedBy("exit 3")).isEqualTo("0 3");
+    }
 }

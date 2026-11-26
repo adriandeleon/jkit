@@ -38,15 +38,21 @@ public enum Tool {
     /** The tool whose installs this tool uses. */
     public Tool storeTool() { return this == GRAALVM ? JDK : this; }
 
+    /** The tool {@code text} names ({@code java} and {@code mvn} too), or an error with hints. */
     public static Tool parse(String text) {
-        return switch (text.toLowerCase(Locale.ROOT)) {
+        return find(text).orElseThrow(() -> new JkitException("unknown tool '" + text + "'", unknownToolHints(text)));
+    }
+
+    /** The tool {@code text} names, as {@link #parse} reads it; empty when it names none. */
+    public static java.util.Optional<Tool> find(String text) {
+        return java.util.Optional.ofNullable(switch (text.toLowerCase(Locale.ROOT)) {
             case "jdk", "java" -> JDK;
             case "maven", "mvn" -> MAVEN;
             case "gradle" -> GRADLE;
             case "sbt" -> SBT;
             case "graalvm" -> GRAALVM;
-            default -> throw new JkitException("unknown tool '" + text + "'", unknownToolHints(text));
-        };
+            default -> null;
+        });
     }
 
     /** Vendors people type where the tool goes ({@code temurin@21}). */

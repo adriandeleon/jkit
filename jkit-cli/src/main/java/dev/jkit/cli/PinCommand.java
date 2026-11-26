@@ -74,7 +74,8 @@ final class PinCommand implements Callable<Integer> {
     }
 
     int run(Context ctx, Path cwd) throws Exception {
-        spec = Resolve.lts(ctx, spec, true);
+        // the vendor's own newest LTS: the one typed, else the default, which sync installs
+        spec = Resolve.lts(ctx, spec, true, spec != null && spec.isLts() ? Resolve.knownVendor(ctx, spec, vendorText) : null, fx);
         String retry = "jkit pin " + spec + (latest ? "@latest" : "") + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "")
                 + (exact ? " --exact" : "");
         Path file = ProjectShell.target(ctx, cwd, here, retry);

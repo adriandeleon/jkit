@@ -73,11 +73,34 @@ class ShellRcTest {
         assertThat(ShellRc.manualLine("jkit hook pwsh | Out-String | Invoke-Expression\n")).isEqualTo(1);
     }
 
+    /** bash and zsh read a \r\n block's lines as "fi\r": the block is \n in any file, the rest stays as it was. */
     @Test
-    void keepsWindowsLineEndings() {
-        String added = ShellRc.add("a\r\n", "bash").text();
-        assertThat(added).startsWith("a\r\n\r\n" + ShellRc.START + "\r\n").doesNotContain("\n" + ShellRc.END + "\n");
-        assertThat(ShellRc.remove(added).text()).isEqualTo("a\r\n");
+    void theBlockIsAlwaysLfAndRemoveKeepsTheFileByteForByte() {
+        String rc = "a\r\nb\r\n";
+        String added = ShellRc.add(rc, "bash").text();
+        assertThat(added).startsWith(rc + "\n" + ShellRc.START + "\n").endsWith(ShellRc.END + "\n");
+        assertThat(added.substring(rc.length())).doesNotContain("\r");
+        assertThat(ShellRc.remove(added).text()).isEqualTo(rc);
+
+        // the user's unterminated last line gets the file's own line ending
+        assertThat(ShellRc.add("a\r\nb", "zsh").text()).startsWith("a\r\nb\r\n\n" + ShellRc.START + "\n");
+
+        // a block between mixed lines (and one an editor turned into \r\n) comes out leaving the rest as is
+        String mixed = "x\r\ny\n" + String.join("\r\n", ShellRc.block("bash")) + "\r\nz\r\n\tw  \n";
+        assertThat(ShellRc.remove(mixed).text()).isEqualTo("x\r\ny\nz\r\n\tw  \n");
+        // no line ending at the end of the file: nothing is added
+        assertThat(ShellRc.remove("a\n" + String.join("\n", ShellRc.block("bash")) + "\nb").text()).isEqualTo("a\nb");
+    }
+
+    /** The block added to a \r\n file runs under bash. */
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void bashRunsTheBlockAddedToACrlfFile() throws Exception {
+        Path self = java.nio.file.Files.createDirectories(tmp.resolve("crlf")).resolve("jkit");
+        java.nio.file.Files.writeString(self, "#!/bin/sh\necho 'echo loaded'\n");
+        self.toFile().setExecutable(true);
+        String rc = ShellRc.add("# a comment\r\n", "bash", self.toString(), tmp.resolve(".jkit")).text();
+        assertThat(runBash(rc, "/usr/bin:/bin")).isEqualTo("loaded");
     }
 
     @org.junit.jupiter.api.io.TempDir

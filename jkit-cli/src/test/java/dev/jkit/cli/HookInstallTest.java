@@ -52,6 +52,25 @@ class HookInstallTest {
         assertThat(Files.readAllBytes(rc)).isEqualTo(latin1);
     }
 
+    /** A dotfile manager's ~/.bashrc link stays a link, keeps its mode, and the change is said to go to its file. */
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void aLinkedStartupFileStaysALinkWithItsMode() throws Exception {
+        Path real = Files.writeString(Files.createDirectories(user.resolve("dotfiles")).resolve("bashrc"), "export A=1\r\n");
+        Files.setPosixFilePermissions(real, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        Path rc = Files.createSymbolicLink(user.resolve(".bashrc"), Path.of("dotfiles/bashrc"));
+        HookCommand.install(ctx(), "bash", user);
+        assertThat(Files.isSymbolicLink(rc)).isTrue();
+        assertThat(Files.readString(real)).startsWith("export A=1\r\n\n" + ShellRc.START + "\n");
+        assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(real)))
+                .isEqualTo("rw-------");
+        assertThat(output()).contains("is a link: the change went to");
+        HookCommand.uninstall(ctx(), "bash", user);
+        assertThat(Files.isSymbolicLink(rc)).isTrue();
+        assertThat(Files.readString(real)).isEqualTo("export A=1\r\n");
+        assertThat(output()).contains("is a link: the change went to");
+    }
+
     @Test
     void installAppendsToBashrcAndSaysWhatChanged() throws Exception {
         Path rc = user.resolve(".bashrc");

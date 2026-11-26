@@ -5,7 +5,6 @@ import dev.jkit.model.PinnedTool;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -35,46 +34,61 @@ public final class ProjectWriter {
                 + "[tools]\n" + line(pin.tool().id(), pin) + "\n";
     }
 
-    /** {@code text} with {@code pin} set: its line replaced in place, or added to {@code [tools]}. */
+    /**
+     * {@code text} with {@code pin} set: its line replaced in place, or added to {@code [tools]}.
+     * Every other line stays byte for byte as it was, line endings included.
+     */
     public static Edit set(Path file, String text, PinnedTool pin) {
-        String nl = text.contains("\r\n") ? "\r\n" : "\n";
-        List<String> lines = new ArrayList<>(text.lines().toList());
-        Located found = locate(lines, pin.tool());
+        List<Lines.Line> lines = Lines.of(text);
+        Located found = locate(lines.stream().map(Lines.Line::text).toList(), pin.tool());
+        String result;
         boolean replaced;
         if (found.line >= 0) {
-            String old = lines.get(found.line);
-            lines.set(found.line, found.indent + found.key + " = " + value(pin) + trailingComment(old, found.valueStart));
+            Lines.Line old = lines.get(found.line);
+            result = text.substring(0, old.start())
+                    + found.indent + found.key + " = " + value(pin) + trailingComment(old.text(), found.valueStart)
+                    + text.substring(old.end());
             replaced = true;
         } else if (found.section >= 0) {
-            lines.add(found.lastKey + 1, line(pin.tool().id(), pin));
+            Lines.Line after = lines.get(found.lastKey);
+            String nl = after.next() > after.end() ? after.ending(text) : Lines.ending(text);
+            String added = line(pin.tool().id(), pin);
+            // a last line without a line ending gets one, and the new line goes after it
+            result = after.next() > after.end()
+                    ? text.substring(0, after.next()) + added + nl + text.substring(after.next())
+                    : text + nl + added + nl;
             replaced = false;
         } else {
-            while (!lines.isEmpty() && lines.getLast().isBlank()) {
-                lines.removeLast();
+            String nl = Lines.ending(text);
+            int keep = lines.size();
+            while (keep > 0 && lines.get(keep - 1).text().isBlank()) {
+                keep--;
             }
-            if (!lines.isEmpty()) {
-                lines.add("");
+            StringBuilder sb = new StringBuilder();
+            if (keep > 0) {
+                Lines.Line last = lines.get(keep - 1);
+                sb.append(text, 0, last.end()).append(last.next() > last.end() ? last.ending(text) : nl).append(nl);
             }
-            lines.add("[tools]");
-            lines.add(line(pin.tool().id(), pin));
+            result = sb.append("[tools]").append(nl).append(line(pin.tool().id(), pin)).append(nl).toString();
             replaced = false;
         }
-        String result = String.join(nl, lines) + nl;
         check(file, text, result, pin.tool(), pin);
         return new Edit(result, replaced);
     }
 
-    /** {@code text} without the tool's line; {@code replaced} false (and the text unchanged) when it had none. */
+    /**
+     * {@code text} without the tool's line; {@code replaced} false (and the text unchanged) when it
+     * had none. Every other byte stays as it was.
+     */
     public static Edit remove(Path file, String text, Tool tool) {
-        String nl = text.contains("\r\n") ? "\r\n" : "\n";
-        List<String> lines = new ArrayList<>(text.lines().toList());
-        Located found = locate(lines, tool);
+        List<Lines.Line> lines = Lines.of(text);
+        Located found = locate(lines.stream().map(Lines.Line::text).toList(), tool);
         if (found.line < 0) {
             check(file, text, text, tool, null);
             return new Edit(text, false);
         }
-        lines.remove(found.line);
-        String result = lines.isEmpty() ? "" : String.join(nl, lines) + nl;
+        Lines.Line gone = lines.get(found.line);
+        String result = text.substring(0, gone.start()) + text.substring(gone.next());
         check(file, text, result, tool, null);
         return new Edit(result, true);
     }
@@ -135,13 +149,7 @@ public final class ProjectWriter {
                 continue;
             }
             at.lastKey = i;
-            Tool keyTool;
-            try {
-                keyTool = Tool.parse(unquote(key.group(2)));
-            } catch (JkitException e) {
-                continue;
-            }
-            if (keyTool == tool && at.line < 0) {
+            if (Tool.find(unquote(key.group(2))).orElse(null) == tool && at.line < 0) {
                 at.line = i;
                 at.indent = key.group(1);
                 at.key = key.group(2);

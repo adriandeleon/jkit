@@ -138,11 +138,9 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("line " + manual + " of " + shown + " already loads the jkit hook; nothing changed there");
         } else {
             createParent(ctx, file, report);
-            if (!exists) {
-                Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
-            }
             String written = ShellRc.add(text, shell, self, ctx.home.root(), !exists).text();
-            Files.writeString(file, written, charset);
+            // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
+            dev.jkit.core.AtomicFile.write(file, written, charset, true);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
@@ -203,10 +201,7 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
-            if (!Files.exists(config)) {
-                Files.createFile(config, dev.jkit.model.Perms.file());
-            }
-            Files.writeString(config, edit.text());
+            dev.jkit.core.AtomicFile.write(config, edit.text(), java.nio.charset.StandardCharsets.UTF_8, true);
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
                     + shown);
@@ -272,8 +267,11 @@ final class HookCommand implements Callable<Integer> {
             Files.delete(file);
             report.fileDeleted(file);
         } else {
-            Files.writeString(file, edit.text(), charset);
+            dev.jkit.core.AtomicFile.write(file, edit.text(), charset, true);
             report.file(file, false);
+            if (Files.isSymbolicLink(file)) {
+                report.note(shown + " is a link: the change went to " + Changes.tilde(file.toRealPath().toString()));
+            }
         }
         ctx.out.println("removed the jkit hook from " + shown);
         if (manual > 0) {

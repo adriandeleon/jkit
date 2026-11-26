@@ -46,6 +46,24 @@ class ResolveTest {
         assertThat(Resolve.lts(ctx, ToolSpec.parse("jdk@21"), false).version()).isEqualTo("21"); // others untouched
     }
 
+    private static dev.jkit.sources.FoojaySource.Pkg pkg(String vendor, String version, String term) {
+        return new dev.jkit.sources.FoojaySource.Pkg("id", Vendor.of(vendor), dev.jkit.model.Version.parse(version).part(0),
+                dev.jkit.model.Version.parse(version), "jdk.tar.gz", "tar.gz", term, true);
+    }
+
+    /** jdk@lts zulu online: zulu's own newest LTS, not one only another vendor has shipped yet. */
+    @Test
+    void ltsOnlineIsTheVendorsOwnNewestLts() {
+        List<dev.jkit.sources.FoojaySource.Pkg> builds = List.of(
+                pkg("temurin", "25.0.1", "lts"), pkg("temurin", "21.0.9", "lts"), pkg("temurin", "24.0.2", "sts"),
+                pkg("zulu", "21.0.9", "lts"), pkg("zulu", "17.0.17", "lts"), pkg("zulu", "24.0.2", "sts"),
+                pkg("corretto", "17.0.17", ""), pkg("corretto", "23.0.2", ""));
+        assertThat(Resolve.newestLts(builds, Vendor.of("temurin"))).isEqualTo(25);
+        assertThat(Resolve.newestLts(builds, Vendor.of("zulu"))).isEqualTo(21);
+        assertThat(Resolve.newestLts(builds, Vendor.of("corretto"))).isEqualTo(17); // no term given: the LTS rule
+        assertThat(Resolve.newestLts(builds, Vendor.of("liberica"))).isNull();
+    }
+
     @Test
     void plainBuildsWinUnlessFxIsAsked() throws Exception {
         install("21.0.5+11", false);

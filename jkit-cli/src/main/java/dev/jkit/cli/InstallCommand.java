@@ -107,8 +107,8 @@ final class InstallCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
-        spec = Resolve.lts(ctx, spec, true);
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
+        spec = Resolve.lts(ctx, spec, true, vendor, fx);
         // an exact pre-release (maven@4.0.0-rc-7) asks for pre-releases by itself, as pin and sync do
         boolean wantPre = pre || spec.version() != null && dev.jkit.model.Version.looksLikeVersion(spec.version())
                 && dev.jkit.model.Version.parse(spec.version()).isPreRelease();

@@ -52,6 +52,21 @@ final class Changes {
                 changes.add(new Change("env", name, "set", after));
             }
         }
+        // a *_HOME set outside jkit: say that jkit keeps it, and when it comes back
+        for (Tool t : Tool.values()) {
+            String kept = ShellEnv.userVariable(t);
+            if (!updates.containsKey(kept)) {
+                continue;
+            }
+            String saved = updates.get(kept);
+            String was = ctx.env.get(kept);
+            if (saved != null && !saved.equals(was)) {
+                note("your own " + t.homeVariable() + " is kept in " + kept + ": it comes back when jkit's "
+                        + t + " leaves this shell");
+            } else if (saved == null && was != null && Objects.equals(updates.get(t.homeVariable()), was)) {
+                note(t.homeVariable() + " is your own again: " + tilde(was));
+            }
+        }
         return this;
     }
 

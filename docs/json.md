@@ -419,13 +419,18 @@ or is null; while it is set, the file's values don't apply, so their `source` is
 { "schemaVersion": 1, "dryRun": false,
   "builds": [ { "install": { "...": "the install object, as it was before removal" },
                 "newer": "21.0.9+10", "bytes": 201326592 } ],
+  "inUse": [ { "install": { "...": "the install object" }, "newer": "8.14.3", "bytes": 150994944,
+               "pid": 48213, "command": "/home/me/.jkit/tools/jdk/21.0.9+10-temurin/bin/java" } ],
   "leftovers": [ "/home/me/.jkit/tmp/install-4821" ],
   "cache": [ "/home/me/.jkit/index/0a579b56721481afc1486ff0.cache" ],
   "bytes": 201330000, "changes": [], "notes": [] }
 ```
 
 `builds` are installs with a newer stable build in the same release line (`newer`), other than a
-global one, one this shell uses, or one the project here pins. `leftovers` are folders interrupted
+global one, one this shell uses, or one the project here pins. `inUse` are such builds kept because a
+running program uses them: `pid` and `command` (null when the OS doesn't say) name one, whose
+executable is in the build or whose arguments name a file in it (a Gradle daemon's classpath). A
+`jkit use` in another shell that runs nothing from the build can't be seen. `leftovers` are folders interrupted
 installs and removals left; `cache` the cached version lists older than 30 days. `bytes` is the
 space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
 

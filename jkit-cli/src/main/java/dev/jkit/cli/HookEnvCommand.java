@@ -31,26 +31,49 @@ final class HookEnvCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         try {
-            Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
+            Map<String, String> env = dev.jkit.model.Envs.system();
+            Path cwd = Path.of("").toAbsolutePath();
+            // this runs on every cd: the usual answer, nothing to do, comes before jkit's home,
+            // config and store are read
+            if (nothingToDo(env, ProjectFile.locate(cwd, env))) {
+                return 0;
+            }
+            Context ctx = Context.lenient(env, System.out);
             String name = shell != null ? shell : ctx.env.getOrDefault("JKIT_SHELL", "bash");
-            ctx.out.print(run(ctx, Path.of("").toAbsolutePath(), name, ctx.err));
+            ctx.out.print(run(ctx, cwd, name, ctx.err));
         } catch (Exception | Error e) {
             System.err.println("jkit: couldn't check for a project file here: " + dev.jkit.model.Visible.of(e.getMessage()));
         }
         return 0;
     }
 
+    /**
+     * Whether a cd changes nothing, from the environment and the project files found alone:
+     * switching was turned off in this shell ({@code JKIT_AUTO_SWITCH=0} exported after the hook
+     * loaded; config.toml only counts for new shells), there is no project and none was applied,
+     * or it is the project already applied, unchanged.
+     */
+    static boolean nothingToDo(Map<String, String> env, List<Path> files) {
+        String auto = env.get(dev.jkit.core.Config.AUTO_SWITCH_ENV);
+        if (auto != null && !auto.isBlank() && Boolean.FALSE.equals(dev.jkit.core.Config.parseSwitch(auto))) {
+            return true;
+        }
+        String key = files.isEmpty() ? null : ProjectFile.key(files);
+        String applied = env.get(ShellEnv.PROJECT);
+        if (key == null && applied == null && !hasProjectState(env)) {
+            return true; // the common case outside projects: no files, nothing applied
+        }
+        return key != null && key.equals(applied); // still the same project, unchanged
+    }
+
     /** The shell code to evaluate ("" when nothing changes), telling {@code err} what it changes. */
     static String run(Context ctx, Path cwd, String shell, PrintStream err) throws Exception {
         List<Path> files = ProjectFile.locate(cwd, ctx.env);
+        if (nothingToDo(ctx.env, files)) {
+            return "";
+        }
         String key = files.isEmpty() ? null : ProjectFile.key(files);
         String applied = ctx.env.get(ShellEnv.PROJECT);
-        if (key == null && applied == null && !hasProjectState(ctx.env)) {
-            return ""; // the common case outside projects: no files, nothing applied
-        }
-        if (key != null && key.equals(applied)) {
-            return ""; // still the same project, unchanged
-        }
         // the same project, unchanged, but a pin wasn't installed last time: look again, quietly
         boolean recheck = key != null && (key + ProjectShell.MISSING).equals(applied);
 
@@ -119,19 +142,33 @@ final class HookEnvCommand implements Callable<Integer> {
             String left = appliedDir(applied);
             List<String> back = new ArrayList<>();
             List<String> own = new ArrayList<>();
+            List<String> user = new ArrayList<>();
             for (Tool t : Tool.values()) {
                 if (env.containsKey(ShellEnv.projectVariable(t))) {
-                    (env.containsKey(ShellEnv.stateVariable(t)) ? own : back).add(t.toString());
+                    if (env.containsKey(ShellEnv.stateVariable(t))) {
+                        own.add(t.toString());
+                    } else if (env.get(ShellEnv.userVariable(t)) != null && !env.get(ShellEnv.userVariable(t)).isBlank()) {
+                        user.add(t + " back to your own " + t.homeVariable());
+                    } else {
+                        back.add(t.toString());
+                    }
                 }
             }
             String where = "left the project" + (left == null ? "" : " in " + Changes.tilde(left));
-            if (own.isEmpty()) {
+            if (own.isEmpty() && user.isEmpty()) {
                 return where + ": back to the global versions";
             }
-            String stays = "this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay");
-            return where + (back.isEmpty() ? "; " + stays
-                    : ": " + String.join(", ", back) + " back to the global " + (back.size() == 1 ? "version" : "versions")
-                            + "; " + stays);
+            List<String> parts = new ArrayList<>();
+            if (!back.isEmpty()) {
+                parts.add(String.join(", ", back) + " back to the global " + (back.size() == 1 ? "version" : "versions"));
+            }
+            if (!user.isEmpty()) {
+                parts.add(String.join(", ", user));
+            }
+            if (!own.isEmpty()) {
+                parts.add("this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay"));
+            }
+            return where + (back.isEmpty() && user.isEmpty() ? "; " : ": ") + String.join("; ", parts);
         }
         String where = Changes.tilde(plan.project().get().dir().toString()) + "/" + plan.project().get().source();
         List<String> tools = new ArrayList<>();

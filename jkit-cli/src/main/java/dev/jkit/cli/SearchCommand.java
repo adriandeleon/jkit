@@ -56,7 +56,9 @@ final class SearchCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Context ctx = options.context();
-        spec = Resolve.lts(ctx, spec, true);
+        // a vendor's own newest LTS; with none named, the newest of any vendor, as the list shows them all
+        spec = Resolve.lts(ctx, spec, true, spec != null && spec.isLts() && vendorText != null
+                ? Resolve.knownVendor(ctx, spec, vendorText) : null, fx);
         if (jsonFlag.json) {
             Map<String, Object> doc = json(ctx);
             doc.put("changes", new Changes(ctx).disk().json());
