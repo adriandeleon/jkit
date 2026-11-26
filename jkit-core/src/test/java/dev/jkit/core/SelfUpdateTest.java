@@ -3,6 +3,7 @@ package dev.jkit.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
@@ -18,6 +19,8 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
@@ -101,16 +104,71 @@ class SelfUpdateTest {
     @Test
     void packageManagersGetTheirCommand() {
         SelfUpdate.Release r = SelfUpdate.parse(SUMS, Platform.LINUX_X64);
-        assertThat(SelfUpdate.Kind.HOMEBREW.command(r, Platform.LINUX_X64)).isEqualTo("brew upgrade jkit");
-        assertThat(SelfUpdate.Kind.RPM.command(r, Platform.LINUX_X64)).isEqualTo(
-                "sudo dnf install https://github.com/adriandeleon/jkit/releases/download/v0.4.0/jkit-0.4.0-1.x86_64.rpm");
-        assertThat(SelfUpdate.Kind.DEB_FILE.command(r, Platform.LINUX_AARCH64)).isEqualTo(
-                "d=$(mktemp -d) && curl -fLo \"$d/jkit_0.4.0_arm64.deb\" https://github.com/adriandeleon/jkit/releases/"
-                        + "download/v0.4.0/jkit_0.4.0_arm64.deb && sudo apt install \"$d/jkit_0.4.0_arm64.deb\"");
-        assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64)).isNull();
+        assertThat(SelfUpdate.Kind.HOMEBREW.command(r, Platform.LINUX_X64, SUMS)).isEqualTo("brew upgrade jkit");
+        assertThat(SelfUpdate.Kind.DEB.command(r, Platform.LINUX_X64, SUMS))
+                .isEqualTo("sudo apt update && sudo apt install --only-upgrade jkit");
+        assertThat(SelfUpdate.Kind.WINGET.command(r, Platform.WINDOWS_X64, SUMS)).isEqualTo("winget upgrade AdrianDeLeon.jkit");
+        // dnf and apt don't check the signature of a package from a file or a URL: the command
+        // checks it against the SHA-256 the signed SHA256SUMS lists before installing it
+        assertThat(SelfUpdate.Kind.RPM.command(r, Platform.LINUX_X64, SUMS)).isEqualTo(
+                "d=$(mktemp -d) && curl -fLo \"$d/jkit-0.4.0-1.x86_64.rpm\" https://github.com/adriandeleon/jkit/releases/"
+                        + "download/v0.4.0/jkit-0.4.0-1.x86_64.rpm && echo '" + "1".repeat(64) + "  '\"$d/jkit-0.4.0-1.x86_64.rpm\""
+                        + " | sha256sum -c - && sudo dnf install \"$d/jkit-0.4.0-1.x86_64.rpm\"");
+        assertThat(SelfUpdate.Kind.DEB_FILE.command(r, Platform.LINUX_X64, SUMS)).isEqualTo(
+                "d=$(mktemp -d) && curl -fLo \"$d/jkit_0.4.0_amd64.deb\" https://github.com/adriandeleon/jkit/releases/"
+                        + "download/v0.4.0/jkit_0.4.0_amd64.deb && echo '" + "6".repeat(64) + "  '\"$d/jkit_0.4.0_amd64.deb\""
+                        + " | sha256sum -c - && sudo apt install \"$d/jkit_0.4.0_amd64.deb\"");
+        assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64, SUMS)).isNull();
+        assertThat(SelfUpdate.Kind.RPM.needsSignedSums()).isTrue();
+        assertThat(SelfUpdate.Kind.DEB_FILE.needsSignedSums()).isTrue();
+        assertThat(SelfUpdate.Kind.DEB.needsSignedSums()).isFalse();
+        assertThat(SelfUpdate.Kind.HOMEBREW.needsSignedSums()).isFalse();
+        // a package SHA256SUMS doesn't list has no command: there is nothing to check it against
+        assertThatThrownBy(() -> SelfUpdate.Kind.RPM.command(r, Platform.LINUX_AARCH64, SUMS))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("jkit 0.4.0 has no jkit-0.4.0-1.aarch64.rpm in its SHA256SUMS");
         // a pre-release's package names, as GitHub publishes them
         SelfUpdate.Release rc = new SelfUpdate.Release(Version.parse("0.4.0-rc.1"), "x", "0".repeat(64));
-        assertThat(SelfUpdate.Kind.RPM.command(rc, Platform.LINUX_X64)).endsWith("/v0.4.0-rc.1/jkit-0.4.0.rc.1-1.x86_64.rpm");
+        assertThat(SelfUpdate.Kind.RPM.packageFile(rc, Platform.LINUX_X64)).isEqualTo("jkit-0.4.0.rc.1-1.x86_64.rpm");
+        assertThat(SelfUpdate.Kind.DEB_FILE.packageFile(rc, Platform.LINUX_AARCH64)).isEqualTo("jkit_0.4.0.rc.1_arm64.deb");
+        assertThat(SelfUpdate.Kind.RPM.command(rc, Platform.LINUX_X64, "a".repeat(64) + "  jkit-0.4.0.rc.1-1.x86_64.rpm\n"))
+                .contains(" https://github.com/adriandeleon/jkit/releases/download/v0.4.0-rc.1/jkit-0.4.0.rc.1-1.x86_64.rpm ");
+    }
+
+    @Test
+    void thePackageCommandInstallsOnlyAFileWithTheListedHash() throws Exception {
+        // run as sh runs it, with curl and sudo standing in: they write what they were asked
+        assumeFalse(System.getProperty("os.name").startsWith("Windows"));
+        assumeTrue(Files.isExecutable(Path.of("/bin/sh")) && Stream.of("/usr/bin/sha256sum", "/bin/sha256sum")
+                .anyMatch(p -> Files.isExecutable(Path.of(p))));
+        Path bin = Files.createDirectories(tmp.resolve("fake-bin"));
+        Path log = tmp.resolve("sudo.log");
+        Files.writeString(bin.resolve("curl"), "#!/bin/sh\nprintf 'the package' > \"$2\"\n");
+        Files.writeString(bin.resolve("sudo"), "#!/bin/sh\necho \"$@\" > '" + log + "'\n");
+        for (String tool : new String[] {"curl", "sudo"}) {
+            Files.setPosixFilePermissions(bin.resolve(tool), PosixFilePermissions.fromString("rwx------"));
+        }
+        String good = sha256("the package".getBytes(StandardCharsets.UTF_8));
+        SelfUpdate.Release r = new SelfUpdate.Release(Version.parse("0.4.0"), "x", "0".repeat(64));
+        for (SelfUpdate.Kind kind : new SelfUpdate.Kind[] {SelfUpdate.Kind.RPM, SelfUpdate.Kind.DEB_FILE}) {
+            String file = kind.packageFile(r, Platform.LINUX_X64);
+            Files.deleteIfExists(log);
+            assertThat(sh(bin, kind.command(r, Platform.LINUX_X64, good + "  " + file + "\n"))).isZero();
+            assertThat(Files.readString(log).strip()).matches((kind == SelfUpdate.Kind.RPM ? "dnf" : "apt")
+                    + " install /.+/" + Pattern.quote(file));
+            Files.deleteIfExists(log);
+            assertThat(sh(bin, kind.command(r, Platform.LINUX_X64, "0".repeat(64) + "  " + file + "\n"))).isNotZero();
+            assertThat(log).doesNotExist(); // a file of another hash is never installed
+        }
+    }
+
+    private static int sh(Path bin, String command) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command).redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        pb.environment().put("PATH", bin + ":/usr/bin:/bin");
+        Process p = pb.start();
+        assertThat(p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        return p.exitValue();
     }
 
     /** A release archive whose jkit is a script printing {@code says}. */

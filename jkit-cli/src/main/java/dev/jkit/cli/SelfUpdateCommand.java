@@ -67,9 +67,13 @@ final class SelfUpdateCommand implements Callable<Integer> {
         String sums = ctx.http().getFresh(SelfUpdate.sumsUrl(base));
         SelfUpdate.Release latest = SelfUpdate.parse(sums, ctx.platform);
         // the signature guards the binary jkit is about to run, so it's checked just before the
-        // download: saying a release is out, or which command updates it, needs no trust in it
+        // download: saying a release is out, or which command updates it, needs no trust in it,
+        // except for an .rpm or .deb from a file, whose command checks the hash SHA256SUMS lists
         boolean newer = SelfUpdate.newer(latest, current);
-        String how = kind.command(latest, ctx.platform);
+        if (newer && kind.needsSignedSums()) {
+            SelfUpdate.requireSigned(ctx.http(), base, latest, sums, sumsCheck);
+        }
+        String how = newer ? kind.command(latest, ctx.platform, sums) : null;
         String status;
         if (!newer) {
             status = "up-to-date";
