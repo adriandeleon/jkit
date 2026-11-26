@@ -14,8 +14,9 @@ name: Release
 #
 # Run it by hand (Actions → Release → Run workflow) to build and test every platform without
 # publishing anything: signing, release, homebrew and winget only run for a pushed tag, so the
-# macOS archives of a manual run are unsigned. A pull request that changes the build or the
-# packaging gets the same dry run, so a plugin bump fails there and not on the release tag.
+# macOS archives of a manual run are unsigned. Every push to main and every pull request that
+# changes the build or the packaging gets the same dry run, so a native-image regression or a
+# plugin bump fails there and not on the release tag.
 #
 # If homebrew or winget fails after the release is published (a missing token, an outage), fix
 # the cause and use "Re-run failed jobs", not "Re-run all jobs": a full re-run rebuilds, then
@@ -25,6 +26,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: [main]   # a dry run: the native binaries of what was merged
   workflow_dispatch:
   pull_request:
     # also the native-image metadata (the JVM tests in ci.yml don't exercise it) and what the packages ship
@@ -197,17 +199,12 @@ jobs:
           jkit=jkit-cli/target/jkit${{ matrix.exe }}
           python=$(command -v python3 || command -v python)
           "$jkit" --version | tr -d '\r' | grep -Fx "jkit $VERSION"
-          # the network commands are checked, but an outage at foojay or Maven Central only warns:
-          # it shouldn't fail a release build
+          # the network commands are checked, but an outage at foojay or GitHub only warns: it
+          # shouldn't fail a release build (the next step checks Maven against a local mirror)
           if out=$("$jkit" search jdk --maintained); then
             printf '%s\n' "$out" | head -3
           else
             echo "::warning::jkit search jdk failed (network?)"
-          fi
-          if doc=$("$jkit" search maven --json); then
-            printf '%s' "$doc" | "$python" -c 'import json,sys; json.load(sys.stdin)'
-          else
-            echo "::warning::jkit search maven failed (network?)"
           fi
           # the native binary needs reflection metadata the JVM tests don't exercise: JSON and the read-only commands
           for cmd in "list --json" "status --json" "env --json --no-project" "doctor --json" "config --json" \
@@ -216,16 +213,6 @@ jobs:
             printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1' \
               || { echo "::error::jkit $cmd printed no valid JSON"; exit 1; }
           done
-          # signature checks run BouncyCastle and the built-in keys, which only the native binary
-          # can show are there: a signed install must say whose signature it checked
-          if out=$("$jkit" install maven@3.9 --no-default 2>&1); then
-            printf '%s\n' "$out" | grep "signature checked: signed by Apache Maven" \
-              || { printf '%s\n' "$out"; echo "::error::jkit install maven checked no signature"; exit 1; }
-          elif printf '%s\n' "$out" | grep -qi signature; then
-            printf '%s\n' "$out"; echo "::error::jkit install maven failed its signature check"; exit 1
-          else
-            printf '%s\n' "$out"; echo "::warning::jkit install maven failed (network?)"
-          fi
           # self-update --check reads the newest published release (it needs no signature to say so)
           if doc=$("$jkit" self-update --check --json); then
             printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1'
@@ -244,6 +231,68 @@ jobs:
               exit 1
             fi
           fi
+
+      # Signature checks run BouncyCastle and the built-in keys, which only the native binary can
+      # show are there. Checked against a mirror on this machine, so a network outage can't hide a
+      # regression: Maven 3.9.9's real zip, from Maven Central (which the build needs anyway), with
+      # its real signature (a test fixture, checked with gpg), must install and say whose signature
+      # it checked; the same zip with one byte changed and a .sha512 to match must be refused.
+      - name: Signature check against a local mirror
+        run: |
+          set -euo pipefail
+          jkit="$PWD/jkit-cli/target/jkit${{ matrix.exe }}"
+          python=$(command -v python3 || command -v python)
+          sha512() { (sha512sum < "$1" 2>/dev/null || shasum -a 512 < "$1") | cut -d' ' -f1; }
+          v=3.9.9
+          zip="apache-maven-$v-bin.zip"
+          mirror="$RUNNER_TEMP/mirror"
+          for root in good bad; do
+            mkdir -p "$mirror/$root/org/apache/maven/apache-maven/$v"
+            printf '<metadata><versioning><versions><version>%s</version></versions></versioning></metadata>\n' "$v" \
+              > "$mirror/$root/org/apache/maven/apache-maven/maven-metadata.xml"
+          done
+          good="$mirror/good/org/apache/maven/apache-maven/$v"
+          bad="$mirror/bad/org/apache/maven/apache-maven/$v"
+          central="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$v"
+          curl -fsSL --proto '=https' --retry 3 -o "$good/$zip" "$central/$zip"
+          curl -fsSL --proto '=https' --retry 3 -o "$good/$zip.sha512" "$central/$zip.sha512"
+          if [ "$(sha512 "$good/$zip")" != "$(cut -d' ' -f1 < "$good/$zip.sha512" | tr -d '\r\n')" ]; then
+            echo "::error::$zip from Maven Central doesn't match its .sha512"
+            exit 1
+          fi
+          cp jkit-core/src/test/resources/dev/jkit/core/maven-$v.asc "$good/$zip.asc"
+          cp "$good/$zip" "$good/$zip.asc" "$bad/"
+          "$python" -c 'import sys; p = sys.argv[1]; b = bytearray(open(p, "rb").read()); b[1000] ^= 1; open(p, "wb").write(b)' "$bad/$zip"
+          sha512 "$bad/$zip" > "$bad/$zip.sha512"
+
+          port=18731
+          "$python" -m http.server "$port" --bind 127.0.0.1 --directory "$mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2> /dev/null || true' EXIT
+          for _ in $(seq 50); do
+            if curl -fs -o /dev/null "http://127.0.0.1:$port/good/org/apache/maven/apache-maven/maven-metadata.xml"; then break; fi
+            sleep 0.2
+          done
+
+          export JKIT_SOURCES_MAVEN_URL="http://127.0.0.1:$port/good/"
+          export JKIT_HOME="$RUNNER_TEMP/jkit-mirror-good"
+          doc=$("$jkit" search maven --json) || { echo "::error::jkit search maven failed against the local mirror"; exit 1; }
+          printf '%s' "$doc" | "$python" -c 'import json,sys; d=json.load(sys.stdin); assert d["schemaVersion"] == 1; assert "3.9.9" in json.dumps(d)' \
+            || { printf '%s\n' "$doc"; echo "::error::jkit search maven --json didn't list 3.9.9"; exit 1; }
+          out=$("$jkit" install maven@3.9 --no-default 2>&1) \
+            || { printf '%s\n' "$out"; echo "::error::jkit install maven failed against the local mirror"; exit 1; }
+          printf '%s\n' "$out"
+          grep -q "signature checked: signed by Apache Maven" <<< "$out" \
+            || { echo "::error::jkit install maven checked no signature"; exit 1; }
+
+          export JKIT_SOURCES_MAVEN_URL="http://127.0.0.1:$port/bad/"
+          export JKIT_HOME="$RUNNER_TEMP/jkit-mirror-bad"
+          if out=$("$jkit" install maven@3.9 --no-default 2>&1); then
+            printf '%s\n' "$out"; echo "::error::jkit installed a Maven zip its signature doesn't cover"; exit 1
+          fi
+          printf '%s\n' "$out"
+          grep -qF "doesn't match the download" <<< "$out" \
+            || { echo "::error::jkit refused the altered zip, but not for its signature"; exit 1; }
 
       # jkit.exe links the Visual C++ runtime (VCRUNTIME140.dll and VCRUNTIME140_1.dll), which
       # Windows doesn't include. The .zip carries Microsoft's redistributable copies next to it
