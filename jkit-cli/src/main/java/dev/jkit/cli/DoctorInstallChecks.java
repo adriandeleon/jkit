@@ -1,7 +1,9 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Config;
 import dev.jkit.core.Installed;
+import dev.jkit.core.ShellRc;
 import dev.jkit.core.Store;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
@@ -20,9 +22,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -158,6 +162,34 @@ final class DoctorInstallChecks {
         if (missing.isEmpty() && p.warnings().isEmpty()) {
             r.ok("project " + r.tilde(p.dir()) + " (" + p.source() + "): " + p.tools().size()
                     + (p.tools().size() == 1 ? " pin" : " pins") + ", all installed");
+        }
+    }
+
+    /**
+     * Temporary files a write of a startup file, config.toml or jkit.toml left when jkit was
+     * killed halfway (the file itself was never touched). Silent when there are none.
+     */
+    static void tempFiles(DoctorReport r) {
+        Set<Path> dirs = new LinkedHashSet<>();
+        try {
+            Path userHome = HookCommand.userHome(r.ctx);
+            for (String shell : List.of("bash", "zsh", "fish")) {
+                dirs.add(ShellRc.file(shell, r.ctx.env, userHome).getParent());
+            }
+        } catch (JkitException noHome) {
+            // no startup files to look next to
+        }
+        dirs.add(r.ctx.home.config().getParent());
+        ToolStates.Result states = r.states;
+        if (states != null && states.project().isPresent()) {
+            dirs.add(states.project().get().dir());
+        }
+        dirs.add(r.cwd);
+        for (Path dir : dirs) {
+            for (Path left : AtomicFile.leftovers(dir)) {
+                r.warn("a temporary file an interrupted jkit write left: " + r.tilde(left),
+                        "when no jkit command is running: " + (DoctorReport.WINDOWS ? "Remove-Item " : "rm ") + r.arg(left));
+            }
         }
     }
 

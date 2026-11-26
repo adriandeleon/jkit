@@ -61,6 +61,7 @@ final class DoctorCommand implements Callable<Integer> {
             Map.entry("path-order", DoctorShellChecks::pathOrder),
             Map.entry("user-env", DoctorWindowsCheck::userEnv),
             Map.entry("store", DoctorInstallChecks::store),
+            Map.entry("temp-files", DoctorInstallChecks::tempFiles),
             Map.entry("project", DoctorInstallChecks::project),
             Map.entry("index", DoctorInstallChecks::index),
             Map.entry("java-runs", DoctorInstallChecks::javaRuns),

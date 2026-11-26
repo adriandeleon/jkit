@@ -30,8 +30,9 @@ checks that foojay, services.gradle.org, Maven Central and GitHub can be reached
 
 It checks: the shell hook, more than one `jkit` on PATH, `JAVA_HOME` and friends set outside jkit,
 whether `java`, `mvn`, `gradle` and `sbt` on PATH are jkit's, broken global links, leftovers from
-interrupted installs, `config.toml`, the project file's warnings, the age of the version cache, and
-whether the active JDK actually runs.
+interrupted installs and from writes of a startup file, `config.toml` or `jkit.toml` (a
+`.<name>.<digits>.jkit-tmp` next to it), `config.toml`, the project file's warnings, the age of the
+version cache, and whether the active JDK actually runs.
 
 The usual culprits:
 
