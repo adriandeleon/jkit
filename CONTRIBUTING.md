@@ -53,6 +53,8 @@ GitHub Actions are pinned by commit SHA with the version in a comment, and workf
 - Commit messages: an imperative subject, and a body that says why.
 - User-visible changes get a line in `CHANGELOG.md` under Unreleased.
 - Keep jkit's output and docs plain: say what happened and what to do next.
+- jkit itself is developed with Claude Code. AI-assisted pull requests are welcome; say so with a
+  `Co-Authored-By:` line, and make sure you understand and have tested what you send.
 
 ## Security issues
 

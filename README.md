@@ -225,6 +225,11 @@ with `packaging/third-party-notices.sh` (CI runs it with `--check`).
 
 To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); design notes are in [docs/design/](docs/design/).
 
+jkit is developed with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding
+agent: much of its code, tests and docs are written with it, and commits it helped write say so
+(`Co-Authored-By: Claude`). Every change goes through the same checks: unit tests on Linux, macOS
+and Windows, native builds, and signed, attested releases.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Bundled components are listed in
