@@ -93,17 +93,17 @@ class JsonOutputTest {
         // sync installed one pin, then the next download failed: the new folder must not go unreported
         List<Object> changes = List.of(JsonOut.fields("kind", "folder", "name", "/h/tools/jdk/21", "action", "create",
                 "value", null));
-        JsonNode doc = new ObjectMapper().readTree(JsonOut.error(
-                new PartialFailure(new JkitException("can't reach repo.maven.apache.org"), changes), 1).toString());
+        JsonNode doc = new ObjectMapper().readTree(JsonOut.write(JsonOut.error(
+                new PartialFailure(new JkitException("can't reach repo.maven.apache.org"), changes), 1)));
         assertThat(doc.path("error").path("message").asText()).isEqualTo("can't reach repo.maven.apache.org");
         assertThat(doc.path("changes").get(0).path("name").asText()).isEqualTo("/h/tools/jdk/21");
-        assertThat(new ObjectMapper().readTree(JsonOut.error(new JkitException("x"), 1).toString()).has("changes"))
+        assertThat(new ObjectMapper().readTree(JsonOut.write(JsonOut.error(new JkitException("x"), 1))).has("changes"))
                 .isFalse();
     }
 
     @Test
     void errorsAreOneDocumentWithMessageHintsAndExitCode() throws Exception {
-        JsonNode doc = JSON.readTree(JsonOut.error(new JkitException(3, "no match", "install it"), 3).toString());
+        JsonNode doc = JSON.readTree(JsonOut.write(JsonOut.error(new JkitException(3, "no match", "install it"), 3)));
 
         assertThat(doc.path("error").path("message").asText()).isEqualTo("no match");
         assertThat(doc.path("error").path("hints").toString()).isEqualTo("[\"install it\"]");

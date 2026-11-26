@@ -16,6 +16,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,7 +68,7 @@ final class JsonOut {
     }
 
     /** Pretty JSON text with the escapes above. */
-    static String pretty(JsonNode node) {
+    private static String pretty(JsonNode node) {
         try {
             return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
         } catch (JsonProcessingException e) {
@@ -83,19 +84,8 @@ final class JsonOut {
 
     private JsonOut() { }
 
-    /** A new top-level document: {@code {"schemaVersion": 1}}. */
-    static ObjectNode doc() {
-        ObjectNode doc = MAPPER.createObjectNode();
-        doc.put("schemaVersion", SCHEMA_VERSION);
-        return doc;
-    }
-
-    static ObjectNode object() {
-        return MAPPER.createObjectNode();
-    }
-
-    static void print(PrintStream out, ObjectNode doc) {
-        out.println(pretty(doc));
+    static void print(PrintStream out, Map<String, Object> doc) {
+        out.println(write(doc));
         out.flush();
     }
 
@@ -103,36 +93,21 @@ final class JsonOut {
      * {@code {"schemaVersion": 1, "error": {"message", "hints", "exitCode"}}}, plus {@code changes}
      * when the command had already changed something before it failed.
      */
-    static ObjectNode error(JkitException e, int exitCode) {
-        ObjectNode doc = doc();
+    static Map<String, Object> error(JkitException e, int exitCode) {
+        Map<String, Object> doc = document();
         if (e instanceof PartialFailure partial && !partial.changes().isEmpty()) {
-            doc.set("changes", toNode(partial.changes()));
+            doc.put("changes", partial.changes());
         }
-        ObjectNode error = doc.putObject("error");
-        error.put("message", Errors.capped(e.getMessage()));
-        ArrayNode hints = error.putArray("hints");
-        e.hints().forEach(h -> hints.add(Errors.capped(h)));
-        error.put("exitCode", exitCode);
+        doc.put("error", fields("message", Errors.capped(e.getMessage()),
+                "hints", e.hints().stream().map(Errors::capped).toList(),
+                "exitCode", exitCode));
         return doc;
     }
 
     /** One installed build, with where it is active. */
-    static ObjectNode installed(Context ctx, Installed i) throws Exception {
-        ObjectNode node = object();
-        node.put("tool", i.tool().id());
-        node.put("id", i.id());
-        node.put("version", i.version().raw());
-        node.put("major", i.major());
-        node.put("vendor", i.vendor() == null ? null : i.vendor().name());
-        node.put("fx", i.fx());
-        node.put("graalvm", i.vendor() != null && i.vendor().isGraalVmBased());
-        node.put("preRelease", i.version().isPreRelease());
-        node.put("home", i.home().toAbsolutePath().toString());
-        // checked against a sha256/384/512 checksum when it was installed (see docs/json.md)
-        node.put("verified", Store.verified(i.home()));
-        node.put("signedBy", Store.signedBy(i.home()));
-        ArrayNode global = node.putArray("global");
-        ArrayNode shell = node.putArray("activeInShell");
+    static Map<String, Object> installed(Context ctx, Installed i) throws Exception {
+        List<String> global = new ArrayList<>();
+        List<String> shell = new ArrayList<>();
         for (Tool t : Tool.values()) {
             if (t.storeTool() != i.tool()) {
                 continue;
@@ -146,14 +121,21 @@ final class JsonOut {
                 shell.add(t.id());
             }
         }
-        return node;
-    }
-
-    static ArrayNode installedList(Context ctx, ArrayNode into, List<Installed> list) throws Exception {
-        for (Installed i : list) {
-            into.add(installed(ctx, i));
-        }
-        return into;
+        return fields(
+                "tool", i.tool().id(),
+                "id", i.id(),
+                "version", i.version().raw(),
+                "major", i.major(),
+                "vendor", i.vendor() == null ? null : i.vendor().name(),
+                "fx", i.fx(),
+                "graalvm", i.vendor() != null && i.vendor().isGraalVmBased(),
+                "preRelease", i.version().isPreRelease(),
+                "home", i.home().toAbsolutePath().toString(),
+                // checked against a sha256/384/512 checksum when it was installed (see docs/json.md)
+                "verified", Store.verified(i.home()),
+                "signedBy", Store.signedBy(i.home()),
+                "global", global,
+                "activeInShell", shell);
     }
 
     /** A top-level document as a map, {@code schemaVersion} first; {@link #write} turns it into JSON. */
