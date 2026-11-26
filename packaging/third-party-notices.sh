@@ -88,7 +88,8 @@ parts of the Java runtime: the OpenJDK class library and GraalVM's Substrate VM,
 the GNU General Public License version 2 with the Classpath Exception (full text near the end),
 with the third-party code they carry (XML parser, Unicode data, zlib and others; see "Java
 runtime"). The Windows .zip also holds Microsoft's Visual C++ runtime DLLs, under Microsoft's
-terms (see "Microsoft Visual C++ runtime").
+terms (see "Microsoft Visual C++ runtime"). The static musl Linux binaries (linux-x64-musl,
+linux-aarch64-musl) also contain musl libc and zlib (see "musl Linux binaries").
 
 The binaries are built with GraalVM Community Edition 25.0.5
 (https://github.com/graalvm/graalvm-ce-builds), except the macOS x64 binary, which is built with
@@ -151,6 +152,22 @@ EOF
     "==============================================================================" \
     "=============================================================================="
   tr -d '\r' < "$root/packaging/third-party/msvc-runtime.txt"
+
+  # the C library and zlib linked statically into the musl binaries (release.yml builds them)
+  printf '\n%s\nmusl Linux binaries\n%s\n\n' \
+    "==============================================================================" \
+    "=============================================================================="
+  cat <<'EOF'
+The linux-x64-musl and linux-aarch64-musl binaries are linked statically against musl libc 1.2.6
+(https://musl.libc.org) and zlib 1.4 (https://zlib.net), built unchanged from their release
+tarballs. The other binaries contain neither: they use the system's C library and zlib.
+EOF
+  for f in musl-COPYRIGHT:"musl libc 1.2.6: COPYRIGHT" zlib-LICENSE:"zlib 1.4: LICENSE"; do
+    printf '\n%s\n%s\n%s\n\n' \
+      "------------------------------------------------------------------------------" "${f#*:}" \
+      "------------------------------------------------------------------------------"
+    tr -d '\r' < "$root/packaging/third-party/musl/${f%%:*}"
+  done
 
   printf '\n%s\nGNU General Public License, version 2, with the Classpath Exception (OpenJDK, GraalVM)\n%s\n\n' \
     "==============================================================================" \

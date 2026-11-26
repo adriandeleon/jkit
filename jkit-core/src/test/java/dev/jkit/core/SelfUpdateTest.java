@@ -30,6 +30,7 @@ class SelfUpdateTest {
 
     private static final String SUMS = """
             1111111111111111111111111111111111111111111111111111111111111111  jkit-0.4.0-1.x86_64.rpm
+            7777777777777777777777777777777777777777777777777777777777777777  jkit-0.4.0-linux-x64-musl.tar.gz
             2222222222222222222222222222222222222222222222222222222222222222  jkit-0.4.0-linux-x64.tar.gz
             3333333333333333333333333333333333333333333333333333333333333333  jkit-0.4.0-linux-x64.zip
             4444444444444444444444444444444444444444444444444444444444444444  jkit-0.4.0-macos-aarch64.tar.gz
@@ -44,6 +45,11 @@ class SelfUpdateTest {
         assertThat(linux.archive()).isEqualTo("jkit-0.4.0-linux-x64.tar.gz");
         assertThat(linux.sha256()).startsWith("2222");
         assertThat(SelfUpdate.parse(SUMS, Platform.WINDOWS_X64).archive()).isEqualTo("jkit-0.4.0-windows-x64.zip");
+        // the musl build is listed first: glibc Linux must still get its own archive, and musl Linux the musl one
+        SelfUpdate.Release musl = SelfUpdate.parse(SUMS, Platform.LINUX_X64_MUSL);
+        assertThat(musl.archive()).isEqualTo("jkit-0.4.0-linux-x64-musl.tar.gz");
+        assertThat(musl.version().raw()).isEqualTo("0.4.0");
+        assertThat(musl.sha256()).startsWith("7777");
         assertThat(linux.url(SelfUpdate.DEFAULT_BASE, linux.archive())).hasToString(
                 "https://github.com/adriandeleon/jkit/releases/download/v0.4.0/jkit-0.4.0-linux-x64.tar.gz");
         assertThat(SelfUpdate.sumsUrl(SelfUpdate.DEFAULT_BASE)).hasToString(
@@ -51,11 +57,12 @@ class SelfUpdateTest {
     }
 
     @Test
-    void parseRefusesMissingAndMuslBuilds() {
+    void parseRefusesMissingBuilds() {
         assertThatThrownBy(() -> SelfUpdate.parse(SUMS, Platform.LINUX_AARCH64)).isInstanceOf(JkitException.class)
                 .hasMessageContaining("no build for linux-aarch64");
-        assertThatThrownBy(() -> SelfUpdate.parse(SUMS, Platform.LINUX_X64_MUSL)).isInstanceOf(JkitException.class)
-                .hasMessageContaining("musl");
+        // a release from before the musl builds: musl Linux doesn't take the glibc archive
+        assertThatThrownBy(() -> SelfUpdate.parse(SUMS, Platform.LINUX_AARCH64_MUSL)).isInstanceOf(JkitException.class)
+                .hasMessageContaining("no build for linux-aarch64-musl");
         assertThatThrownBy(() -> SelfUpdate.parse("<html>", Platform.LINUX_X64)).isInstanceOf(JkitException.class);
     }
 

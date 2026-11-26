@@ -4,7 +4,8 @@ name: Release
 # Community Edition (Liberica NIK, also GPLv2 with the Classpath Exception, on macOS x64, which
 # Community Edition doesn't ship for) and runs the tests, then packs it with LICENSE and
 # THIRD-PARTY-NOTICES (and on Windows the Visual C++ runtime DLLs it links) as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and an
-# .rpm and makes the CycloneDX SBOM, and the macOS binaries (arm64 and x64) are signed and
+# .rpm and makes the CycloneDX SBOM, and builds a second, static binary against musl for Alpine
+# (linux-x64-musl, linux-aarch64-musl: archives only), and the macOS binaries (arm64 and x64) are signed and
 # notarized (macos-sign: tag runs only, in a job that runs no build code). The release job
 # attaches them all with a SHA256SUMS file and a build provenance attestation (check one with
 # `gh attestation verify FILE --repo adriandeleon/jkit`), then the homebrew job updates the
@@ -59,6 +60,23 @@ jobs:
             graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-aarch64_bin.tar.gz
             graalvm_sha256: 41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66
             profiles: native,linux-packages
+          # Alpine and other musl systems: a fully static binary linked against musl (and zlib),
+          # both built from source below; it needs nothing from the system. Archives only: the
+          # .deb and .rpm are for glibc distributions.
+          - runner: ubuntu-22.04
+            platform: linux-x64-musl
+            libc: musl
+            musl_target: x86_64-linux-musl
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-x64_bin.tar.gz
+            graalvm_sha256: c6438dee6c3ade2220d40b7ccdcad24b512d30e233e61bb4fc70519522de34ef
+            profiles: native,musl
+          - runner: ubuntu-22.04-arm
+            platform: linux-aarch64-musl
+            libc: musl
+            musl_target: aarch64-linux-musl
+            graalvm_url: https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/graalvm-community-jdk-25i5-25.0.5.0.3_linux-aarch64_bin.tar.gz
+            graalvm_sha256: 41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66
+            profiles: native,musl
           # Both macOS binaries are signed and notarized by the macos-sign job below.
           - runner: macos-15
             platform: macos-aarch64
@@ -128,6 +146,41 @@ jobs:
           echo "JAVA_HOME=$home" >> "$GITHUB_ENV"
           echo "$home${{ matrix.exe && '\bin' || '/bin' }}" >> "$GITHUB_PATH"
 
+      # native-image --libc=musl links with <target>-gcc (x86_64-linux-musl-gcc, ...) and a static
+      # zlib. musl's own musl-gcc wrapper over the runner's gcc is that compiler; zlib is built with
+      # it into the same prefix. Both from their release tarballs, checked against these SHA-256s
+      # (taken from tarballs whose signatures checked out: musl's key 8364 8929 0BB6 B70F 99FF DA05
+      # 56BC DB59 3020 450F, Mark Adler's 5ED4 6A67 21D3 6558 7791 E2AA 783F CD8E 58BC AFBA).
+      # THIRD-PARTY-NOTICES names both versions: bump them there too.
+      - name: Set up the musl toolchain
+        if: matrix.libc == 'musl'
+        env:
+          MUSL_TARGET: ${{ matrix.musl_target }}
+          MUSL_URL: https://musl.libc.org/releases/musl-1.2.6.tar.gz
+          MUSL_SHA256: d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a
+          ZLIB_URL: https://zlib.net/fossils/zlib-1.4.tar.gz
+          ZLIB_SHA256: 02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/musl"
+          src="$RUNNER_TEMP/musl-src"
+          mkdir -p "$src"
+          fetch() { # url sha256 → unpacked into $src
+            local file="$src/$(basename "$1")"
+            curl -fsSL --proto '=https' --retry 3 -o "$file" "$1"
+            echo "$2  $file" | sha256sum -c --quiet || { echo "::error::$1 doesn't match its SHA-256"; exit 1; }
+            tar -C "$src" -xzf "$file"
+          }
+          fetch "$MUSL_URL" "$MUSL_SHA256"
+          fetch "$ZLIB_URL" "$ZLIB_SHA256"
+          (cd "$src/musl-1.2.6" && ./configure --prefix="$prefix" --disable-shared > /dev/null \
+            && make -j"$(nproc)" > /dev/null && make install > /dev/null)
+          ln -s "$prefix/bin/musl-gcc" "$prefix/bin/$MUSL_TARGET-gcc"
+          (cd "$src/zlib-1.4" && CC="$prefix/bin/musl-gcc" ./configure --prefix="$prefix" --static > /dev/null \
+            && make -j"$(nproc)" > /dev/null && make install > /dev/null)
+          "$prefix/bin/$MUSL_TARGET-gcc" --version | head -1
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+
       # The oldest macOS the binary runs on. Without it the linker uses the runner's own version
       # (15), and older Macs refuse the binary. jkit-cli/pom.xml passes it on to native-image's
       # linker (-E); the smoke test checks the binary's minos.
@@ -181,7 +234,7 @@ jobs:
           python3 packaging/sbom-runtime.py jkit-cli/target/sbom.json "$GRAALVM_HOME" "$GRAALVM_URL"
 
       - name: Check the glibc the binary needs
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.libc != 'musl'
         run: |
           need=$(objdump -T jkit-cli/target/jkit | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
           echo "highest glibc symbol: $need (packages declare GLIBC_2.34)"
@@ -189,6 +242,31 @@ jobs:
             echo "::error::the binary needs $need; raise the glibc dependency in the packages"
             exit 1
           fi
+
+      # The musl binary must need nothing from the system: no loader, no shared libraries. Then it
+      # runs on Alpine itself, where jkit must also see that it is on musl (doctor names the platform).
+      - name: Check the musl binary is static and runs on Alpine
+        if: matrix.libc == 'musl'
+        env:
+          # alpine:3.24.4, the multi-arch index
+          ALPINE: alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          file jkit-cli/target/jkit
+          if readelf -lW jkit-cli/target/jkit | grep -q 'INTERP'; then
+            echo "::error::the musl binary asks for a program interpreter: it isn't static"; exit 1
+          fi
+          if readelf -dW jkit-cli/target/jkit | grep -q 'NEEDED'; then
+            echo "::error::the musl binary needs shared libraries: it isn't static"; exit 1
+          fi
+          docker run --rm -v "$PWD/jkit-cli/target/jkit:/usr/local/bin/jkit:ro" -e VERSION -e PLATFORM "$ALPINE" sh -euc '
+            jkit --version | grep -Fx "jkit $VERSION"
+            doc=$(jkit doctor --json) || { echo "jkit doctor failed on Alpine"; exit 1; }
+            printf "%s\n" "$doc" | grep -q "$PLATFORM" \
+              || { printf "%s\n" "$doc"; echo "jkit on Alpine does not say it is on $PLATFORM"; exit 1; }
+            jkit search jdk --maintained | head -3 || echo "jkit search jdk failed on Alpine (network?)"
+          '
 
       - name: Smoke test
         env:
@@ -358,7 +436,7 @@ jobs:
             tar -C stage --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch" \
               --format=gnu -cf - "${files[@]}" | gzip -9n > "dist/$base.tar.gz"
             (cd stage && TZ=UTC zip -q -X "../dist/$base.zip" "${files[@]}")
-            cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/
+            if [ "${{ matrix.libc }}" != musl ]; then cp jkit-cli/target/*.deb jkit-cli/target/*.rpm dist/; fi
             # GitHub turns "~" (the pre-release marker, jkit_1.2.0~rc.1_amd64.deb) into "." on
             # upload, and SHA256SUMS must name the files as they are published
             for f in dist/*~*; do
@@ -623,7 +701,7 @@ jobs:
         id: complete
         run: |
           missing=()
-          for platform in linux-x64 linux-aarch64 macos-x64 macos-aarch64 windows-x64; do
+          for platform in linux-x64 linux-aarch64 linux-x64-musl linux-aarch64-musl macos-x64 macos-aarch64 windows-x64; do
             compgen -G "dist/jkit-*-$platform.zip" > /dev/null || missing+=("$platform")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -644,7 +722,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
-          for platform in linux-x64 linux-aarch64 macos-x64 macos-aarch64 windows-x64; do
+          for platform in linux-x64 linux-aarch64 linux-x64-musl linux-aarch64-musl macos-x64 macos-aarch64 windows-x64; do
             compgen -G "dist/jkit-*-$platform.zip" > /dev/null \
               || { echo "::error::no $platform archives were downloaded, even after a retry"; exit 1; }
           done

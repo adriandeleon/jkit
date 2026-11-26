@@ -145,6 +145,29 @@
         </plugins>
       </build>
     </profile>
+    <!--
+      With native: a fully static Linux binary linked against musl instead of glibc, for Alpine and
+      other musl systems (it runs on glibc systems too). Needs a musl toolchain on the PATH
+      (x86_64-linux-musl-gcc or aarch64-linux-musl-gcc) with a static zlib built against it;
+      release.yml builds both from source.
+    -->
+    <profile>
+      <id>musl</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <configuration>
+              <buildArgs combine.children="append">
+                <buildArg>--static</buildArg>
+                <buildArg>--libc=musl</buildArg>
+              </buildArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <!-- Linux arch names per package format, picked from the build machine -->
     <profile>
       <id>arch-x64</id>
