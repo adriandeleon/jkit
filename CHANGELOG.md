@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and puts their `bin` folders first on your user `PATH`, so cmd.exe, IDEs and programs started
   from Explorer follow `jkit use … --global` too, not only a hooked PowerShell. Each change is
   printed, a value it replaces included; the rest of `PATH` stays exactly as it was, `%VAR%`s
-  and all. `jkit env --uninstall` removes only what it set. `jkit doctor` says whether it's set
+  and all. `jkit env --uninstall` removes only what it set. A value it replaces that is one of jkit's
+  own installs isn't kept, and `--uninstall` doesn't put back a folder that no longer exists, and
+  says so. `jkit doctor` says whether it's set
   up, and warns about a `java` in the system `PATH`, which comes first; `jkit use … --global`
   says whether programs outside PowerShell follow it.
 - **`jkit prune` keeps builds a running program uses**, such as a JVM, an IDE or a Gradle daemon,
@@ -105,9 +107,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Leaving a project says `maven unset (no global maven)` for a tool with no global version, instead
   of "back to the global versions".
 - The `.deb` and `.rpm` descriptions say to set up the shell with `jkit hook --install`.
+- **`jkit search` and `jkit install` point out builds from a vendor that stopped updating a
+  release.** openjdk (jdk.java.net) and GraalVM CE publish only the first updates of each release,
+  so `jkit install jdk@21 openjdk` got 21.0.2 from January 2024 without a word. Search now marks a
+  vendor's newest build that is two or more updates behind another vendor's (`↓ behind: newest 21
+  is 21.0.9`), and install warns and says where the newest build is. `--json` has a `behind` field.
+- **`jkit upgrade` stays within a Maven or Gradle minor release** (3.9.9 → 3.9.11, not 3.10.2), as
+  its help says; JDK, GraalVM and sbt lines are still the major version. "is up to date" also says
+  when the global points at an older build of that line, and how to move it. `jkit prune` treats
+  builds as superseded the same way. `--json` lines gain `release`.
+- **Without the shell hook, `jkit status` no longer sends you to `jkit sync`** for a pin that is
+  installed (sync then said the hook wasn't active): it says the hook is missing and offers `jkit
+  exec` or setting the hook up. "the global … isn't applied" is one line, not one per tool.
+- `.java-version` reads jenv's names: `temurin64-21.0.5` and `corretto64-21` pin that vendor, and
+  `openjdk64-17.0.2` pins 17.0.2 from any vendor.
+- When only pre-releases match, `jkit search` says to add `--pre` (`jkit search maven@4`).
+- Builds checked by their checksum alone say so (`checksum checked (sha256)`), as signed ones say
+  `signature checked: …`: Zulu, Gradle, GraalVM CE, openjdk and others.
+- `jkit doctor --network` skips its check in offline mode (`JKIT_NETWORK_OFFLINE`) and says so;
+  jkit warns when `JKIT_OFFLINE`, which it doesn't read, is set.
+- On `cd`, a project file whose pin jkit can't read says "it pins nothing jkit can read" and points
+  to `jkit status`, instead of "it pins nothing".
+- `jkit use … --global` for the install that already is the global says so instead of printing the
+  link as changed; `--json` has `"changed": false`.
+- A command given no tool (`jkit reset`) says to name one and lists the tools, instead of picocli's
+  "Missing required parameter".
+- `semeru-certified` in `.tool-versions` gets a warning that jkit pins open Semeru.
 
 ### Fixed
 
+- **`jkit sync` no longer fails with "jkit can't read that pin"** when `.sdkmanrc` pins a JDK and a
+  `.java-version` beside it holds something jkit can't read: the first file that mentions a tool
+  decides it. Within `.sdkmanrc` and `.tool-versions`, the first line for a tool decides; a later
+  one is ignored with a warning.
+- **A second install of the same build no longer downloads it again**: it waits for the first,
+  and downloads only if that one failed.
+- **`jkit install … --offline` uses what `jkit search … --offline` cached.** Before, it failed with
+  "this lookup isn't cached" right after a search; when the cache can't answer, the error names the
+  search that fills it.
+- **The "available from:" hint no longer says "no other vendor has jdk@X" on a guess**: a vendor
+  whose list couldn't be fetched counted as not having it. These lookups now run in parallel, and
+  not at all offline.
+- The shell hook no longer leaves an empty `jkit-env.*` file in the temp folder after an
+  interrupted run: the next run removes it (bash, zsh, fish), and PowerShell always does.
+- A decimal version in a table (`version = 3.9` under `[tools.maven]`) is reported on its own line,
+  not at the table's header with a made-up `3.10`.
+- The warning that a lookup couldn't be cached shows the cache folder as `~/.jkit/index`, and is
+  printed once.
 - **`jdk = 21` in `jkit.toml` (a TOML number, not a string) pins JDK 21.** Before, it was skipped
   with a warning and `jkit sync` passed, saying the project pins no tools, so CI went on with the
   wrong JDK. A decimal such as `maven = 3.10`, which TOML reads as 3.1, is refused with a warning to
@@ -171,6 +217,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`--json` output escapes Unicode tag characters (U+E0000–E007F)**, which can hide ASCII text
+  from a reader, as text output already did; both now use one list of hidden characters.
+- **A later self-signature without key flags no longer turns a vendor's key into "not a signing
+  key"** (gpg's addrevoker or a new user ID makes one): key flags and expiry are read from the
+  signature RFC 9580 names. For Corretto, whose signature is the only check, this could have
+  refused every build.
+- **The installer itself refuses a download with no checksum and no signature** (unless
+  `--allow-unverified`), not only the commands that call it, and the vendors whose signatures jkit
+  checks are kept in one list.
 - **A signature counts only when its key may sign and is strong enough**: marked for signing
   (by its self-signature, or for a subkey its binding signature), RSA of 2048 bits or more, EdDSA
   or ECDSA, and not expired when it signed. Before, an encryption subkey, an expired subkey, or

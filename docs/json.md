@@ -334,7 +334,7 @@ link (in `changes`), unless `--no-default`.
   "schemaVersion": 1,
   "dryRun": true,
   "lines": [
-    { "tool": "jdk", "major": 21, "vendor": "temurin", "fx": false,
+    { "tool": "jdk", "major": 21, "release": "21", "vendor": "temurin", "fx": false,
       "from": "21.0.5+11", "to": "21.0.9+10", "status": "available" }
   ],
   "changes": [ { "kind": "file", "name": "/home/me/.jkit/index/3f9a….cache", "action": "update",
@@ -342,17 +342,20 @@ link (in `changes`), unless `--no-default`.
 }
 ```
 
-One entry per release line. `status`: `up-to-date`, `available` (dry run), `upgraded` (then also
+One entry per release line. `release` is the line: the major version for JDKs and sbt,
+major.minor (`3.9`) for Maven and Gradle; `major` is its first number. `status`: `up-to-date`, `available` (dry run), `upgraded` (then also
 `verified`, `path` and `changes`: the new folder and any global link moved) or `failed` (then `error: {message, hints}` and `to` may be null). Exits `1`
 when any line failed. The top-level `changes` lists the cached files written to check the lines.
 
 ## `jkit use <tool>@<version> [vendor] [--global] --json`
 
 ```json
-{ "schemaVersion": 1, "scope": "global", "tool": "jdk", "installed": { "...": "the install object" } }
+{ "schemaVersion": 1, "scope": "global", "tool": "jdk", "installed": { "...": "the install object" }, "changed": true }
 ```
 
 `scope` is `global` or `shell`. Without `--global` the shell hook must be active, as in text mode.
+`changed` is `false` when `--global` names the install the global link already points at;
+`changes` then has no link entry.
 
 The document also lists what changed outside the store, and notes on what that means (the same
 lines text mode prints, also on stderr):
