@@ -175,12 +175,39 @@ final class ExecCommand implements Callable<Integer> {
      * PATH, which still has the old versions first.
      */
     static String executable(String name, String path, Path dir) {
-        if (name.contains("/") || name.contains(File.separator)) {
-            return name;
-        }
-        boolean windows = Platform.hostIsWindows();
+        return executable(name, path, dir, Platform.hostIsWindows());
+    }
+
+    /**
+     * {@link #executable(String, String, Path)} by Windows rules or Unix ones. A name with a slash
+     * is a path, not looked up on PATH. Unix starts it as it is, from the command's folder. Windows
+     * resolves it against {@code dir} here, since CreateProcess would resolve it against jkit's own
+     * folder rather than the command's, and tries .exe, .cmd and .bat after it as for a name on
+     * PATH: {@code ./gradlew} is gradlew.bat there, gradlew being the Unix script it can't start.
+     */
+    static String executable(String name, String path, Path dir, boolean windows) {
         // Windows: mvn.cmd before mvn, the Unix script next to it that CreateProcess can't start
         List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
+        if (name.contains("/") || name.contains(File.separator) || windows && name.contains("\\")) {
+            if (!windows) {
+                return name;
+            }
+            Path given;
+            try {
+                given = dir.resolve(name).normalize(); // as Windows reads it: .\x is x, a\..\b is b
+            } catch (InvalidPathException e) {
+                return name;
+            }
+            if (given.getFileName() != null) {
+                for (String suffix : suffixes) {
+                    Path candidate = given.resolveSibling(given.getFileName() + suffix);
+                    if (Files.isRegularFile(candidate)) {
+                        return candidate.toString();
+                    }
+                }
+            }
+            return given.toString(); // not there: starting it says so
+        }
         for (String raw : path.split(File.pathSeparator)) {
             // some installers add quoted entries ("C:\Program Files\x"), which aren't valid paths
             Path entry = Fs.path(raw);
