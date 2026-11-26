@@ -126,6 +126,18 @@ class ProjectFileTest {
     }
 
     @Test
+    void aDecimalInATableIsReportedOnItsOwnLine() throws IOException {
+        Path file = write("home/p/jkit.toml", """
+                [tools.maven]
+                vendor = "x"
+                version = 3.9
+                """);
+        assertThat(find("home/p").warnings()).contains(
+                file + ":3: maven.version = 3.9 is a TOML number, which drops trailing zeros (3.10 reads as 3.1); "
+                        + "quote it: version = \"3.9\", skipped maven");
+    }
+
+    @Test
     void aPinItCannotReadIsSkippedButAnUnknownToolIsNot() throws IOException {
         write("home/p/jkit.toml", "[tools]\nkotlin = \"2.1\"\ngradle = \"eight\"\njdk = true\n");
         assertThat(find("home/p").skipped()).containsExactlyInAnyOrder(Tool.GRADLE, Tool.JDK);
@@ -232,10 +244,58 @@ class ProjectFileTest {
         write("home/b/.java-version", "1.8\n");
         assertThat(find("home/b").get(Tool.JDK).version()).isEqualTo("8");
 
+        Path bad = write("home/c/.java-version", "system\n");
+        ProjectSpec none = find("home/c");
+        assertThat(none.tools()).isEmpty();
+        assertThat(none.skipped()).containsExactly(Tool.JDK);
+        assertThat(none.warnings()).containsExactly(bad + ":1: 'system' is not a Java version (jkit reads numbers"
+                + " such as 21 or 17.0.2, and jenv names such as temurin64-21.0.5), skipped");
+    }
+
+    @Test
+    void readsJenvNamesInJavaVersion() throws IOException {
+        write("home/a/.java-version", "temurin64-21.0.5\n");
+        assertThat(find("home/a").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "21.0.5", Vendor.of("temurin"), false));
+        write("home/b/.java-version", "corretto64-21\n");
+        assertThat(find("home/b").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "21", Vendor.of("corretto"), false));
+        // jenv's name for any build that only says "OpenJDK": the version, from any vendor
         write("home/c/.java-version", "openjdk64-17.0.2\n");
-        ProjectSpec jenv = find("home/c");
-        assertThat(jenv.tools()).isEmpty();
-        assertThat(jenv.warnings()).singleElement().asString().contains("is not a Java version");
+        assertThat(find("home/c").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "17.0.2", null, false));
+        write("home/d/.java-version", "oracle64-1.8.0.202\n");
+        assertThat(find("home/d").get(Tool.JDK)).isEqualTo(new PinnedTool(Tool.JDK, "8.0.202", Vendor.of("oracle"), false));
+        assertThat(find("home/d").warnings()).isEmpty();
+    }
+
+    @Test
+    void theFirstFileThatMentionsAToolDecidesIt() throws IOException {
+        // a pin jkit can read in .sdkmanrc wins over a .java-version it can't
+        write("home/p/.sdkmanrc", "java=21.0.5-tem\n");
+        write("home/p/.java-version", "system\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.get(Tool.JDK).version()).isEqualTo("21.0.5");
+        assertThat(spec.skipped()).isEmpty();
+        // a pin .sdkmanrc skips is not replaced by a later file's
+        write("home/q/.sdkmanrc", "java=system\n");
+        write("home/q/.java-version", "17\n");
+        ProjectSpec skipped = find("home/q");
+        assertThat(skipped.tools()).isEmpty();
+        assertThat(skipped.skipped()).containsExactly(Tool.JDK);
+    }
+
+    @Test
+    void theFirstLineForAToolDecidesIt() throws IOException {
+        Path rc = write("home/p/.sdkmanrc", "java=21.0.5-tem\njava=bogus\n");
+        ProjectSpec spec = find("home/p");
+        assertThat(spec.get(Tool.JDK).version()).isEqualTo("21.0.5");
+        assertThat(spec.skipped()).isEmpty();
+        assertThat(spec.warnings()).containsExactly(rc + ":2: java is already set on line 1, ignored");
+
+        Path tv = write("home/q/.tool-versions", "java system\njava 21\n");
+        ProjectSpec skipped = find("home/q");
+        assertThat(skipped.tools()).isEmpty();
+        assertThat(skipped.skipped()).containsExactly(Tool.JDK);
+        assertThat(skipped.warnings()).containsExactly(tv + ":1: 'system' is not a version jkit can use, e.g. temurin-21 or 21, skipped",
+                tv + ":2: java is already set on line 1, ignored");
     }
 
     @Test

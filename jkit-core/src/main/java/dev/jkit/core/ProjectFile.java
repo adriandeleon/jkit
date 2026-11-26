@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -308,7 +309,11 @@ public final class ProjectFile {
         });
     }
 
-    /** Earlier specs win where several pin the same tool. */
+    /**
+     * The first spec that mentions a tool decides it: its pin wins over later files, and so does a
+     * pin it skips (a later file's pin doesn't stand in for one jkit couldn't read). A later file's
+     * skipped pin doesn't count where an earlier file pinned the tool.
+     */
     private static ProjectSpec merge(List<ProjectSpec> specs) {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         Map<Tool, Path> origins = new EnumMap<>(Tool.class);
@@ -317,11 +322,15 @@ public final class ProjectFile {
         List<Path> files = new ArrayList<>();
         for (ProjectSpec spec : specs) {
             spec.tools().forEach((tool, pin) -> {
-                if (tools.putIfAbsent(tool, pin) == null) {
+                if (!skipped.contains(tool) && tools.putIfAbsent(tool, pin) == null) {
                     origins.put(tool, spec.origin(tool));
                 }
             });
-            skipped.addAll(spec.skipped());
+            for (Tool tool : spec.skipped()) {
+                if (!tools.containsKey(tool)) {
+                    skipped.add(tool);
+                }
+            }
             warnings.addAll(spec.warnings());
             files.addAll(spec.files());
         }
@@ -368,7 +377,6 @@ public final class ProjectFile {
             for (String key : table.keySet()) {
                 TomlPosition position = toml.inputPositionOf(List.of("tools", key));
                 String where = at(file, position);
-                String line = position == null || position.line() > lines.size() ? "" : lines.get(position.line() - 1);
                 Tool tool = Tool.find(key).orElse(null);
                 if (tool == null) {
                     warnings.add(where + ": unknown tool '" + shown(key) + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
@@ -379,7 +387,7 @@ public final class ProjectFile {
                             "keep one of them");
                 }
                 keyFor.put(tool, key);
-                PinnedTool pinned = tomlEntry(tool, key, table.get(List.of(key)), where, line, warnings);
+                PinnedTool pinned = tomlEntry(tool, key, table.get(List.of(key)), file, position, lines, warnings);
                 if (pinned != null) {
                     tools.put(tool, pinned);
                 } else {
@@ -395,8 +403,9 @@ public final class ProjectFile {
      * whole number ({@code jdk = 21}) is read as its digits; a decimal ({@code maven = 3.10}) is
      * refused, as TOML reads it as the number 3.1 and the version would change.
      */
-    private static PinnedTool tomlEntry(Tool tool, String key, Object value, String where, String line,
-                                        List<String> warnings) {
+    private static PinnedTool tomlEntry(Tool tool, String key, Object value, Path file, TomlPosition position,
+                                        List<String> lines, List<String> warnings) {
+        String where = at(file, position);
         if (value instanceof String text) {
             return pinned(tool, key, text, null, false, where, warnings);
         }
@@ -404,7 +413,7 @@ public final class ProjectFile {
             return pinned(tool, key, number.toString(), null, false, where, warnings);
         }
         if (value instanceof Double) {
-            warnings.add(decimalWarning(where, key, key, line));
+            warnings.add(decimalWarning(where, key, key, lineAt(lines, position)));
             return null;
         }
         if (!(value instanceof TomlTable table)) {
@@ -423,7 +432,10 @@ public final class ProjectFile {
                         continue;
                     }
                     if (v instanceof Double) {
-                        warnings.add(decimalWarning(where, key, "version", line));
+                        // its own line: under [tools.maven], not the table's header
+                        TomlPosition at = table.inputPositionOf(List.of(field));
+                        warnings.add(decimalWarning(at == null ? where : at(file, at), key, "version",
+                                lineAt(lines, at)));
                         return null;
                     }
                     if (!(v instanceof String s)) {
@@ -462,8 +474,13 @@ public final class ProjectFile {
         String written = m.find() ? m.group(1).replace("_", "") : null;
         String name = field.equals(key) ? shown(key) : shown(key) + "." + field;
         return where + ": " + name + (written != null ? " = " + written : "")
-                + " is a TOML number, which drops trailing zeros (3.10 reads as 3.1); quote it: "
-                + field + " = \"" + (written != null ? written : "3.10") + "\", skipped " + shown(key);
+                + " is a TOML number, which drops trailing zeros (3.10 reads as 3.1); quote it"
+                + (written != null ? ": " + field + " = \"" + written + "\"" : "") + ", skipped " + shown(key);
+    }
+
+    /** The text of the line at {@code position}; empty when it isn't known. */
+    private static String lineAt(List<String> lines, TomlPosition position) {
+        return position == null || position.line() > lines.size() ? "" : lines.get(position.line() - 1);
     }
 
     private static PinnedTool pinned(Tool tool, String key, String versionText, String vendorText, boolean fx,
@@ -496,7 +513,7 @@ public final class ProjectFile {
         return new PinnedTool(tool, version, vendor, fx);
     }
 
-    // .sdkmanrc
+    // .sdkmanrc: "<candidate>=<version>"; where a candidate comes twice, the first line decides
 
     static ProjectSpec readSdkmanrc(Path file) {
         List<String> lines = lines(file);
@@ -504,6 +521,7 @@ public final class ProjectFile {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         TreeSet<String> unmanaged = new TreeSet<>();
         Set<Tool> skipped = EnumSet.noneOf(Tool.class);
+        Map<Tool, Integer> seen = new EnumMap<>(Tool.class); // the first line for a tool decides
         for (int i = 0; i < lines.size(); i++) {
             String line = stripComment(lines.get(i));
             if (line.isEmpty()) {
@@ -522,9 +540,13 @@ public final class ProjectFile {
                 unmanaged.add(candidate);
                 continue;
             }
+            if (seen.containsKey(tool)) {
+                warnings.add(where + ": " + shown(candidate) + " is already set on line " + seen.get(tool) + ", ignored");
+                continue;
+            }
+            seen.put(tool, i + 1);
             try {
                 tools.put(tool, SdkmanIds.parse(tool, id));
-                skipped.remove(tool);
             } catch (IllegalArgumentException e) {
                 skipped.add(tool);
                 warnings.add(where + ": " + message(e.getMessage()) + ", skipped");
@@ -537,6 +559,7 @@ public final class ProjectFile {
     }
 
     // .tool-versions (asdf, mise): "<name> <version> [fallback versions…]"; jkit uses the first
+    // version, and where a name comes twice, the first line
 
     static ProjectSpec readToolVersions(Path file) {
         List<String> lines = lines(file);
@@ -544,6 +567,7 @@ public final class ProjectFile {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         TreeSet<String> unmanaged = new TreeSet<>();
         Set<Tool> skipped = EnumSet.noneOf(Tool.class);
+        Map<Tool, Integer> seen = new EnumMap<>(Tool.class); // the first line for a tool decides
         for (int i = 0; i < lines.size(); i++) {
             String line = stripComment(lines.get(i));
             if (line.isEmpty()) {
@@ -560,10 +584,14 @@ public final class ProjectFile {
                 unmanaged.add(words[0]);
                 continue;
             }
+            if (seen.containsKey(tool)) {
+                warnings.add(where + ": " + shown(words[0]) + " is already set on line " + seen.get(tool) + ", ignored");
+                continue;
+            }
+            seen.put(tool, i + 1);
             try {
                 List<String> notes = new ArrayList<>();
                 tools.put(tool, ToolVersionsIds.parse(tool, words[1], notes));
-                skipped.remove(tool);
                 notes.forEach(note -> warnings.add(where + ": " + message(note)));
             } catch (IllegalArgumentException e) {
                 skipped.add(tool);
@@ -576,7 +604,10 @@ public final class ProjectFile {
         return new ProjectSpec(List.of(file), tools, warnings, skipped, Map.of());
     }
 
-    // .java-version
+    // .java-version: a Java version (21, 17.0.2, 1.8), or a jenv name (temurin64-21.0.5)
+
+    /** jenv's names for the JDKs it knows: {@code <vendor>64-<version>}. */
+    private static final Pattern JENV = Pattern.compile("([a-z][a-z-]*?)64-(\\d.*)", Pattern.CASE_INSENSITIVE);
 
     static ProjectSpec readJavaVersion(Path file) {
         List<String> lines = lines(file);
@@ -585,16 +616,43 @@ public final class ProjectFile {
             if (text.isEmpty()) {
                 continue;
             }
+            String where = file + ":" + (i + 1);
+            Matcher jenv = JENV.matcher(text);
+            if (jenv.matches()) {
+                return jenvName(file, where, text, jenv.group(1).toLowerCase(Locale.ROOT),
+                        Version.fromLegacyJava(jenv.group(2)));
+            }
             String version = Version.fromLegacyJava(text);
             if (!Version.looksLikeVersion(version)) {
-                return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + shown(text)
-                        + "' is not a Java version (jkit reads only numbers such as 21 or 17.0.2), skipped"),
-                        Set.of(Tool.JDK), Map.of());
+                return new ProjectSpec(List.of(file), Map.of(), List.of(where + ": '" + shown(text)
+                        + "' is not a Java version (jkit reads numbers such as 21 or 17.0.2, and jenv names such as"
+                        + " temurin64-21.0.5), skipped"), Set.of(Tool.JDK), Map.of());
             }
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
                     List.of());
         }
         return new ProjectSpec(List.of(file), Map.of(), List.of(file + ": empty, skipped"));
+    }
+
+    /**
+     * A jenv name, read as the {@code .tool-versions} id {@code <vendor>-<version>}: jenv's vendor
+     * names are the vendors' own ({@code temurin}, {@code corretto}, {@code zulu}). {@code openjdk}
+     * is what jenv calls any build that says only "OpenJDK", so it pins the version alone.
+     */
+    private static ProjectSpec jenvName(Path file, String where, String text, String vendor, String version) {
+        if (vendor.equals("openjdk") && Version.looksLikeVersion(version)) {
+            return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
+                    List.of());
+        }
+        try {
+            List<String> notes = new ArrayList<>();
+            PinnedTool pin = ToolVersionsIds.parse(Tool.JDK, vendor + "-" + version, notes);
+            return new ProjectSpec(List.of(file), Map.of(Tool.JDK, pin),
+                    notes.stream().map(note -> where + ": " + message(note)).toList());
+        } catch (IllegalArgumentException e) {
+            return new ProjectSpec(List.of(file), Map.of(), List.of(where + ": '" + shown(text)
+                    + "' is not a Java version jkit can use, skipped"), Set.of(Tool.JDK), Map.of());
+        }
     }
 
     // helpers

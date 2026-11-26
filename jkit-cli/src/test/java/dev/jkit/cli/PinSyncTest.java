@@ -283,6 +283,14 @@ class PinSyncTest {
     }
 
     @Test
+    void syncUsesTheWinningPinWhenALaterFileCantBeRead() throws Exception {
+        Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\n");
+        Files.writeString(project.resolve(".java-version"), "system\n");
+        assertThat(new SyncCommand().run(ctx(), project)).isZero();
+        assertThat(errors()).contains("'system' is not a Java version");
+    }
+
+    @Test
     void resetGlobalJsonReportsTheLinkItRemoved() throws Exception {
         ResetCommand reset = new ResetCommand();
         reset.tool = Tool.MAVEN;
