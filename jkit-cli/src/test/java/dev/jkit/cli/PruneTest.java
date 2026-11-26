@@ -74,7 +74,10 @@ class PruneTest {
         install(Tool.GRADLE, "8.14.3", "");
         Path oldMaven = install(Tool.MAVEN, "3.9.9", "");
         install(Tool.MAVEN, "3.9.11", "");
-        Process daemon = new ProcessBuilder("/bin/sh", "-c", "sleep 30; exit 0", old.resolve("lib/gradle-daemon.jar").toString())
+        // `read` is built into sh, so no child (a forked `sleep` still carries the jar in its
+        // arguments until it execs) outlives the shell when the test stops it; it waits on the
+        // stdin pipe this test holds open
+        Process daemon = new ProcessBuilder("/bin/sh", "-c", "read x", old.resolve("lib/gradle-daemon.jar").toString())
                 .start();
         try {
             prune(true);
