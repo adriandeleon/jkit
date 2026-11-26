@@ -6,6 +6,7 @@ import dev.jkit.core.Signatures;
 import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Perms;
+import dev.jkit.model.Version;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
@@ -79,6 +80,10 @@ final class SelfUpdateCommand implements Callable<Integer> {
             status = "up-to-date";
             // a development build or a pre-release can be ahead of the newest release
             say.println(latest.version().raw().equals(current) ? "jkit " + current + " is the newest release"
+                    : latest.version().isPreRelease() && (current == null || !Version.isSafeText(current)
+                            || latest.version().compareTo(Version.parse(current)) > 0)
+                            ? "jkit " + current + " is up to date: the newest release, " + latest.version()
+                                    + ", is a pre-release, which self-update installs only over a pre-release"
                     : "jkit " + current + " is up to date: the newest release is " + latest.version());
         } else if (check) {
             status = "available";

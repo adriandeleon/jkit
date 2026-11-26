@@ -226,12 +226,17 @@ public final class SelfUpdate {
         return Kind.ARCHIVE;
     }
 
-    /** Whether {@code latest} is newer than {@code current}; an unreadable current version counts as older. */
+    /**
+     * Whether {@code latest} is newer than {@code current}; an unreadable current version counts as
+     * older. A pre-release is newer only than a pre-release: a release candidate marked as the
+     * latest release, by mistake or not, mustn't move everyone on a release onto it.
+     */
     public static boolean newer(Release latest, String current) {
-        if (current == null || !Version.isSafeText(current)) {
-            return true;
+        boolean readable = current != null && Version.isSafeText(current);
+        if (latest.version().isPreRelease() && !(readable && Version.parse(current).isPreRelease())) {
+            return false;
         }
-        return latest.version().compareTo(Version.parse(current)) > 0;
+        return !readable || latest.version().compareTo(Version.parse(current)) > 0;
     }
 
     /**

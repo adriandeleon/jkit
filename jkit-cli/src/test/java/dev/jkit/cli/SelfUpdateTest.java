@@ -49,20 +49,28 @@ class SelfUpdateTest {
     @BeforeEach
     void setUp() throws Exception {
         assumeFalse(Platform.current().isWindows());
+        serve("9.9.9");
+    }
+
+    /** Serves {@code version} as the newest release, replacing what was served. */
+    private void serve(String version) throws Exception {
+        if (server != null) {
+            server.stop(0);
+        }
         String platform = Platform.current().os() + "-" + Platform.current().arch();
-        String archiveName = "jkit-9.9.9-" + platform + ".tar.gz";
-        byte[] archive = archive("jkit 9.9.9");
+        String archiveName = "jkit-" + version + "-" + platform + ".tar.gz";
+        byte[] archive = archive("jkit " + version);
         String sums = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(archive)) + "  " + archiveName + "\n";
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", ex -> {
             String path = ex.getRequestURI().getPath();
-            if (path.equals("/download/v9.9.9/" + archiveName) && duringDownload != null) {
+            if (path.equals("/download/v" + version + "/" + archiveName) && duringDownload != null) {
                 duringDownload.run();
             }
             byte[] body = path.equals("/latest/download/SHA256SUMS") ? sums.getBytes(StandardCharsets.UTF_8)
-                    : path.equals("/download/v9.9.9/SHA256SUMS.asc")
+                    : path.equals("/download/v" + version + "/SHA256SUMS.asc")
                             ? (signature == null ? null : signature.getBytes(StandardCharsets.UTF_8))
-                    : path.equals("/download/v9.9.9/" + archiveName) ? archive : null;
+                    : path.equals("/download/v" + version + "/" + archiveName) ? archive : null;
             ex.sendResponseHeaders(body == null ? 404 : 200, body == null ? -1 : body.length);
             if (body != null) {
                 ex.getResponseBody().write(body);
@@ -155,6 +163,20 @@ class SelfUpdateTest {
         try (Stream<Path> left = Files.list(tmp.resolve(".jkit/tmp"))) {
             assertThat(left).isEmpty();
         }
+    }
+
+    @Test
+    void aPreReleaseMarkedAsTheLatestReleaseOnlyReplacesAPreRelease() throws Exception {
+        // signed, and marked as the latest release: a release candidate still doesn't replace a release
+        serve("9.9.9-rc.1");
+        Path binary = binary("bin");
+        assertThat(run(binary, "0.3.0", false, false)).contains("jkit 0.3.0 is up to date: the newest release, "
+                + "9.9.9-rc.1, is a pre-release, which self-update installs only over a pre-release");
+        assertThat(run(binary, "0.3.0", true, true)).contains("\"status\" : \"up-to-date\"");
+        assertThat(Files.readString(binary)).isEqualTo("old");
+        // over a pre-release it does
+        assertThat(run(binary, "9.9.9-beta.1", false, false)).contains("updated jkit 9.9.9-beta.1 → 9.9.9-rc.1");
+        assertThat(Files.readString(binary)).contains("jkit 9.9.9-rc.1");
     }
 
     @Test

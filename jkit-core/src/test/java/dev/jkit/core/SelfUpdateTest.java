@@ -77,6 +77,20 @@ class SelfUpdateTest {
         assertThat(SelfUpdate.newer(r, "0.4.0")).isFalse();
         assertThat(SelfUpdate.newer(r, "0.5.0-SNAPSHOT")).isFalse();
         assertThat(SelfUpdate.newer(r, "unknown version")).isTrue();
+        // a pre-release, even signed and marked as the latest release, only replaces a pre-release
+        SelfUpdate.Release rc = SelfUpdate.parse(SUMS.replace("0.4.0", "0.5.0-rc.1"), Platform.LINUX_X64);
+        assertThat(rc.version().isPreRelease()).isTrue();
+        assertThat(SelfUpdate.newer(rc, "0.4.0")).isFalse();
+        assertThat(SelfUpdate.newer(rc, "unknown version")).isFalse();
+        assertThat(SelfUpdate.newer(rc, null)).isFalse();
+        assertThat(SelfUpdate.newer(rc, "0.5.0-beta.2")).isTrue();
+        assertThat(SelfUpdate.newer(rc, "0.4.0-rc.3")).isTrue();
+        assertThat(SelfUpdate.newer(rc, "0.5.0-rc.1")).isFalse();
+        // and the release after it replaces both
+        assertThat(SelfUpdate.newer(SelfUpdate.parse(SUMS.replace("0.4.0", "0.5.0"), Platform.LINUX_X64), "0.5.0-rc.1"))
+                .isTrue();
+        assertThat(SelfUpdate.newer(SelfUpdate.parse(SUMS.replace("0.4.0", "0.5.0"), Platform.LINUX_X64), "0.4.0"))
+                .isTrue();
     }
 
     @Test
