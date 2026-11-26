@@ -20,6 +20,8 @@ and Windows, native builds, and signed, attested releases.
 
 Website: <https://jkit-project.dev>
 
+<img src="docs/images/jkit-demo.svg" alt="A terminal: jkit install jdk@21 downloads Temurin 21, checks Adoptium's signature and lists each folder and link it made; java -version runs it; jkit pin jdk@21 writes jkit.toml and lists the variables it set; jkit status shows the JDK the project picked">
+
 ## Quickstart
 
 ```bash
