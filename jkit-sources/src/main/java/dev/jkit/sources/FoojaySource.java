@@ -88,29 +88,67 @@ public final class FoojaySource {
     }
 
     /**
-     * The package's signature link: the one foojay lists (Temurin, Microsoft), https only, or for
-     * Corretto, which publishes a {@code .sig} next to each download on corretto.aws that foojay
-     * doesn't list, that one. A listed link that isn't https is dropped rather than refused, since
-     * the checksum still guards the download.
+     * The package's signature link. Temurin, Microsoft and Corretto, the vendors jkit has keys for,
+     * publish a {@code .sig} next to each download they sign (Temurin's GitHub releases, aka.ms,
+     * corretto.aws): for those, jkit takes that link whether or not foojay lists one. foojay leaves
+     * it out for some Temurin builds that have one, and a compromised foojay could leave it out on
+     * purpose, or point the download somewhere else, to have a build installed on its own checksum:
+     * the link is next to whatever download foojay names, and a signature from there must still be
+     * by the vendor's key.
+     * <p>
+     * For other builds, the link foojay lists, https only: a listed link that isn't https is
+     * refused for a vendor jkit has keys for, and dropped for others, whose links jkit never fetches.
      */
-    static URI signature(JsonNode info, URI download, URI base) {
+    static URI signature(JsonNode info, URI download, URI base, Pkg pkg) {
+        if (vendorSigns(pkg.vendor(), pkg.version())) {
+            return nextTo(download);
+        }
         String sig = Json.text(info, "signature_uri");
         if (sig.isEmpty()) {
-            return correttoSignature(download);
+            return null;
         }
         try {
             return Http.sent(sig, "a signature", base);
         } catch (RuntimeException e) {
+            if (SIGNING_VENDORS.contains(pkg.vendor().foojayName())) {
+                throw e;
+            }
             return null;
         }
     }
 
-    /** {@code <download>.sig} for a Corretto build served from corretto.aws, else null. */
-    static URI correttoSignature(URI download) {
-        boolean corretto = "https".equals(download.getScheme()) && "corretto.aws".equals(download.getHost())
-                && download.getRawQuery() == null && download.getRawFragment() == null
-                && download.getRawPath() != null && download.getRawPath().startsWith("/downloads/resources/");
-        return corretto ? URI.create(download + ".sig") : null;
+    /** The JDK vendors jkit has signing keys for (Signatures in jkit-core). */
+    static final java.util.Set<String> SIGNING_VENDORS = java.util.Set.of("temurin", "microsoft", "corretto");
+
+    /**
+     * The first Temurin release of each feature version with a {@code .sig} on GitHub: Adoptium
+     * started signing in July 2022 (8u342, 11.0.16, 17.0.4, 18.0.2), and signs every build since,
+     * early-access ones included. Older ones, and 16, have none.
+     */
+    private static final Map<Integer, Version> TEMURIN_FIRST_SIGNED = Map.of(
+            8, Version.parse("8.0.342"), 11, Version.parse("11.0.16"),
+            17, Version.parse("17.0.4"), 18, Version.parse("18.0.2"));
+
+    /**
+     * Whether the vendor publishes a signature for this build: every Microsoft and Corretto build
+     * foojay lists, and Temurin's from mid-2022 on.
+     */
+    static boolean vendorSigns(Vendor vendor, Version version) {
+        return switch (vendor.foojayName()) {
+            case "microsoft", "corretto" -> true;
+            case "temurin" -> {
+                Version first = TEMURIN_FIRST_SIGNED.get(version.part(0));
+                yield first != null ? version.compareTo(first) >= 0 : version.part(0) >= 19;
+            }
+            default -> false;
+        };
+    }
+
+    /** {@code <download>.sig}: the file name with {@code .sig} added, on the same server. */
+    static URI nextTo(URI download) {
+        String path = download.getRawPath() == null || download.getRawPath().isEmpty() ? "/" : download.getRawPath();
+        return URI.create(download.getScheme() + "://" + download.getRawAuthority() + path + ".sig"
+                + (download.getRawQuery() == null ? "" : "?" + download.getRawQuery()));
     }
 
     /**
@@ -233,7 +271,7 @@ public final class FoojaySource {
             URI download = Http.sent(url, "a download", base);
             return new Artifact(tool, pkg.version(), pkg.vendor(), download, pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
-                    checksum == null ? null : checksum.hash(), fx, signature(info, download, base));
+                    checksum == null ? null : checksum.hash(), fx, signature(info, download, base, pkg));
         }
         Pkg newest = candidates.getFirst();
         if (candidates.size() > MAX_LOOKUPS) {
@@ -263,7 +301,7 @@ public final class FoojaySource {
         boolean checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type")) != null
                 || !Json.text(info, "checksum_uri").isEmpty();
         URI download = Http.sent(url, "a download", base);
-        return new Availability(pkg, checksum, signature(info, download, base));
+        return new Availability(pkg, checksum, signature(info, download, base, pkg));
     }
 
     /**

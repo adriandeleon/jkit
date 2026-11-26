@@ -37,8 +37,8 @@ matters:
 
   | Downloads | Signature | Key (primary fingerprint) |
   | --- | --- | --- |
-  | Temurin | listed by foojay | Adoptium `3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B` |
-  | Microsoft Build of OpenJDK | listed by foojay | Microsoft `B602 4333 84B8 9913 0292 4D82 3553 1D31 5B21 C189` |
+  | Temurin 8u342, 11.0.16, 17.0.4, 18.0.2, 19 and later | `.sig` next to the download on Adoptium's GitHub releases | Adoptium `3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B` |
+  | Microsoft Build of OpenJDK | `.sig` next to the download on aka.ms | Microsoft `B602 4333 84B8 9913 0292 4D82 3553 1D31 5B21 C189` |
   | Amazon Corretto | `.sig` next to the download on corretto.aws | Amazon `6DC3 636D AE53 4049 C8B9 4623 A122 542A B04F 24E3` |
   | Apache Maven 3.9.0 and later | `.asc` next to the zip on Maven Central (or your mirror) | the release managers who signed them, from Maven's [KEYS](https://downloads.apache.org/maven/KEYS) file: Tamas Cservenak `29BE A2A6 45F2 D6CE D7FB 12E0 2B17 2E3E 1564 66E8` and `88BE 34F9 4BDB 2B53 5704 4E2E 3A38 7D43 9641 43E3`, Slawomir Jaranowski `8478 9D24 DF77 A324 33CE 1F07 9EB8 0E92 EB21 35B1`, Guillaume Nodet `EA23 DB13 60D9 0294 81E7 F2EF ECDF EA3C B449 3B94` |
   | sbt | `.asc` on sbt's GitHub releases | sbt build tool `2EE0 EA64 E40A 89B8 4B2D F734 99E8 2A75 642A C823` (its subkey `05B3 70DC 1261 4519 62FF E35A CD4E AA59 06F9 BF46` signs 1.12.2 on) |
@@ -58,16 +58,26 @@ matters:
     rather than fetching the KEYS file, because a file fetched at install time is only as
     trustworthy as the server it comes from.
   - Maven releases before 3.9.0 aren't checked: they were signed with SHA-1, DSA-1024 keys, or
-    keys that have since expired. Other JDK vendors aren't checked (foojay lists no signatures for
-    them), nor is Gradle, which publishes none.
-  - Temurin and Microsoft builds are checked when foojay lists a signature for them, as it does
-    for current builds; one foojay lists without a signature is checked against its checksum only.
+    keys that have since expired. Temurin builds from before Adoptium started signing (July 2022)
+    have no signature either. jkit installs these on their checksum and says only the checksum was
+    checked. Other JDK vendors aren't checked (they publish no signatures, or none with a key jkit
+    has), nor is Gradle, which publishes none.
+  - jkit doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: it looks
+    for the `.sig` next to whatever download foojay names, whether or not foojay lists one (it
+    leaves it out for some builds that have one). So a compromised foojay entry can't skip the
+    check by leaving the signature out or pointing the download elsewhere: the install then
+    stops, as for any signature jkit can't fetch. A signature link foojay lists over plain http is
+    refused, not ignored.
   - Where there is a checksum, the signature is checked as well, never instead of it. Corretto
     publishes no per-version checksum (foojay lists none, and corretto.aws has only one for the
     latest build), so for Corretto the signature is the check: a good signature by Amazon's key
-    installs it, counted as verified. Amazon's signature covers the file, not its name, so jkit
-    also checks that the unpacked JDK's `release` file (`version.txt` for Corretto 8, which has no
-    `release` file) reports the version it asked for.
+    installs it, counted as verified.
+  - A signature covers the file, not its name: any build the publisher signed would pass, an
+    older one included. So after a good signature jkit also checks that the unpacked tool is the
+    version it asked for: a JDK's `release` file, every part of the version (`version.txt` for
+    Corretto 8, which has no `release` file), Maven's `lib/maven-core-<version>.jar`, and the
+    version sbt's launcher (`bin/sbt-launch.jar`) starts by default.
+  - A signature is read only up to 64 KB; a link that serves more is cut off there.
 - `jkit self-update` downloads jkit's own release archive over HTTPS from GitHub and checks it
   against that release's `SHA256SUMS`, then checks the new binary runs and reports the expected
   version before it replaces the old one. `SHA256SUMS` comes from the same place as the archive,
