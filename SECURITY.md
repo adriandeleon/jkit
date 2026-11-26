@@ -67,10 +67,11 @@ matters:
     2024), and they have no checksum: jkit says so, and installs one only with
     `--allow-unverified`. `jkit search` marks them ○, as it does builds with nothing to check.
   - JDK builds are found through the foojay API, and jkit trusts it as little as it can. It
-    doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: it looks for
-    the `.sig` next to the download whether or not foojay lists one (it leaves it out for some
-    builds that have one), and a signature link foojay lists over plain http is refused, not
-    ignored. It takes only builds foojay lists under the vendor and major version you asked for,
+    doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: for every
+    build these vendors sign, it looks for the `.sig` next to the download and doesn't read the
+    signature link foojay lists, if any (foojay leaves it out for some builds that have one). For a
+    Temurin build from before Adoptium signed, a signature link foojay lists is used if it is
+    HTTPS; over plain http it is refused, not ignored. It takes only builds foojay lists under the vendor and major version you asked for,
     so an answer can't call a Temurin build "Zulu", or a Temurin 21 build 17.0.3, to have it
     installed without the signature check. And a build of these three vendors must download from
     the vendor's own server, at a link of the vendor's own shape ending in the build's file name,
