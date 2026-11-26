@@ -125,8 +125,9 @@ final class Signals {
      * exit 130), after a Ctrl-C: an interactive bash, or a bash script running jkit, stops on
      * Ctrl-C only when its command died from SIGINT, not when it exited 130. A shell shows 130
      * either way. First deletes the folders an install was working in and the hook's
-     * $JKIT_ENV_FILE: an interactive bash skips the rest of the hook's jkit function, its rm
-     * included. Returns when jkit can't end from the signal here; the caller then exits 130.
+     * $JKIT_ENV_FILE, for a hook from an older jkit, whose jkit function an interactive bash leaves
+     * on Ctrl-C before its rm. Returns when jkit can't end from the signal here; the caller then
+     * exits 130.
      */
     static void raiseInt(Map<String, String> env) {
         WorkDirs.deleteAll();
@@ -168,7 +169,7 @@ final class Signals {
 
     /**
      * The file the hook's jkit function made for this run, from $JKIT_ENV_FILE: only one named as
-     * the bash and zsh hooks name it ({@code jkit-env.XXXXXX} right in $TMPDIR, else /tmp), so a
+     * the bash, zsh and fish hooks name it ({@code jkit-env.XXXXXX} right in $TMPDIR, else /tmp), so a
      * variable that points anywhere else never gets a file deleted. Null otherwise.
      */
     static Path hookEnvFile(Map<String, String> env) {

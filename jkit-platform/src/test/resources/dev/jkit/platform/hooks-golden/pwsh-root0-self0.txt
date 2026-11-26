@@ -74,16 +74,17 @@ function jkit {
       [Console]::Error.WriteLine('jkit: not found on PATH')
       $rc = 127
     }
-  } finally {
-    # also after Ctrl-C, so that a later jkit run outside this function doesn't write to the file
     Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
+    # Run the file's text as a script block rather than dot-sourcing the file: the execution
+    # policy (Restricted by default in Windows PowerShell) blocks .ps1 files, and the changes
+    # jkit reported would then silently not reach this shell.
+    if ((Test-Path -LiteralPath $envFile) -and (Get-Item -LiteralPath $envFile).Length -gt 0) {
+      . ([scriptblock]::Create([IO.File]::ReadAllText($envFile)))
+    }
+  } finally {
+    # also after Ctrl-C: the file goes, and a later jkit run outside this function doesn't write to it
+    Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $envFile -ErrorAction SilentlyContinue
   }
-  # Run the file's text as a script block rather than dot-sourcing the file: the execution
-  # policy (Restricted by default in Windows PowerShell) blocks .ps1 files, and the changes
-  # jkit reported would then silently not reach this shell.
-  if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) {
-    . ([scriptblock]::Create([IO.File]::ReadAllText($envFile)))
-  }
-  Remove-Item $envFile -ErrorAction SilentlyContinue
   $global:LASTEXITCODE = $rc
 }

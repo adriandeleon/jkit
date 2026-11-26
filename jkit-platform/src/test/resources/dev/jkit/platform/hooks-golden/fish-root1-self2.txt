@@ -42,11 +42,21 @@ function __jkit_run
   end
 end
 function jkit
-  set -l envfile (mktemp)
+  # Ctrl-C can end this function before its rm: a file an earlier run left goes now, or when
+  # fish exits. Named as the bash hook names it, so jkit removes it itself on Ctrl-C.
+  set -q __jkit_envfile[1]; and rm -f $__jkit_envfile
+  set -l tmp /tmp
+  test -n "$TMPDIR"; and set tmp (string trim -r -c / -- $TMPDIR)
+  set -g __jkit_envfile (mktemp $tmp/jkit-env.XXXXXX); or return 1
+  set -l envfile $__jkit_envfile
   set -lx JKIT_ENV_FILE $envfile
   __jkit_run $argv
   set -l rc $status
   test -s $envfile; and source $envfile
   rm -f $envfile
+  set -e __jkit_envfile
   return $rc
+end
+function __jkit_exit --on-event fish_exit
+  set -q __jkit_envfile[1]; and rm -f $__jkit_envfile
 end

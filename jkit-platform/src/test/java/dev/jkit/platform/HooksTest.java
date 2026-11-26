@@ -250,6 +250,35 @@ class HooksTest {
         assertThat(out.lines().toList().get(1)).startsWith("bin ").contains("jkit-env.");
     }
 
+    /**
+     * Ctrl-C reaches the shell and jkit together. Without an INT trap, bash then skips the rest of
+     * the jkit function, its rm included; the hook's own trap makes it go on, and the user's INT
+     * trap is back afterwards.
+     */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookRemovesItsFileAfterCtrlCAndKeepsTheUsersTrap() throws Exception {
+        Path temp = Files.createDirectories(tmp.resolve("temp"));
+        Path fake = tmp.resolve("fakejkit");
+        // what a Ctrl-C does: SIGINT to the shell, and to jkit, which dies from it
+        Files.writeString(fake, "#!/bin/sh\nkill -INT $PPID\nkill -INT $$\nsleep 5\n");
+        fake.toFile().setExecutable(true);
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, Hooks.posix("bash", tmp.resolve("root"), fake.toString())
+                + "trap 'echo mine' INT\njkit sync\necho \"rc=$?\"\ntrap -p INT\nls -A \"$TMPDIR\"\necho done\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString()).redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("TMPDIR", temp.toString());
+        Process p = pb.start();
+        p.getOutputStream().close();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out.lines().toList()).as(out).containsExactly("rc=130", "trap -- 'echo mine' SIGINT", "done");
+        try (Stream<Path> left = Files.list(temp)) {
+            assertThat(left).isEmpty();
+        }
+    }
+
     @Test
     void fishHookKeepsAnExistingJavaHomeAndSetsTheOtherHomes() {
         String fish = Hooks.fish(Path.of("/home/u/.jkit"));
