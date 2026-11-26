@@ -31,9 +31,22 @@ final class CompletionCommand implements Callable<Integer> {
         return 0;
     }
 
-    /** The bash completion script for the whole command tree. Also works in zsh via bashcompinit. */
+    /**
+     * picocli's lines for zsh that change the user's shell: COMPLETE_ALIASES changes how every
+     * alias completes, and the alias makes compopt mean complete. The script needs neither: it
+     * calls compopt only after {@code type compopt}, which zsh's bashcompinit doesn't define.
+     */
+    static final String ZSH_OPTIONS = "  setopt COMPLETE_ALIASES\n  alias compopt=complete\n";
+
+    /**
+     * The bash completion script for the whole command tree. Also works in zsh via bashcompinit,
+     * without picocli's {@link #ZSH_OPTIONS}: the hook carries this script, and loading it must not
+     * change options or aliases.
+     */
     static String script(CommandLine root) {
-        return AutoComplete.bash("jkit", root);
+        String script = AutoComplete.bash("jkit", root);
+        String comment = "  # Make alias a distinct command for completion purposes when using zsh (see [4])\n";
+        return script.replace(comment + ZSH_OPTIONS, "").replace(ZSH_OPTIONS, "");
     }
 
     static final class CompletionShells implements Iterable<String> {
