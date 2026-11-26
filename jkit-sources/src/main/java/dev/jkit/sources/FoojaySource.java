@@ -55,6 +55,16 @@ public final class FoojaySource {
         public boolean downloadable() {
             return pkg != null;
         }
+
+        /**
+         * Whether its signature is by a key the vendor has retired, which install can't check:
+         * Amazon's 2019 Corretto builds, the ones it still serves from its old CloudFront host
+         * (all of them, and nothing else, are there).
+         */
+        public boolean retiredKey() {
+            return pkg != null && signature != null && pkg.vendor().foojayName().equals("corretto")
+                    && "d3pxv6yz143wms.cloudfront.net".equalsIgnoreCase(signature.getHost());
+        }
     }
 
     /** A feature release and its support status. */
@@ -143,8 +153,11 @@ public final class FoojaySource {
             17, Version.parse("17.0.4"), 18, Version.parse("18.0.2"));
 
     /**
-     * Whether the vendor publishes a signature for this build: every Microsoft and Corretto build
-     * foojay lists, and Temurin's from mid-2022 on.
+     * Whether jkit looks for the vendor's signature of this build: every Microsoft and Corretto
+     * build, and Temurin's from mid-2022 on. Not that each has one jkit can check: Amazon signed
+     * its 2019 Corretto builds with keys it has since retired, and a few old Corretto downloads
+     * (Alpine builds of 2020, a macOS 8u242) have no .sig at all. Those are refused unless
+     * --allow-unverified, as any build whose signature can't be checked.
      */
     static boolean vendorSigns(Vendor vendor, Version version) {
         return switch (vendor.foojayName()) {

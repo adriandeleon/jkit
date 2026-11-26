@@ -220,8 +220,10 @@ public final class Installer {
                             + "pick another build or vendor");
             default -> {
                 String why = "couldn't check the signature of " + label + ": " + result.detail();
+                // a key jkit doesn't know may be the publisher's new one; a retired one stays unknown
                 String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
-                        ? " (a newer jkit may know a new key: jkit self-update)" : "";
+                        ? " (a newer jkit may know a new key: jkit self-update)"
+                        : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
                 if (required) {
                     throw new SignatureRequired(why + newer + refused);
                 }

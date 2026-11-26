@@ -233,6 +233,29 @@ class InstallerTest {
     }
 
     @Test
+    void aCorrettoBuildSignedWithARetiredKeyIsRefusedWithoutSendingYouToSelfUpdate() throws Exception {
+        // Amazon's real signature of its 11.0.4.11.1 Linux build, made with that release's own key
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] retired;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("corretto-11.0.4.11.1.sig")) {
+            retired = in.readAllBytes();
+        }
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, retired))
+                .install(corretto(), Http.Progress.NONE, true))
+                .isInstanceOf(Installer.SignatureRequired.class)
+                .hasMessageContaining("signed with Amazon's retired key 5A812B5B67F4FCB4")
+                .hasMessageContaining("(pick a newer build)")
+                .hasMessageNotContaining("self-update")
+                .hasMessageEndingWith("and it has no published checksum; nothing was installed");
+        // a key jkit doesn't know at all may be a new one
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, realTemurinSignature()))
+                .install(corretto(), Http.Progress.NONE, true))
+                .hasMessageContaining("a newer jkit may know a new key: jkit self-update");
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+    }
+
+    @Test
     void aSignedJdkMustBeTheVersionAskedFor() throws Exception {
         Path jdk = Files.createDirectories(tmp.resolve("jdk"));
         // what amazon-corretto-21.0.13.1.2-linux-x64.tar.gz says
