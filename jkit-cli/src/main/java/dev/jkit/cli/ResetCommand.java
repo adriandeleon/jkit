@@ -41,7 +41,7 @@ final class ResetCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        return run(Context.create(false, true));
+        return run(Context.local());
     }
 
     int run(Context ctx) throws Exception {

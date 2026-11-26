@@ -40,7 +40,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, false);
+        Context ctx = Context.online();
         return run(ctx, self(), VersionProvider.version());
     }
 

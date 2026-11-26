@@ -274,6 +274,32 @@ class PinSyncTest {
     }
 
     @Test
+    void removeSaysWhatUsesTheBuildAndWhatForceWouldTake() {
+        RemoveCommand remove = new RemoveCommand();
+        remove.spec = ToolSpec.parse("jdk@21");
+        env.put("JKIT_SHELL_JDK", temurin21.toString()); // chosen with jkit use; there is no global jdk
+        assertThatThrownBy(() -> remove.run(ctx())).isInstanceOf(JkitException.class)
+                .hasMessage("jdk 21.0.9+10 temurin is this shell's jdk (chosen with jkit use); nothing removed")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .containsExactly("stop using it in this shell: jkit reset jdk", "or remove it anyway: add --force"));
+        RemoveCommand removeMaven = new RemoveCommand();
+        removeMaven.spec = ToolSpec.parse("maven@3.9.11");
+        assertThatThrownBy(() -> removeMaven.run(ctx()))
+                .hasMessage("maven 3.9.11 is the global maven; nothing removed")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .contains("or remove it anyway (the global link goes too): add --force"));
+        assertThat(temurin21).exists();
+    }
+
+    @Test
+    void aHintNamesTheFileThatPinsTheTool() throws Exception {
+        Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\n");
+        Files.writeString(project.resolve(".tool-versions"), "maven 3.8.8\n");
+        ProjectShell.Plan plan = ProjectShell.plan(ctx(), project);
+        assertThat(plan.notes()).contains(".tool-versions wants maven 3.8.8, not installed: jkit sync");
+    }
+
+    @Test
     void syncWithoutAProjectFileFails() {
         assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
                 .isInstanceOf(JkitException.class).hasMessageStartingWith("no jkit.toml");
