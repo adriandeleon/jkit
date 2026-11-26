@@ -205,3 +205,22 @@ gh attestation verify jkit-0.4.0-linux-x64.tar.gz --repo adriandeleon/jkit
 ```
 
 `jkit self-update` does steps 2 and 3 itself, with the key built into jkit.
+
+### Verifying a `.deb` or `.rpm`
+
+From 0.5.0, the `.deb` and `.rpm` are signed with the Vitrina repository's key (see
+[What jkit verifies](#what-jkit-verifies)). To check an `.rpm`:
+
+```bash
+sudo rpm --import https://vitrina-project.dev/vitrina.asc
+rpm -K jkit-*.rpm                           # digests signatures OK
+```
+
+`dnf` checks it the same way when it installs one once the key is imported. A `.deb` carries its
+signature as a `_gpgorigin` member, which `debsig-verify` checks; apt and dpkg don't check a
+downloaded `.deb`. Both are also listed in `SHA256SUMS`, so the steps above work for them too.
+
+### The SBOM
+
+Each release's CycloneDX SBOM is made from the Linux x64 build. The other builds compile in the
+same libraries; the macOS x64 binary is built with Liberica NIK instead of GraalVM CE.
