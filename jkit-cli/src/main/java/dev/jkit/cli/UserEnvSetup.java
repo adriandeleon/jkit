@@ -35,13 +35,24 @@ final class UserEnvSetup {
     static List<String> names() {
         List<String> names = new ArrayList<>();
         TOOLS.forEach(t -> names.add(t.homeVariable()));
+        TOOLS.forEach(t -> names.add(savedVariable(t)));
         names.add("Path");
         return names;
     }
 
     /**
+     * Where install keeps a *_HOME of the user's own that it replaced, for uninstall to put back.
+     * Not the shell's {@code JKIT_USER_<TOOL>}: every new shell gets this variable, and the hook
+     * would then bring the old value back over the global link on jkit reset.
+     */
+    static String savedVariable(Tool tool) {
+        return "JKIT_SAVED_" + tool.name();
+    }
+
+    /**
      * What install writes, recorded in {@code report}: for each tool with a global version, its
-     * variable (replacing another value, which a note keeps) and its bin first on PATH. Tools
+     * variable (replacing another value, which is saved in {@link #savedVariable} for uninstall to
+     * put back) and its bin first on PATH. Tools
      * without one are left out: a JAVA_HOME naming nothing breaks programs that could otherwise find
      * java on PATH, and a MAVEN_HOME of the user's own stays theirs.
      */
@@ -59,7 +70,11 @@ final class UserEnvSetup {
                 writes.put(var, link.toString());
                 report.userEnv(var, "set", link.toString());
                 if (before != null && !before.isBlank()) {
-                    report.note("replaced " + var + "=" + before + ", which was set before");
+                    String saved = savedVariable(tool);
+                    writes.put(saved, before);
+                    report.userEnv(saved, "set", before);
+                    report.note("replaced " + var + "=" + before + ", which was set before; it is kept in " + saved
+                            + ", and jkit env --uninstall puts it back");
                 }
             }
             if (tool.onPath()) {
@@ -83,16 +98,32 @@ final class UserEnvSetup {
         return writes;
     }
 
-    /** What uninstall writes: only the values install set, so a variable of the user's own stays. */
+    /**
+     * What uninstall writes: only the values install set, so a variable of the user's own stays,
+     * and the value install replaced comes back.
+     */
     static Map<String, String> uninstall(JkitHome home, Map<String, String> current, Changes report) {
         Map<String, String> writes = new LinkedHashMap<>();
         List<String> bins = new ArrayList<>();
         for (Tool tool : TOOLS) {
             String link = home.global(tool).toAbsolutePath().normalize().toString();
             String var = tool.homeVariable();
+            String saved = savedVariable(tool);
+            String before = current.get(saved);
+            boolean restore = before != null && !before.isBlank();
             if (same(current.get(var), link)) {
-                writes.put(var, null);
-                report.userEnv(var, "unset", null);
+                writes.put(var, restore ? before : null);
+                report.userEnv(var, restore ? "set" : "unset", restore ? before : null);
+                if (restore) {
+                    report.note("put back " + var + "=" + before + ", which was set before jkit env --install");
+                }
+            } else if (restore) {
+                report.note(var + " was changed since jkit env --install, so it stays; the earlier value "
+                        + before + " goes with " + saved);
+            }
+            if (current.containsKey(saved)) {
+                writes.put(saved, null);
+                report.userEnv(saved, "unset", null);
             }
             if (tool.onPath()) {
                 bins.add(Path.of(link, "bin").toString());
@@ -158,7 +189,11 @@ final class UserEnvSetup {
 
     /** Runs install or uninstall against the user's environment, and says what changed. */
     static int run(Context ctx, boolean install, boolean json) throws IOException {
-        UserEnv env = ctx.os.userEnv();
+        return run(ctx, ctx.os.userEnv(), install, json);
+    }
+
+    /** {@link #run(Context, boolean, boolean)} against {@code env}; null where there is no user environment. */
+    static int run(Context ctx, UserEnv env, boolean install, boolean json) throws IOException {
         if (env == null) {
             throw new JkitException(
                     "jkit env --" + (install ? "install" : "uninstall") + " is for Windows, where programs get their "
@@ -209,8 +244,12 @@ final class UserEnvSetup {
         say.println(message);
         report.print(say);
         if (json) {
-            ctx.out.println(JsonOut.write(JsonOut.fields("action", install ? "install" : "uninstall",
-                    "changed", !writes.isEmpty(), "changes", report.json(), "notes", report.notes())));
+            Map<String, Object> doc = JsonOut.document();
+            doc.put("action", install ? "install" : "uninstall");
+            doc.put("changed", !writes.isEmpty());
+            doc.put("changes", report.json());
+            doc.put("notes", report.notes());
+            ctx.out.println(JsonOut.write(doc));
         }
         return 0;
     }
