@@ -126,7 +126,7 @@ final class InstallCommand implements Callable<Integer> {
         PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
-            Changes changes = new Changes(ctx).disk();
+            Changes changes = new Changes(ctx).disk().namedInMessage(null);
             changes.print(say);
             if (json.json) {
                 printJson(ctx, "already-installed", null, null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
@@ -167,14 +167,14 @@ final class InstallCommand implements Callable<Integer> {
         // another jkit may have installed it while this one waited for the store lock
         say.println((result.fresh() ? "installed " : "already installed (by another jkit just now): ")
                 + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
-        changes.print(say);
+        changes.namedInMessage(result.installed().home()).print(say);
         if (json.json) {
             printJson(ctx, result.fresh() ? "installed" : "already-installed", result.fresh() ? result.verified() : null,
                     result.fresh() ? result.signedBy() : null, artifact.version(), artifact.vendor(), artifact.fx(), changes);
             return 0;
         }
         if (!madeDefault) {
-            ctx.out.println("make it the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText)
+            ctx.out.println("  make it the default: jkit use " + spec + (vendorText == null ? "" : " " + vendorText)
                     + (fx ? " --fx" : "") + " --global");
         }
         return 0;

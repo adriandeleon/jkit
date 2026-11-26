@@ -39,6 +39,10 @@ final class Changes {
     private final Context ctx;
     private final List<Change> changes = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
+    /** A folder the command's own message names, with its parents: their "created" lines go unsaid. */
+    private Path named;
+    /** Whether the line for cached version lists and checksums goes unsaid. */
+    private boolean quietCache;
 
     Changes(Context ctx) {
         this.ctx = ctx;
@@ -193,6 +197,17 @@ final class Changes {
         return this;
     }
 
+    /**
+     * For install, whose message names the new folder: the folders it implies (that one, and the
+     * jkit home or tools/ folders made for it) and the cached version lists aren't printed again.
+     * --json still lists them.
+     */
+    Changes namedInMessage(Path folder) {
+        named = folder == null ? null : folder.toAbsolutePath().normalize();
+        quietCache = true;
+        return this;
+    }
+
     Changes note(String note) {
         notes.add(note);
         return this;
@@ -272,6 +287,13 @@ final class Changes {
         Path index = ctx.home.index().toAbsolutePath();
         for (Change c : changes) {
             if (bookkeeping(c)) {
+                continue;
+            }
+            if (named != null && c.kind().equals("folder") && c.action().equals("create")
+                    && named.startsWith(Path.of(c.name()).normalize())) {
+                continue; // the message names this folder, or one inside it
+            }
+            if (quietCache && c.kind().equals("file") && Path.of(c.name()).startsWith(index)) {
                 continue;
             }
             if (c.kind().equals("file") && c.action().equals("delete") && Path.of(c.name()).startsWith(index)) {

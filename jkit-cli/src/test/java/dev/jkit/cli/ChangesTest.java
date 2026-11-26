@@ -168,6 +168,25 @@ class ChangesTest {
     }
 
     @Test
+    void installsMessageNamesTheFolderSoItsLinesAndTheCacheAreOnlyInTheJson() throws Exception {
+        Path jkit = home.resolve("fresh");
+        Context ctx = Context.forEnv(new HashMap<>(Map.of("JKIT_HOME", jkit.toString())));
+        Files.createDirectories(jkit); // the command made the home
+        Path install = jkit.resolve("tools/jdk/21.0.9+10-temurin");
+        Path leftover = jkit.resolve("tools/jdk/21.0.9+10-temurin.old");
+        ctx.cacheWrites.add(new Context.CacheWrite(URI.create("https://api.foojay.io/a"), jkit.resolve("index/a.cache"), true));
+
+        Changes changes = new Changes(ctx).disk().folder(leftover, false).folder(install, true)
+                .link(jkit.resolve("global/jdk"), install).namedInMessage(install);
+
+        assertThat(print(changes)).isEqualTo("""
+                  folder %s deleted
+                  link   %s → %s
+                """.formatted(leftover, jkit.resolve("global/jdk"), install));
+        assertThat(changes.json()).hasSize(5);
+    }
+
+    @Test
     void deletedFolderIsReported() {
         Context ctx = context(Map.of());
         Path gone = home.resolve("tools/jdk/17-zulu");
