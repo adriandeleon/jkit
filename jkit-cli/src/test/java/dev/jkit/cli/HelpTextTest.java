@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -18,6 +20,37 @@ class HelpTextTest {
         List<String> tooLong = new ArrayList<>();
         collect(new CommandLine(new Main()), tooLong);
         assertThat(tooLong).isEmpty();
+    }
+
+    /** An example line: two spaces, the command, two or more spaces, what it does. */
+    private static final Pattern EXAMPLE = Pattern.compile("^  \\S.*?\\S {2,}(\\S.*)$");
+
+    @Test
+    void theExamplesOfEachCommandLineUpTheirExplanations() {
+        List<String> off = new ArrayList<>();
+        examples(new CommandLine(new Main()), off);
+        assertThat(off).isEmpty();
+    }
+
+    private static void examples(CommandLine cli, List<String> off) {
+        if (cli.getCommand() instanceof CommandLine.HelpCommand) {
+            return;
+        }
+        int column = -1;
+        for (String line : cli.getCommandSpec().usageMessage().description()) {
+            Matcher m = EXAMPLE.matcher(line);
+            if (!line.startsWith("  ")) {
+                column = -1; // a new group of examples starts after other text
+            } else if (m.matches()) {
+                if (column >= 0 && m.start(1) != column) {
+                    off.add(cli.getCommandSpec().qualifiedName() + ": " + line);
+                }
+                column = column < 0 ? m.start(1) : column;
+            }
+        }
+        for (CommandLine sub : cli.getSubcommands().values()) {
+            examples(sub, off);
+        }
     }
 
     private static void collect(CommandLine cli, List<String> tooLong) {
