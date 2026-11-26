@@ -48,9 +48,7 @@ class EnvTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
-        return path;
+        return TestInstalls.install(home, tool, dir, properties);
     }
 
     private EnvCommand.Result compute(boolean global) throws Exception {

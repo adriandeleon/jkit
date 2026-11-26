@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,15 +50,16 @@ class WorkDirsTest {
         Path work = WorkDirs.create(tmp, "install-");
         Path out = Files.createDirectories(work.resolve("out").resolve("jdk"));
         Path tools = Files.createDirectories(tmp.resolve("tools"));
-        java.util.concurrent.CompletableFuture<java.util.List<Path>> deleted = new java.util.concurrent.CompletableFuture<>();
+        CompletableFuture<List<Path>> deleted = new CompletableFuture<>();
         WorkDirs.moveIn(() -> {
             // Ctrl-C meanwhile: its delete waits until the install is in tools/
-            Thread.ofPlatform().start(() -> deleted.complete(WorkDirs.deleteAll()));
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                throw new java.io.InterruptedIOException();
+            Thread interrupt = Thread.ofPlatform().start(() -> deleted.complete(WorkDirs.deleteAll()));
+            // until it is blocked on the move, not a fixed sleep: a slow machine mustn't pass by luck
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (interrupt.getState() != Thread.State.BLOCKED && !deleted.isDone() && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
             }
+            assertThat(interrupt.getState()).isEqualTo(Thread.State.BLOCKED);
             assertThat(deleted).isNotDone();
             Files.move(out, tools.resolve("jdk"));
         }, out);

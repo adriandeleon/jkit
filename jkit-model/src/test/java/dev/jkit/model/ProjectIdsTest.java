@@ -91,6 +91,7 @@ class ProjectIdsTest {
         assertThat(ToolVersionsIds.parse(Tool.JDK, "zulu-musl-21.0.5", notes)).isEqualTo(jdk("21.0.5", "zulu", false));
         assertThat(ToolVersionsIds.parse(Tool.JDK, "zulu-21.38.21", notes)).isEqualTo(jdk("21", "zulu", false));
         assertThat(ToolVersionsIds.parse(Tool.JDK, "nope-21", notes)).isEqualTo(jdk("21", "nope", false));
+        assertThat(ToolVersionsIds.parse(Tool.JDK, "semeru-certified-21.0.5", notes)).isEqualTo(jdk("21.0.5", "semeru", false));
         assertThat(notes).containsExactly(
                 "'temurin-jre-21.0.5+11.0.LTS' is a JRE; jkit installs full JDKs, pinned as the temurin JDK",
                 "'liberica-jre-javafx-17' is a JRE; jkit installs full JDKs, pinned as the liberica JDK",
@@ -98,7 +99,8 @@ class ProjectIdsTest {
                 "'zulu-21.38.21' is a Zulu release number, which jkit can't match; pinned as zulu 21 "
                         + "(write the Java version, such as zulu-21.0.<update>, to be exact)",
                 "'nope-21': jkit doesn't know the vendor 'nope'; it will look for a vendor of that name "
-                        + "(jkit search jdk lists them)");
+                        + "(jkit search jdk lists them)",
+                "'semeru-certified-21.0.5' is IBM's certified Semeru build; jkit installs open Semeru, pinned as semeru");
         assertThatThrownBy(() -> ToolVersionsIds.parse(Tool.JDK, "graalvm-22.3.0+java17"))
                 .hasMessageContaining("GraalVM release id");
         assertThatThrownBy(() -> ToolVersionsIds.parse(Tool.JDK, "mandrel-23.1.5.0-Final"))

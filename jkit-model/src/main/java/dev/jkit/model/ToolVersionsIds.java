@@ -102,6 +102,9 @@ public final class ToolVersionsIds {
             name = "semeru";
             notes.add("'" + value + "' is an AdoptOpenJDK OpenJ9 build, pinned as semeru (IBM Semeru continues them)");
         }
+        if (name.equals("semeru-certified")) {
+            notes.add("'" + value + "' is IBM's certified Semeru build; jkit installs open Semeru, pinned as semeru");
+        }
         name = VENDORS.getOrDefault(name, name);
         if (name.equals("semeru")) {
             version = version.replaceFirst("_openj9-.*$", ""); // 21.0.5+11_openj9-0.48.0: the OpenJ9 release

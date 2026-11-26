@@ -224,7 +224,7 @@ final class PruneCommand implements Callable<Integer> {
         long freed = 0;
         List<Object> removedBuilds = new ArrayList<>();
         // the same locks as jkit remove: not while an install runs, nor while a link moves
-        try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
+        try (var _ = ctx.store.lock(); var _ = ctx.store.linkLock()) {
             // decide again under the lock: a jkit use --global or an install since the scan may
             // have made one of these builds the one in use
             ToolStates.Result here = StatusCommand.read(ctx, cwd);
@@ -278,7 +278,7 @@ final class PruneCommand implements Callable<Integer> {
     }
 
     /**
-     * Every install with a newer stable build in the same release line (tool, major version,
+     * Every install with a newer stable build in the same release line (tool, release line,
      * vendor, JavaFX or not, as {@code jkit upgrade} groups them), except one that is global,
      * chosen in this shell, applied here from a project file, or pinned by the project here.
      * Pre-releases are left alone: an early-access build has no stable build replacing it.
@@ -288,7 +288,8 @@ final class PruneCommand implements Callable<Integer> {
         for (Tool tool : List.of(Tool.JDK, Tool.MAVEN, Tool.GRADLE, Tool.SBT)) {
             for (Installed i : ctx.store.list(tool)) {
                 if (!i.version().isPreRelease()) {
-                    lines.computeIfAbsent(new UpgradeCommand.Line(i.tool(), i.version().part(0), i.vendor(), i.fx()),
+                    lines.computeIfAbsent(new UpgradeCommand.Line(i.tool(), UpgradeCommand.release(i.tool(), i.version()),
+                            i.vendor(), i.fx()),
                             k -> new ArrayList<>()).add(i);
                 }
             }

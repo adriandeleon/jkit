@@ -128,7 +128,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
         // tmp/install-* folders no running jkit holds, and this one is held from the moment it
         // exists. The download and the test run of the new binary then go without the lock, so
         // installs elsewhere don't wait for them.
-        try (AutoCloseable lock = ctx.store.lock()) {
+        try (var _ = ctx.store.lock()) {
             Perms.mkdirs(ctx.home.tmp());
             work = WorkDirs.create(ctx.home.tmp(), "install-self-");
         }
@@ -136,7 +136,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
             Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
             // Under the lock again, briefly: two self-updates at once must not interleave their
             // renames of the binary and the DLLs beside it.
-            try (AutoCloseable lock = ctx.store.lock()) {
+            try (var _ = ctx.store.lock()) {
                 List<Path> olds = new ArrayList<>();
                 if (ctx.platform.isWindows()) {
                     for (String name : SelfUpdate.runtimeToReplace(fresh, binary)) {

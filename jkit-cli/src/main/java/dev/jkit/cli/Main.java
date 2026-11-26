@@ -2,6 +2,7 @@ package dev.jkit.cli;
 
 import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
 import java.io.PrintWriter;
@@ -17,7 +18,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
-import sun.misc.SignalHandler;
 
 @Command(name = "jkit",
         mixinStandardHelpOptions = true,
@@ -158,7 +158,7 @@ public final class Main implements Runnable {
                 }
                 System.exit(128 + signalNumber(name));
             }, name);
-            if (!saved.isEmpty() && saved.getFirst().previous() == SignalHandler.SIG_IGN) {
+            if (Signals.wasIgnored(saved)) {
                 Signals.restore(saved);
             }
         }
@@ -250,12 +250,24 @@ public final class Main implements Runnable {
             hints.add("put -- before the command to run: jkit exec [<tool>@<version> [vendor]]... -- <command> [args]");
         }
         String name = cmd.getCommandSpec().qualifiedName();
+        String message = ex.getMessage();
+        if (ex instanceof CommandLine.MissingParameterException missing
+                && missing.getMissing().getFirst() instanceof CommandLine.Model.PositionalParamSpec p
+                && p.paramLabel().startsWith("<tool>")) {
+            // jkit reset with no tool: which tools there are, not picocli's "Missing required parameter"
+            message = "name a tool: " + name + " " + switch (p.paramLabel()) {
+                case "<tool>" -> "jdk";
+                case "<tool>@<version>" -> "jdk@<version>"; // remove: no example to copy that removes something
+                default -> "jdk@21";
+            };
+            hints.add("tools: " + String.join(", ", Arrays.stream(Tool.values()).map(Tool::id).toList()));
+        }
         String synopsis = cmd.getHelp().synopsis(0).strip().replaceFirst("^Usage:\\s*", "");
         if (cmd.getParent() != null) {
             hints.add("usage: " + synopsis.replaceAll("\\s+", " "));
         }
         hints.add("more: " + name + " --help");
-        return new JkitException(CommandLine.ExitCode.USAGE, ex.getMessage(), hints.toArray(String[]::new));
+        return new JkitException(CommandLine.ExitCode.USAGE, message, hints.toArray(String[]::new));
     }
 
     private static void printError(JkitException e) {

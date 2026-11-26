@@ -4,8 +4,8 @@ import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Config;
 import dev.jkit.core.ConfigWriter;
 import dev.jkit.core.Fs;
-import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellRc;
+import dev.jkit.core.TextFiles;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Perms;
@@ -209,13 +209,13 @@ final class HookCommand implements Callable<Integer> {
         Path config = ctx.home.config();
         String shown = Changes.tilde(config.toString());
         boolean exists = Files.exists(config);
-        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? ProjectFile.text(config) : "",
+        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? TextFiles.text(config) : "",
                 "shell", "auto_switch", "true");
         if (!edit.changed()) {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
-            ProjectFile.write(config, edit.text(), true);
+            TextFiles.write(config, edit.text(), true);
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
                     + shown);
@@ -251,7 +251,7 @@ final class HookCommand implements Callable<Integer> {
         if (!Files.isRegularFile(file)) {
             return StandardCharsets.UTF_8;
         }
-        return ProjectFile.encoding(Files.readAllBytes(file)).charset();
+        return TextFiles.encoding(Files.readAllBytes(file)).charset();
     }
 
     /**

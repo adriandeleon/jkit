@@ -46,9 +46,8 @@ class ExecTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
+        Path path = TestInstalls.install(home, tool, dir, properties);
         Files.createDirectories(path.resolve("bin"));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
         return path;
     }
 
@@ -119,6 +118,16 @@ class ExecTest {
     }
 
     @Test
+    void anotherVendorsInstallIsOfferedAsAnExecCommand() {
+        assertThatThrownBy(() -> plan("jdk@17"))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("no installed JDK matches 17 from temurin (default vendor)")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                        "install it:          jkit install jdk@17",
+                        "or use installed:    jkit exec jdk@17 zulu -- <command>"));
+    }
+
+    @Test
     void theCallingShellsStateDoesNotLeakIn() throws Exception {
         env.put(ShellEnv.stateVariable(Tool.MAVEN), home.resolve("tools/maven/3.9.11").toString());
         env.put("MAVEN_HOME", home.resolve("tools/maven/3.9.11").toString());
@@ -154,7 +163,7 @@ class ExecTest {
         assertThat(Files.readSymbolicLink(home.resolve("global/jdk"))).isEqualTo(temurin21);
         Resolve.pointGlobal(ctx, home.resolve("global/jdk"), temurin21); // still works for one that's there
         // and doesn't wait for an install running meanwhile, which holds the store lock for its download
-        try (AutoCloseable install = ctx.store.lock()) {
+        try (var _ = ctx.store.lock()) {
             Resolve.pointGlobal(ctx, home.resolve("global/jdk"), temurin21);
         }
     }
