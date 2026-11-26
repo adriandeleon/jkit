@@ -103,12 +103,12 @@ final class UpgradeCommand implements Callable<Integer> {
                     : "no installed " + spec + (vendorText == null ? "" : " " + vendorText) + " to upgrade");
             return 0;
         }
-        lists = new Changes(ctx);
+        Changes lists = new Changes(ctx); // the cached files written to check the lines: the top-level changes
         List<Object> rows = new ArrayList<>();
         int failures = 0;
         int available = 0;
         for (Map.Entry<Line, List<Installed>> entry : lines.entrySet()) {
-            Map<String, Object> row = upgrade(ctx, say, entry.getKey(), entry.getValue().getFirst());
+            Map<String, Object> row = upgrade(ctx, say, lists, entry.getKey(), entry.getValue().getFirst());
             rows.add(row);
             if ("failed".equals(row.get("status"))) {
                 failures++;
@@ -138,12 +138,10 @@ final class UpgradeCommand implements Callable<Integer> {
      * One release line, for text and {@code --json} alike: {@code status} up-to-date, available
      * (dry run), upgraded or failed, the installed {@code from} build, the newest {@code to} build,
      * and on failure an {@code error}. A failure on one line never stops the others, so what
-     * earlier lines changed is always reported.
+     * earlier lines changed is always reported. Version lists fetched to find the newest build go
+     * to {@code lists}, not to this line's changes.
      */
-    /** The cached files written to check the lines: the top-level {@code changes}. */
-    private Changes lists;
-
-    private Map<String, Object> upgrade(Context ctx, PrintStream say, Line line, Installed newest) {
+    private Map<String, Object> upgrade(Context ctx, PrintStream say, Changes lists, Line line, Installed newest) {
         Map<String, Object> row = JsonOut.fields(
                 "tool", line.userTool().id(),
                 "major", line.major(),

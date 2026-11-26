@@ -73,7 +73,8 @@ final class PruneCommand implements Callable<Integer> {
         if (!Files.isDirectory(ctx.home.root())) {
             say.println("nothing to prune: " + Changes.tilde(ctx.home.root().toString()) + " doesn't exist yet");
             if (json.json) {
-                ctx.out.println(JsonOut.write(document(List.of(), List.of(), List.of(), List.of(), 0, new Changes(ctx))));
+                ctx.out.println(JsonOut.write(document(List.of(), List.of(), List.of(), List.of(), 0, List.of(),
+                        new Changes(ctx))));
             }
             return 0;
         }
@@ -105,6 +106,7 @@ final class PruneCommand implements Callable<Integer> {
             bytes += size(p);
         }
         Changes report = new Changes(ctx);
+        List<Object> removed = List.of();
         for (Superseded s : kept) {
             say.println((dryRun ? "would keep " : "kept ") + s.install().tool() + " " + s.install().label()
                     + ": " + usedBy(inUse.get(s.install().home())));
@@ -125,12 +127,14 @@ final class PruneCommand implements Callable<Integer> {
             }
             say.println("would free " + human(bytes) + "; run without --dry-run to remove");
         } else {
-            bytes = prune(ctx, cwd, builds, cache, report, say);
+            Pruned pruned = prune(ctx, cwd, builds, cache, report, say);
+            bytes = pruned.bytes();
+            removed = pruned.removedBuilds();
             report.print(say);
             say.println("freed " + human(bytes));
         }
         if (json.json) {
-            ctx.out.println(JsonOut.write(document(rows, keptRows, leftovers, cache, bytes, report)));
+            ctx.out.println(JsonOut.write(document(rows, keptRows, leftovers, cache, bytes, removed, report)));
         }
         return 0;
     }
@@ -201,13 +205,17 @@ final class PruneCommand implements Callable<Integer> {
         return folders.stream().anyMatch(w::contains);
     }
 
+    /** The bytes {@link #prune} actually freed, and the changes {@link RemoveCommand#remove} reported (printed already). */
+    private record Pruned(long bytes, List<Object> removedBuilds) { }
+
     /**
      * Removes what was found, carrying on past anything that can't be removed (a build an IDE holds
-     * open on Windows) with a warning, and returns the bytes actually freed.
+     * open on Windows) with a warning.
      */
-    private long prune(Context ctx, Path cwd, List<Superseded> builds, List<Path> cache, Changes report,
+    private Pruned prune(Context ctx, Path cwd, List<Superseded> builds, List<Path> cache, Changes report,
             PrintStream say) throws Exception {
         long freed = 0;
+        List<Object> removedBuilds = new ArrayList<>();
         // the same locks as jkit remove: not while an install runs, nor while a link moves
         try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
             // decide again under the lock: a jkit use --global or an install since the scan may
@@ -259,11 +267,8 @@ final class PruneCommand implements Callable<Integer> {
                 report.note("warning: couldn't delete " + Changes.tilde(p.toString()) + " (" + e.getMessage() + ")");
             }
         }
-        return freed;
+        return new Pruned(freed, removedBuilds);
     }
-
-    /** The changes {@link RemoveCommand#remove} reported, which it has printed already. */
-    private final List<Object> removedBuilds = new ArrayList<>();
 
     /**
      * Every install with a newer stable build in the same release line (tool, major version,
@@ -381,7 +386,7 @@ final class PruneCommand implements Callable<Integer> {
     }
 
     private Map<String, Object> document(List<Object> buildRows, List<Object> keptRows, List<Path> leftovers,
-            List<Path> cache, long bytes, Changes report) {
+            List<Path> cache, long bytes, List<Object> removedBuilds, Changes report) {
         List<Object> changes = new ArrayList<>(removedBuilds);
         changes.addAll(report.json());
         Map<String, Object> doc = JsonOut.document();
