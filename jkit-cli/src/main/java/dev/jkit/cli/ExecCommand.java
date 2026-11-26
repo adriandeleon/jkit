@@ -34,7 +34,9 @@ import picocli.CommandLine.Parameters;
                 "Never uses the network and installs nothing: a missing version exits 3.",
                 "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits).",
                 "To stop it from another process, send jkit SIGTERM: it passes it on, waits,",
-                "and exits with the command's code (a second SIGTERM kills the command)."})
+                "and exits with the command's code (a second SIGTERM kills the command).",
+                "A command ended by SIGINT, SIGTERM or SIGHUP ends jkit with the same signal,",
+                "so a script calling jkit exec stops on Ctrl-C as it would without jkit."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",
@@ -203,36 +205,52 @@ final class ExecCommand implements Callable<Integer> {
         ProcessBuilder pb = new ProcessBuilder(command).directory(plan.dir().toFile()).inheritIO();
         pb.environment().clear();
         pb.environment().putAll(env);
-        Process process;
-        try {
-            process = pb.start();
-        } catch (java.io.IOException e) {
-            throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
-        }
         // Ctrl-C reaches the whole foreground process group, so the child gets its own SIGINT: a REPL
         // handles it and keeps going, and its exit code is ours. SIGTERM and SIGHUP are passed on as
         // SIGTERM (a second one kills it), and jkit still waits, so its exit code is the child's and
-        // a child that ignores TERM is never left running on its own.
-        List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
+        // a child that ignores TERM is never left running on its own. In place before the child
+        // starts: a Ctrl-C as it starts must not end jkit and leave the child running on its own.
+        java.util.concurrent.atomic.AtomicReference<Process> child = new java.util.concurrent.atomic.AtomicReference<>();
         java.util.concurrent.atomic.AtomicInteger stops = new java.util.concurrent.atomic.AtomicInteger();
+        List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
         ignored.addAll(Signals.handle(() -> {
-            if (stops.getAndIncrement() == 0) {
-                process.destroy();
-            } else {
-                process.destroyForcibly();
+            int n = stops.getAndIncrement();
+            Process p = child.get();
+            if (p != null && n == 0) {
+                p.destroy();
+            } else if (p != null) {
+                p.destroyForcibly();
             }
         }, "TERM", "HUP"));
-        Thread stop = new Thread(process::destroy); // where those signals can't be handled
-        Runtime.getRuntime().addShutdownHook(stop);
+        Thread stop = null;
+        int code;
         try {
-            return process.waitFor();
+            Process process;
+            try {
+                process = pb.start();
+            } catch (java.io.IOException e) {
+                throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
+            }
+            child.set(process);
+            if (stops.get() > 0) {
+                process.destroy(); // a SIGTERM came while it started
+            }
+            stop = new Thread(process::destroy); // where those signals can't be handled
+            Runtime.getRuntime().addShutdownHook(stop);
+            code = process.waitFor();
         } finally {
             Signals.restore(ignored);
-            try {
-                Runtime.getRuntime().removeShutdownHook(stop);
-            } catch (IllegalStateException shuttingDown) {
-                // the hook is running already
+            if (stop != null) {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(stop);
+                } catch (IllegalStateException shuttingDown) {
+                    // the hook is running already
+                }
             }
         }
+        // ended by a signal: so is jkit, or a bash script running jkit exec would carry on after Ctrl-C
+        // (bash stops only when the command it waited for died from SIGINT, not when it exited 130)
+        Signals.raiseFor(code);
+        return code;
     }
 }
