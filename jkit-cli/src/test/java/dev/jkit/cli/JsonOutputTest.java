@@ -89,6 +89,18 @@ class JsonOutputTest {
     }
 
     @Test
+    void hiddenCharactersAreEscapedInJsonToo() throws Exception {
+        Map<String, Object> doc = JsonOut.document();
+        String text = "ok\uDB40\uDC41x\u202Ey\uD83D\uDE00";
+        doc.put("text", text);
+        String out = JsonOut.write(doc);
+        // both halves of the tag character U+E0041, the bidi override; the emoji stays a valid pair
+        assertThat(out).contains("ok\\udb40\\udc41x\\u202ey\\ud83d\\ude00");
+        assertThat(out.chars().anyMatch(c -> Character.isSurrogate((char) c) || c == 0x202e)).isFalse();
+        assertThat(JSON.readTree(out).path("text").asText()).isEqualTo(text);
+    }
+
+    @Test
     void aFailureAfterChangesStillListsThem() throws Exception {
         // sync installed one pin, then the next download failed: the new folder must not go unreported
         List<Object> changes = List.of(JsonOut.fields("kind", "folder", "name", "/h/tools/jdk/21", "action", "create",

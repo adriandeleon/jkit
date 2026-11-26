@@ -14,6 +14,7 @@ import dev.jkit.core.ShellEnv;
 import dev.jkit.core.Store;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import dev.jkit.model.Visible;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,7 +41,8 @@ final class JsonOut {
 
     /**
      * Jackson escapes C0 controls already; this adds DEL and the C1 controls ({@code \u007f},
-     * {@code \u0080..\u009f}), so a document printed to a terminal can't carry an escape sequence.
+     * {@code \u0080..\u009f}), so a document printed to a terminal can't carry an escape sequence, and
+     * the characters {@link Visible#hidden} names, so an agent reading it sees them as escapes.
      * stdout under {@code --json} skips {@link SafeOutput}, whose {@code \xNN} isn't valid JSON.
      */
     private static final class TerminalSafeEscapes extends CharacterEscapes {
@@ -57,11 +59,11 @@ final class JsonOut {
 
         @Override
         public SerializableString getEscapeSequence(int ch) {
-            // also the bidirectional overrides and invisible characters Visible escapes in text output
-            boolean hidden = ch == 0x061c || ch == 0x200e || ch == 0x200f || (ch >= 0x202a && ch <= 0x202e)
-                    || (ch >= 0x2066 && ch <= 0x2069) || (ch >= 0x200b && ch <= 0x200d) || (ch >= 0x2060 && ch <= 0x2064)
-                    || ch == 0xfeff || ch == 0x00ad || ch == 0x2028 || ch == 0x2029 || ch == 0x180e;
-            return ch >= 0x80 && ch <= 0x9f || hidden
+            // Jackson calls this per UTF-16 unit, so a Unicode tag character (U+E0041 is \udb40\udc41)
+            // arrives as two surrogates: escape every surrogate, which is still valid JSON and the only
+            // stateless way to escape both halves of a tag character without splitting other pairs
+            boolean surrogate = Character.isSurrogate((char) ch);
+            return ch >= 0x80 && ch <= 0x9f || surrogate || Visible.hidden(ch)
                     ? new SerializedString(String.format("\\u%04x", ch))
                     : null;
         }
