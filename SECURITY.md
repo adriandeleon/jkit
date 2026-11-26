@@ -160,7 +160,48 @@ user profile.
 
 ## Release artifacts
 
-Each release lists SHA-256 checksums in `SHA256SUMS`, signed with jkit's release key in
-`SHA256SUMS.asc` (from 0.4.0; the key is above, under `jkit self-update`), carries a GitHub build provenance
-attestation (`gh attestation verify <file> --repo adriandeleon/jkit`) and a CycloneDX SBOM. The
-macOS binaries are signed and notarized by Apple.
+Each release lists SHA-256 checksums in `SHA256SUMS`, carries a GitHub build provenance
+attestation and a CycloneDX SBOM. From 0.4.0, `SHA256SUMS.asc` is an OpenPGP signature of
+`SHA256SUMS` by jkit's release key. The macOS binaries are signed and notarized by Apple, and from
+0.5.0 the `.deb` and `.rpm` are signed too (see above).
+
+### Verifying a download
+
+Put the archive you downloaded, `SHA256SUMS` and `SHA256SUMS.asc` from the same release in one
+folder (for example `gh release download v0.4.0 --repo adriandeleon/jkit -p SHA256SUMS -p
+SHA256SUMS.asc -p 'jkit-0.4.0-linux-x64.tar.gz'`), and run these in that folder.
+
+1. Import jkit's release key, once:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/adriandeleon/jkit/main/jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc | gpg --import
+   ```
+
+2. Check that `SHA256SUMS` is signed by it:
+
+   ```bash
+   gpg --verify SHA256SUMS.asc SHA256SUMS
+   ```
+
+   It must say `Good signature from "jkit release signing key"`, and the key it was made with must
+   be `A9444E8F5048FEBCB942E110FC89EBE68C4539E6`. gpg also warns that the key "is not certified
+   with a trusted signature": that only means you haven't signed the key yourself. Comparing the
+   fingerprint with the one here is the check.
+
+3. Check the archive against `SHA256SUMS`:
+
+   ```bash
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
+   It must print `<file>: OK`. On macOS, use `shasum -a 256 -c SHA256SUMS --ignore-missing`. On
+   Windows PowerShell, compare `(Get-FileHash <file>).Hash` with the file's line in `SHA256SUMS`.
+
+Without gpg, the build attestation shows that a file was built by this repository's release
+workflow:
+
+```bash
+gh attestation verify jkit-0.4.0-linux-x64.tar.gz --repo adriandeleon/jkit
+```
+
+`jkit self-update` does steps 2 and 3 itself, with the key built into jkit.

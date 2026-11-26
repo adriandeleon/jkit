@@ -88,10 +88,18 @@ the release's `SHA256SUMS` and that file's signature by jkit's release key; for 
 and winget it prints that tool's upgrade command (for a `.deb` installed from a file, the download
 that replaces it).
 
-To check a download: `sha256sum -c SHA256SUMS --ignore-missing` (from 0.4.0, `gpg --verify
-SHA256SUMS.asc SHA256SUMS` checks that file against jkit's release key, in
-[SECURITY.md](SECURITY.md)), and for where it was built,
-`gh attestation verify <file> --repo adriandeleon/jkit`. From 0.5.0, the `.deb`
+To check a download, put it next to the release's `SHA256SUMS` and `SHA256SUMS.asc` (from 0.4.0)
+and run, in that folder:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adriandeleon/jkit/main/jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc | gpg --import
+gpg --verify SHA256SUMS.asc SHA256SUMS      # Good signature, key A9444E8F5048FEBCB942E110FC89EBE68C4539E6
+sha256sum -c SHA256SUMS --ignore-missing    # <file>: OK
+```
+
+[SECURITY.md](SECURITY.md#verifying-a-download) explains each step, gpg's "not certified" warning,
+and the macOS and Windows commands. `gh attestation verify <file> --repo adriandeleon/jkit` shows
+where a file was built. From 0.5.0, the `.deb`
 and `.rpm` are also signed with the Vitrina repository's key: after
 `sudo rpm --import https://vitrina-project.dev/vitrina.asc`, `rpm -K` checks an `.rpm`, and so does
 `dnf` when it installs one. Each release also has a CycloneDX SBOM,
