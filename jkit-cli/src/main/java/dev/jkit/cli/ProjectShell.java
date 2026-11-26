@@ -50,14 +50,12 @@ final class ProjectShell {
         Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    /** Writes a project file without following a link put there since {@link #target} checked. */
+    /**
+     * Writes a project file all at once (644 when new, whatever the umask), never through a link:
+     * one put there since {@link #target} checked is replaced, and what it points at left alone.
+     */
     static void write(Path file, String text) throws IOException {
-        if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
-        }
-        Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
-                java.nio.file.StandardOpenOption.WRITE);
+        dev.jkit.core.AtomicFile.write(file, text, java.nio.charset.StandardCharsets.UTF_8, false);
     }
 
     private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {

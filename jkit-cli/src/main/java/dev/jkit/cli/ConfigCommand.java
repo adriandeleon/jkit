@@ -266,10 +266,8 @@ final class ConfigCommand implements Callable<Integer> {
             return false;
         }
         HookCommand.createParent(ctx, config, report);
-        if (!exists) {
-            Files.createFile(config, dev.jkit.model.Perms.file());
-        }
-        Files.writeString(config, edit.text());
+        // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
+        dev.jkit.core.AtomicFile.write(config, edit.text(), java.nio.charset.StandardCharsets.UTF_8, true);
         report.file(config, !exists);
         return true;
     }
