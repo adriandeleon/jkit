@@ -20,7 +20,6 @@ class CopyrightTest {
             System.setOut(original);
         }
         String out = buf.toString();
-        System.out.print(out);
         assertThat(code).isZero();
         assertThat(out).contains("Copyright (c) 2026 Adrián Arturo De León Saldivar <adrian.deleon@gmail.com>")
                 .contains("MIT License")

@@ -25,6 +25,7 @@ jdk.vendor` change the file, keeping its comments. An environment variable wins 
 | `JKIT_JDK_VENDOR` | like `jdk.vendor` |
 | `JKIT_GRAALVM_VENDOR` | like `graalvm.vendor` |
 | `JKIT_AUTO_SWITCH` | like `shell.auto_switch` (`1`/`0`); `0` also stops switching in a shell that's already open |
+| `JKIT_DEBUG` | set (to anything): when a command fails with an error, also print its stack trace on stderr. For reporting a bug |
 | `JKIT_PROJECT_FILE` | use this project file, or none when empty ([project files](project-files.md)) |
 | `JKIT_NETWORK_OFFLINE` | `1`/`true`: like `--offline`, version lists come only from the cache |
 | `HTTPS_PROXY`, `NO_PROXY` | the proxy to use, and the hosts to reach directly |

@@ -2,12 +2,12 @@ package dev.jkit.core;
 
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Perms;
+import dev.jkit.model.Platform;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Version;
 import dev.jkit.model.Visible;
 import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -184,10 +184,8 @@ public final class Installer {
                 moveIntoPlace(toolHome, dest);
             }
             return new Result(installed, true, verified, removed, signedBy, List.copyOf(notes));
-        } catch (IOException | RuntimeException e) {
-            if (e instanceof IOException io) {
-                failure = io;
-            }
+        } catch (IOException e) {
+            failure = e; // so a failed cleanup below is attached to it
             throw e;
         } finally {
             WorkDirs.remove(work); // releases its lock first, since Windows can't delete an open file
@@ -392,7 +390,7 @@ public final class Installer {
      * holds them for a moment and the move fails with access denied: try again for a few seconds.
      */
     private static void moveIntoPlace(Path from, Path to) throws IOException {
-        boolean windows = File.separatorChar == '\\';
+        boolean windows = Platform.hostIsWindows();
         for (int attempt = 1; ; attempt++) {
             try {
                 WorkDirs.moveIn(() -> Files.move(from, to, StandardCopyOption.ATOMIC_MOVE), from);
@@ -456,29 +454,31 @@ public final class Installer {
 
     /** Runs chmod a+x on the regular files directly in {@code bin}, except .bat, .cmd and .exe files. */
     private static void makeExecutable(Path bin) {
-        makeExecutable(bin, null);
-    }
-
-    /** Like {@link #makeExecutable(Path)}, but only for the file named {@code only} when it isn't null. */
-    private static void makeExecutable(Path bin, String only) {
         try (var files = Files.list(bin)) {
             for (Path f : files.toList()) {
                 String n = f.getFileName().toString();
-                if (only != null && !n.equals(only)) {
-                    continue;
-                }
-                if (Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) && !n.endsWith(".bat")
-                        && !n.endsWith(".cmd") && !n.endsWith(".exe")) {
-                    Set<PosixFilePermission> perms =
-                            new HashSet<>(Files.getPosixFilePermissions(f));
-                    perms.add(PosixFilePermission.OWNER_EXECUTE);
-                    perms.add(PosixFilePermission.GROUP_EXECUTE);
-                    perms.add(PosixFilePermission.OTHERS_EXECUTE);
-                    Files.setPosixFilePermissions(f, perms);
+                if (!n.endsWith(".bat") && !n.endsWith(".cmd") && !n.endsWith(".exe")) {
+                    makeFileExecutable(f);
                 }
             }
         } catch (IOException e) {
             throw new JkitException("cannot make " + bin + " executable: " + e.getMessage());
+        }
+    }
+
+    /** Runs chmod a+x on {@code file} when it is a regular file. */
+    private static void makeFileExecutable(Path file) {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try {
+            Set<PosixFilePermission> perms = new HashSet<>(Files.getPosixFilePermissions(file));
+            perms.add(PosixFilePermission.OWNER_EXECUTE);
+            perms.add(PosixFilePermission.GROUP_EXECUTE);
+            perms.add(PosixFilePermission.OTHERS_EXECUTE);
+            Files.setPosixFilePermissions(file, perms);
+        } catch (IOException e) {
+            throw new JkitException("cannot make " + file + " executable: " + e.getMessage());
         }
     }
 
@@ -603,8 +603,10 @@ public final class Installer {
      * Corretto 8 numbers its builds {@code 8.<update>.<build>.<revision>} (8.514.01.1 is 8u514),
      * where everything else says 8.0.514; later Corretto releases already use 11.0.33.1.1.
      */
+    private static final Pattern CORRETTO_EIGHT = Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)");
+
     static String fromCorrettoEight(String text) {
-        Matcher m = Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)").matcher(text);
+        Matcher m = CORRETTO_EIGHT.matcher(text);
         return m.matches() ? "8.0." + m.group(1) + m.group(2) : text;
     }
 
@@ -622,10 +624,7 @@ public final class Installer {
                     makeExecutable(toolHome.resolve("bin")); // a zip archive made without Unix file modes
                     // The JDK starts child processes through these, so without +x ProcessBuilder fails.
                     for (String helper : List.of("jspawnhelper", "jexec")) {
-                        Path file = toolHome.resolve("lib").resolve(helper);
-                        if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-                            makeExecutable(file.getParent(), helper);
-                        }
+                        makeFileExecutable(toolHome.resolve("lib").resolve(helper));
                     }
                 }
                 return;

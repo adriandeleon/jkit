@@ -41,28 +41,38 @@ final class Context {
     /** Built on first use: the HTTP client costs startup time that status, env and the cd hook don't need. */
     private Http http;
     final PrintStream out;
-    final PrintStream err = System.err;
+    final PrintStream err;
     /** Why config.toml couldn't be read, for a lenient context (doctor); otherwise always null. */
     final String configError;
     /** Whether the jkit home existed when the command started, so a command can say it created it. */
     final boolean homeExisted;
     /** Set once a {@link Changes} has reported creating the home. */
     boolean homeReported;
-    /** Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}. */
-    // search looks builds up on several threads, each of which can write to the cache
+    /**
+     * Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}.
+     * Synchronized: search looks builds up on several threads, each of which can write to the cache.
+     */
     final List<CacheWrite> cacheWrites = Collections.synchronizedList(new ArrayList<>());
 
-    /** One cached version list written: {@code created} false when it replaced an older copy. */
-    /** A file the cache wrote ({@code source} is where it came from), or deleted ({@code source} null). */
+    /**
+     * A file the cache wrote ({@code source} is where it came from; {@code created} false when it
+     * replaced an older copy), or deleted ({@code source} null).
+     */
     record CacheWrite(URI source, Path file, boolean created) { }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
-        this(env, refresh, offline, out, false);
+        this(env, refresh, offline, out, System.err, false);
     }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out, boolean lenient) {
+        this(env, refresh, offline, out, System.err, lenient);
+    }
+
+    private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out, PrintStream err,
+            boolean lenient) {
         this.env = env;
         this.out = out;
+        this.err = err;
         this.home = JkitHome.fromEnv(env);
         this.homeExisted = Files.exists(home.root());
         this.platform = Platform.current();
@@ -110,7 +120,17 @@ final class Context {
 
                         @Override
                         public void stale(String message) {
-                            System.err.println("warning: " + message);
+                            err.println("warning: " + message);
+                        }
+
+                        private boolean warned;
+
+                        @Override
+                        public void notStored(String message) {
+                            if (!warned) { // once: a command may make several lookups
+                                warned = true;
+                                err.println("warning: " + message);
+                            }
                         }
                     });
         }
@@ -127,8 +147,19 @@ final class Context {
         return "jkit/" + VersionProvider.version();
     }
 
+    /** For the commands with --refresh and --offline ({@link Options}). */
     static Context create(boolean refresh, boolean offline) {
         return new Context(Envs.system(), refresh, offline, System.out);
+    }
+
+    /** For commands that work on what is installed and never use the network (use, reset, remove, prune, unpin). */
+    static Context local() {
+        return create(false, true);
+    }
+
+    /** For commands that always go online and have no --offline (self-update). */
+    static Context online() {
+        return create(false, false);
     }
 
     /**
@@ -170,9 +201,19 @@ final class Context {
         return new Context(env, false, true, out);
     }
 
+    /** For tests: like {@link #forEnv(Map, PrintStream)}, with stderr going to {@code err}. */
+    static Context forEnv(Map<String, String> env, PrintStream out, PrintStream err) {
+        return new Context(env, false, true, out, err, false);
+    }
+
     /** For tests: like {@link #forEnv(Map, PrintStream)}, but online (for a server on localhost). */
     static Context forEnvOnline(Map<String, String> env, PrintStream out) {
         return new Context(env, false, false, out);
+    }
+
+    /** For tests: like {@link #forEnvOnline(Map, PrintStream)}, with stderr going to {@code err}. */
+    static Context forEnvOnline(Map<String, String> env, PrintStream out, PrintStream err) {
+        return new Context(env, false, false, out, err, false);
     }
 
     FoojaySource foojay() {

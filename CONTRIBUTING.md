@@ -73,6 +73,12 @@ GitHub Actions are pinned by commit SHA with the version in a comment, and workf
 - jkit itself is developed with Claude Code. AI-assisted pull requests are welcome; say so with a
   `Co-Authored-By:` line, and make sure you understand and have tested what you send.
 
+## Releases
+
+Pushing a `v*` tag publishes a release (see `.github/workflows/release.yml`). Afterwards, bump the
+version in every `pom.xml` to the next `-SNAPSHOT` (after v0.4.0, `0.5.0-SNAPSHOT`): CI fails until
+main's version is ahead of the latest release.
+
 ## Security issues
 
 Don't open a public issue for a vulnerability; see [SECURITY.md](SECURITY.md).

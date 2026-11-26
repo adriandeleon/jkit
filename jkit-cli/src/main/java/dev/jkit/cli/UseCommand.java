@@ -42,7 +42,7 @@ final class UseCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
+        Context ctx = Context.local();
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         Installed chosen = Resolve.installed(ctx, spec, vendor, vendorText, fx).getFirst();
@@ -52,7 +52,7 @@ final class UseCommand implements Callable<Integer> {
             Changes changes = new Changes(ctx).link(ctx.home.global(tool), chosen.home()).globalEffect(tool);
             PinnedTool pin = projectPin(ctx, tool);
             if (pin != null) {
-                changes.note(projectFile(ctx) + " here pins " + StatusCommand.pinText(pin)
+                changes.note(projectFile(ctx, tool) + " here pins " + StatusCommand.pinText(pin)
                         + ", which wins over the global " + tool + " in this project");
             }
             PrintStream say = json.json ? ctx.err : ctx.out;
@@ -76,7 +76,7 @@ final class UseCommand implements Callable<Integer> {
                         + (chosen.vendor() == null ? "" : " " + chosen.vendor().name()) + (chosen.fx() ? " --fx" : "") + " --global");
         PinnedTool pin = projectPin(ctx, tool);
         if (pin != null) {
-            report.note("overrides " + projectFile(ctx) + "'s " + StatusCommand.pinText(pin)
+            report.note("overrides " + projectFile(ctx, tool) + "'s " + StatusCommand.pinText(pin)
                     + " in this shell; jkit reset " + tool + " to go back to it");
         }
         PrintStream say = json.json ? ctx.err : ctx.out;
@@ -95,9 +95,9 @@ final class UseCommand implements Callable<Integer> {
         }
     }
 
-    private static String projectFile(Context ctx) {
+    private static String projectFile(Context ctx, Tool tool) {
         try {
-            return ProjectFile.find(Path.of("").toAbsolutePath(), ctx.env).map(p -> p.source()).orElse("the project file");
+            return ProjectShell.pinFile(ProjectFile.find(Path.of("").toAbsolutePath(), ctx.env), tool);
         } catch (JkitException e) {
             return "the project file";
         }

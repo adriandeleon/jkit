@@ -97,6 +97,14 @@ class HookEnvTest {
                 .contains("set    JAVA_HOME=" + temurin21).contains("PATH   + " + temurin21.resolve("bin"));
     }
 
+    @Test
+    void severalProjectFilesAreNamedByTheirFolder() throws Exception {
+        Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\n");
+        Files.writeString(project.resolve(".tool-versions"), "maven 3.9.9\n");
+        cd(project);
+        assertThat(said()).contains("jkit: using " + project + " (.sdkmanrc, .tool-versions): jdk 21.0.9+10 temurin");
+    }
+
     /** JKIT_AUTO_SWITCH=0 exported in an open shell turns switching off there, from the next cd. */
     @Test
     void autoSwitchTurnedOffInThisShellChangesNothing() throws Exception {
@@ -218,7 +226,7 @@ class HookEnvTest {
     }
 
     @Test
-    void leavingNamesWhichToolsGoBackAndWhichStay() throws Exception {
+    void leavingNamesWhichToolsAreUnsetAndWhichStay() throws Exception {
         // the project pins jdk and maven; this shell chose its own jdk; PATH was reordered meanwhile
         install("maven", "3.9.11", "version=3.9.11\nvendor=\n");
         Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\nmaven = \"3.9\"\n");
@@ -227,8 +235,16 @@ class HookEnvTest {
         cd(project);
         env.put("PATH", "/venv/bin" + File.pathSeparator + env.get("PATH"));
         cd(elsewhere);
-        assertThat(said()).contains("maven back to the global version; this shell's own jdk stays");
+        // there is no global maven to go back to: MAVEN_HOME goes, and that is what it says
+        assertThat(said()).contains("maven unset (no global maven); this shell's own jdk stays")
+                .doesNotContain("back to the global").contains("unset  MAVEN_HOME");
         assertThat(env).containsEntry("JAVA_HOME", zulu17.toString()).doesNotContainKey("MAVEN_HOME");
+
+        // with a global maven, it goes back to that
+        Files.createSymbolicLink(home.resolve("global/maven"), home.resolve("tools/maven/3.9.11"));
+        cd(project);
+        cd(elsewhere);
+        assertThat(said()).contains("maven back to the global version; this shell's own jdk stays");
     }
 
     @Test

@@ -39,18 +39,23 @@ graalvm = { version = "25", vendor = "graalvm-ce" }
 - Unknown keys or tools give a warning naming the file and line, not an error, so a file written
   for a newer jkit still works. Versions and vendors must be plain text (letters, digits, `. + _ -`);
   anything else is skipped with a warning.
+- Quote versions. A whole number (`jdk = 21`) is read as `"21"`, but a decimal (`maven = 3.10`) is
+  skipped with a warning: TOML has already made it 3.1.
+- `jkit sync` fails, installing nothing, when a file pins a tool it can't read (a malformed
+  version, a decimal, an unknown SDKMAN suffix, …); an unknown tool or key only warns.
 
 `.jkit.toml` works too, for those who want it hidden; `jkit.toml` wins when both are there.
 
 ## Other files jkit reads
 
 jkit reads these so existing repositories work unchanged, and never writes them. Several in one
-folder are read together, the earlier one in this list winning per tool.
+folder are read together, the earlier one in this list winning per tool; hints and warnings name
+the file that set each tool.
 
 | File | Example | Notes |
 |---|---|---|
 | `.sdkmanrc` | `java=21.0.5-tem`, `maven=3.9.9` | SDKMAN's vendor suffixes map to jkit's vendors (`tem` temurin, `zulu`, `amzn` corretto, `librca` liberica, `ms` microsoft, `sapmchn` sapmachine, `sem` semeru, `graalce` graalvm-ce, `graal` graalvm, `nik` liberica-nik, `mandrel`, `oracle`, `open` openjdk, `kona`, `albba` dragonwell, `jbr` jetbrains, `trava` trava, `bsg` bisheng). `21.0.5.fx-zulu` means a JavaFX build. Other candidates are skipped with one warning. |
-| `.tool-versions` (asdf, mise) | `java temurin-21.0.5+11.0.LTS`, `maven 3.9.9` | asdf names map to jkit's (`adoptopenjdk` temurin, `graalvm-community` graalvm-ce, …). Only the first version on a line counts. `system`, `ref:` and `path:` are skipped. asdf's Zulu ids use Zulu's own numbering and don't match. |
+| `.tool-versions` (asdf, mise) | `java temurin-21.0.5+11.0.LTS`, `maven 3.9.9` | asdf names map to jkit's (`adoptopenjdk` temurin, `graalvm-community` graalvm-ce, …). Only the first version on a line counts. `system`, `ref:` and `path:` are skipped. Corretto's `21.0.5.11.1` reads as 21.0.5 (`8.432.06.1` as 8.0.432), Semeru's `_openj9-…` is dropped, `mandrel-23.1.5.0-Final-java21` is Mandrel for Java 21, `-javafx` / `-fx` asks for JavaFX, and `-jre`, `-lite` and `-musl` are pinned as the full JDK with a warning (the C library follows the machine). A Zulu release number (`zulu-21.38.21`) pins only the major, with a warning: write the Java version (`zulu-21.0.5`) to be exact. Old GraalVM release ids (`graalvm-22.3.0+java17`) are skipped, and an unknown vendor gets a warning. |
 | `.java-version` | `21`, `17.0.2` | jdk only, any vendor; `1.8` reads as 8. |
 
 ## Which file applies

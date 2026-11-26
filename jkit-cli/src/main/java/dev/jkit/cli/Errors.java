@@ -1,9 +1,9 @@
 package dev.jkit.cli;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Platform;
 import dev.jkit.sources.HttpStatusException;
 import dev.jkit.sources.NetworkException;
-import java.io.File;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
@@ -42,7 +42,7 @@ final class Errors {
             return network(n.uri().getHost(), n.getCause());
         }
         if (ex instanceof AccessDeniedException a) {
-            return new JkitException("permission denied: " + a.getFile(), File.separatorChar == '\\'
+            return new JkitException("permission denied: " + a.getFile(), Platform.hostIsWindows()
                     ? "something may have the file open (an antivirus scan, an IDE, a Gradle daemon): wait a moment, "
                             + "then run this again"
                     : "check the folder's owner, or set JKIT_HOME to a folder you can write");

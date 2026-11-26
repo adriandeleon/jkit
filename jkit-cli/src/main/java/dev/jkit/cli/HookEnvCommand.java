@@ -2,6 +2,7 @@ package dev.jkit.cli;
 
 import dev.jkit.core.Config;
 import dev.jkit.core.Installed;
+import dev.jkit.core.JkitHome;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Envs;
@@ -9,6 +10,7 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -108,7 +110,7 @@ final class HookEnvCommand implements Callable<Integer> {
             new Changes(ctx).env(changes).print(err);
             return ShellEnv.format(changes, shell);
         }
-        err.println("jkit: " + headline(plan, applied, ctx.env));
+        err.println("jkit: " + headline(plan, applied, ctx.env, ctx.home));
         Changes report = new Changes(ctx);
         report.env(changes);
         plan.notes().forEach(report::note);
@@ -136,20 +138,22 @@ final class HookEnvCommand implements Callable<Integer> {
 
     /** {@code using ~/src/app/jkit.toml: jdk 21.0.9+10 temurin, maven 3.9.11}, or what leaving means. */
     static String headline(ProjectShell.Plan plan, String applied) {
-        return headline(plan, applied, Map.of());
+        return headline(plan, applied, Map.of(), null);
     }
 
     /**
      * {@link #headline(ProjectShell.Plan, String)} for a shell with {@code env}. Leaving a project,
      * each tool it applied goes back to the global version, unless this shell chose its own with
-     * jkit use: that one stays, and saying "back to global" would be wrong for it.
+     * jkit use: that one stays, and saying "back to global" would be wrong for it. A tool with no
+     * global version in {@code home} (null: assume there is one) is unset instead, and said so.
      */
-    static String headline(ProjectShell.Plan plan, String applied, Map<String, String> env) {
+    static String headline(ProjectShell.Plan plan, String applied, Map<String, String> env, JkitHome home) {
         if (plan.project().isEmpty()) {
             String left = appliedDir(applied);
             List<String> back = new ArrayList<>();
             List<String> own = new ArrayList<>();
             List<String> user = new ArrayList<>();
+            List<String> unset = new ArrayList<>();
             for (Tool t : Tool.values()) {
                 if (env.containsKey(ShellEnv.projectVariable(t))) {
                     if (env.containsKey(ShellEnv.stateVariable(t))) {
@@ -158,13 +162,15 @@ final class HookEnvCommand implements Callable<Integer> {
                         user.add(t + " stays as you set " + t.homeVariable());
                     } else if (env.get(ShellEnv.userVariable(t)) != null && !env.get(ShellEnv.userVariable(t)).isBlank()) {
                         user.add(t + " back to your own " + t.homeVariable());
+                    } else if (home != null && !Files.exists(home.global(t))) {
+                        unset.add(t + " unset (no global " + t + ")");
                     } else {
                         back.add(t.toString());
                     }
                 }
             }
             String where = "left the project" + (left == null ? "" : " in " + Changes.tilde(left));
-            if (own.isEmpty() && user.isEmpty()) {
+            if (own.isEmpty() && user.isEmpty() && unset.isEmpty()) {
                 return where + ": back to the global versions";
             }
             List<String> parts = new ArrayList<>();
@@ -174,12 +180,16 @@ final class HookEnvCommand implements Callable<Integer> {
             if (!user.isEmpty()) {
                 parts.add(String.join(", ", user));
             }
+            if (!unset.isEmpty()) {
+                parts.add(String.join(", ", unset));
+            }
             if (!own.isEmpty()) {
                 parts.add("this shell's own " + String.join(", ", own) + (own.size() == 1 ? " stays" : " stay"));
             }
-            return where + (back.isEmpty() && user.isEmpty() ? "; " : ": ") + String.join("; ", parts);
+            return where + (back.isEmpty() && user.isEmpty() && unset.isEmpty() ? "; " : ": ") + String.join("; ", parts);
         }
-        String where = Changes.tilde(plan.project().get().dir().toString()) + "/" + plan.project().get().source();
+        // one file by its path; several (.sdkmanrc and .tool-versions) by their folder and names
+        String where = ProjectShell.where(plan.project().get());
         List<String> tools = new ArrayList<>();
         for (Map.Entry<Tool, Installed> e : plan.applied().entrySet()) {
             tools.add(e.getKey() + " " + e.getValue().label());

@@ -261,8 +261,9 @@ public final class SelfUpdate {
     /**
      * Puts {@code fresh} where {@code binary} is, keeping {@code binary}'s permissions. Copied next to
      * it first, then renamed over it in one step, so the old binary stays whole if anything fails.
-     * Windows can't replace a running .exe, but can rename it: the old one becomes {@code jkit.exe.old},
-     * which the next self-update deletes. Returns the .old file left behind, or null.
+     * Windows can't replace a running .exe, but can rename it: the old one becomes {@code jkit.exe.old}
+     * ({@code jkit.exe.1.old} and so on while an older jkit still running holds that one), which the
+     * next self-update deletes. Returns the .old file left behind, or null.
      */
     public static Path replace(Path fresh, Path binary, boolean windows) throws IOException {
         Path dir = binary.getParent();
@@ -279,8 +280,7 @@ public final class SelfUpdate {
                 Files.move(staged, binary, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
                 return null;
             }
-            Path old = dir.resolve(binary.getFileName() + ".old");
-            Files.deleteIfExists(old);
+            Path old = freeOld(binary);
             Files.move(binary, old);
             try {
                 Files.move(staged, binary);
@@ -316,13 +316,18 @@ public final class SelfUpdate {
      * deleted once nothing has them open. Returns the ones deleted.
      */
     public static List<Path> deleteOld(Path binary) {
-        List<Path> names = new ArrayList<>();
-        names.add(binary.resolveSibling(binary.getFileName() + ".old"));
-        for (String name : WINDOWS_RUNTIME) {
-            names.add(binary.resolveSibling(name + ".old"));
+        List<String> names = new ArrayList<>();
+        names.add(binary.getFileName().toString());
+        names.addAll(WINDOWS_RUNTIME);
+        List<Path> olds;
+        try (var files = Files.list(binary.getParent())) {
+            olds = files.filter(p -> names.stream().anyMatch(n -> isOld(p.getFileName().toString(), n)))
+                    .sorted().toList();
+        } catch (IOException e) {
+            return List.of(); // the next self-update tries again
         }
         List<Path> deleted = new ArrayList<>();
-        for (Path old : names) {
+        for (Path old : olds) {
             try {
                 if (Files.deleteIfExists(old)) {
                     deleted.add(old);
@@ -332,5 +337,39 @@ public final class SelfUpdate {
             }
         }
         return deleted;
+    }
+
+    /** How many {@code jkit.exe.<n>.old} names {@link #freeOld} tries before it gives up. */
+    static final int MAX_OLD = 100;
+
+    /**
+     * Where {@code file} goes while it is replaced: {@code <name>.old}, deleting the one an earlier
+     * update left; or, when that can't be deleted because an older jkit still running holds it,
+     * the first free {@code <name>.<n>.old}. {@link #deleteOld} deletes them all once they are free.
+     */
+    static Path freeOld(Path file) throws IOException {
+        String name = file.getFileName().toString();
+        Path old = file.resolveSibling(name + ".old");
+        try {
+            Files.deleteIfExists(old);
+            return old;
+        } catch (IOException held) {
+            for (int n = 1; n <= MAX_OLD; n++) {
+                Path other = file.resolveSibling(name + "." + n + ".old");
+                if (!Files.exists(other, LinkOption.NOFOLLOW_LINKS)) {
+                    return other;
+                }
+            }
+            throw held;
+        }
+    }
+
+    /** Whether {@code fileName} is {@code <name>.old} or {@code <name>.<n>.old}, a name {@link #freeOld} gives. */
+    static boolean isOld(String fileName, String name) {
+        if (!fileName.startsWith(name + ".") || !fileName.endsWith(".old")) {
+            return false;
+        }
+        String middle = fileName.substring(name.length(), fileName.length() - ".old".length());
+        return middle.isEmpty() || middle.matches("\\.[1-9][0-9]{0,2}");
     }
 }

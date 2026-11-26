@@ -13,9 +13,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
 import org.bouncycastle.bcpg.HashAlgorithmTags;
 import org.bouncycastle.bcpg.sig.KeyFlags;
@@ -50,9 +54,28 @@ class SignaturesTest {
     }
 
     private static PGPKeyPair rsa() throws Exception {
+        return rsa(2048, new Date());
+    }
+
+    private static PGPKeyPair rsa(int bits, Date created) throws Exception {
         RSAKeyPairGenerator gen = new RSAKeyPairGenerator();
-        gen.init(new RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), new SecureRandom(), 2048, 12));
-        return new BcPGPKeyPair(PGPPublicKey.RSA_GENERAL, gen.generateKeyPair(), new Date());
+        gen.init(new RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), new SecureRandom(), bits, 12));
+        return new BcPGPKeyPair(PGPPublicKey.RSA_GENERAL, gen.generateKeyPair(), created);
+    }
+
+    /** A key ring of one primary key, its user ID self-signed with {@code flags}, as gpg makes them. */
+    private static PGPPublicKeyRing ring(PGPKeyPair primary, int flags) throws Exception {
+        PGPSignatureSubpacketGenerator hashed = new PGPSignatureSubpacketGenerator();
+        hashed.setKeyFlags(false, flags);
+        PGPKeyRingGenerator gen = new PGPKeyRingGenerator(PGPSignature.POSITIVE_CERTIFICATION, primary,
+                "Someone <someone@example.com>", new BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
+                hashed.generate(), null,
+                new BcPGPContentSignerBuilder(PGPPublicKey.RSA_GENERAL, HashAlgorithmTags.SHA256), null);
+        return gen.generatePublicKeyRing();
+    }
+
+    private static PGPPublicKeyRing ring(PGPKeyPair primary) throws Exception {
+        return ring(primary, KeyFlags.CERTIFY_OTHER | KeyFlags.SIGN_DATA);
     }
 
     private static byte[] sign(PGPKeyPair pair, byte[] data, int hash, boolean armored) throws Exception {
@@ -75,8 +98,7 @@ class SignaturesTest {
         Path file = Files.write(tmp.resolve("jdk.tar.gz"), data);
         String fpr = HexFormat.of().withUpperCase().formatHex(vendor.getPublicKey().getFingerprint());
         Signatures.Key key = Signatures.Key.vendor("temurin", "Adoptium", "test.asc", fpr);
-        PGPPublicKeyRingCollection ring = new PGPPublicKeyRingCollection(
-                List.of(new PGPPublicKeyRing(List.of(vendor.getPublicKey()))));
+        PGPPublicKeyRingCollection ring = new PGPPublicKeyRingCollection(List.of(ring(vendor)));
         return Signatures.verify(file, sig, key, ring);
     }
 
@@ -97,7 +119,7 @@ class SignaturesTest {
         String fpr = HexFormat.of().withUpperCase().formatHex(vendor.getPublicKey().getFingerprint());
         Signatures.Key jkit = new Signatures.Key(null, null, "jkit", "test.asc", List.of(fpr));
         PGPPublicKeyRingCollection ring = new PGPPublicKeyRingCollection(
-                List.of(new PGPPublicKeyRing(List.of(vendor.getPublicKey()))));
+                List.of(ring(vendor)));
         byte[] sums = "abc  jkit-9.9.9-linux-x64.tar.gz\n".getBytes(StandardCharsets.UTF_8);
         byte[] sig = sign(vendor, sums, HashAlgorithmTags.SHA256, true);
         assertThat(Signatures.verify(() -> new ByteArrayInputStream(sums), sig, jkit, ring).outcome())
@@ -155,17 +177,123 @@ class SignaturesTest {
 
     /** A key ring with a user ID and a signing subkey, as Maven's release managers and sbt have. */
     private static PGPPublicKeyRing withSubkey(PGPKeyPair primary, PGPKeyPair subkey, String userId) throws Exception {
+        return withSubkey(primary, subkey, userId, KeyFlags.SIGN_DATA, 0);
+    }
+
+    /** With the subkey bound for {@code flags}, expiring {@code expires} seconds after it was made (0: never). */
+    private static PGPPublicKeyRing withSubkey(PGPKeyPair primary, PGPKeyPair subkey, String userId, int flags,
+                                               long expires) throws Exception {
+        PGPSignatureSubpacketGenerator certify = new PGPSignatureSubpacketGenerator();
+        certify.setKeyFlags(false, KeyFlags.CERTIFY_OTHER);
         PGPKeyRingGenerator gen = new PGPKeyRingGenerator(PGPSignature.POSITIVE_CERTIFICATION, primary, userId,
-                new BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1), null, null,
+                new BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1), certify.generate(), null,
                 new BcPGPContentSignerBuilder(PGPPublicKey.RSA_GENERAL, HashAlgorithmTags.SHA256), null);
-        PGPSignatureSubpacketGenerator signing = new PGPSignatureSubpacketGenerator();
-        signing.setKeyFlags(false, KeyFlags.SIGN_DATA);
-        gen.addSubKey(subkey, signing.generate(), null);
+        PGPSignatureSubpacketGenerator binding = new PGPSignatureSubpacketGenerator();
+        binding.setKeyFlags(false, flags);
+        if (expires > 0) {
+            binding.setKeyExpirationTime(false, expires);
+        }
+        gen.addSubKey(subkey, binding.generate(), null);
         return gen.generatePublicKeyRing();
     }
 
+    private Signatures.Result checkWith(PGPPublicKeyRing ring, PGPKeyPair primary, PGPKeyPair signer) throws Exception {
+        Path file = Files.write(tmp.resolve("maven.zip"), DATA);
+        Signatures.Key key = Signatures.Key.tool(Tool.MAVEN, "Apache Maven", "test.asc", fingerprint(primary));
+        return Signatures.verify(file, sign(signer, DATA, HashAlgorithmTags.SHA256, true), key,
+                new PGPPublicKeyRingCollection(List.of(ring)));
+    }
+
+    @Test
+    void aKeyNotForSigningDoesNotCount() throws Exception {
+        PGPKeyPair primary = rsa();
+        PGPKeyPair encrypt = rsa();
+        PGPPublicKeyRing ring = withSubkey(primary, encrypt, "Someone <someone@example.com>",
+                KeyFlags.ENCRYPT_COMMS | KeyFlags.ENCRYPT_STORAGE, 0);
+        // the encryption subkey, and the primary key, certify-only here
+        String sub = fingerprint(encrypt).substring(24);
+        String main = fingerprint(primary).substring(24);
+        Signatures.Result bySubkey = checkWith(ring, primary, encrypt);
+        assertThat(bySubkey.outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
+        assertThat(bySubkey.detail()).isEqualTo("it is made with Apache Maven's key " + main + "'s subkey " + sub
+                + ", which isn't a signing key");
+        Signatures.Result byPrimary = checkWith(ring, primary, primary);
+        assertThat(byPrimary.outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
+        assertThat(byPrimary.detail()).isEqualTo("it is made with Apache Maven's key " + main + ", which isn't a signing key");
+        // a key with no self-signature saying what it is for doesn't sign either
+        Signatures.Result bare = checkWith(new PGPPublicKeyRing(List.of(primary.getPublicKey())), primary, primary);
+        assertThat(bare.outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
+    }
+
+    @Test
+    void aWeakKeyDoesNotCount() throws Exception {
+        PGPKeyPair weak = rsa(1024, new Date());
+        Signatures.Result r = checkWith(ring(weak), weak, weak);
+        assertThat(r.outcome()).isEqualTo(Signatures.Outcome.UNREADABLE);
+        assertThat(r.detail()).isEqualTo("it is made with Apache Maven's key " + fingerprint(weak).substring(24)
+                + ", a RSA-1024 key, which jkit doesn't accept");
+    }
+
+    @Test
+    void aSignatureMadeAfterItsKeyExpiredDoesNotCount() throws Exception {
+        PGPKeyPair primary = rsa();
+        Date twoDaysAgo = new Date(System.currentTimeMillis() - 2 * 86_400_000L);
+        PGPKeyPair old = rsa(2048, twoDaysAgo);
+        Signatures.Result expired = checkWith(withSubkey(primary, old, "Someone <someone@example.com>",
+                KeyFlags.SIGN_DATA, 86_400), primary, old);
+        assertThat(expired.outcome()).isEqualTo(Signatures.Outcome.UNKNOWN_KEY);
+        assertThat(expired.detail()).startsWith("it was made on ")
+                .contains(", after Apache Maven's key " + fingerprint(primary).substring(24) + "'s subkey "
+                        + fingerprint(old).substring(24) + " expired on ");
+        // still valid: good
+        assertThat(checkWith(withSubkey(primary, old, "Someone <someone@example.com>", KeyFlags.SIGN_DATA,
+                30 * 86_400), primary, old).outcome()).isEqualTo(Signatures.Outcome.GOOD);
+    }
+
+    /**
+     * The keys in each built-in ring that may sign, as gpg --show-keys lists them ([S]): any
+     * other key in a ring (encryption subkeys, Guillaume Nodet's DSA-1024 primary) doesn't count.
+     */
+    @Test
+    void theBuiltInSigningKeysAreTheOnesThatCount() {
+        Map<String, Set<String>> signing = Map.of(
+                "adoptium.asc", Set.of("3B04D753C9050D9A5D343F39843C48A565F8F04B"),
+                "microsoft.asc", Set.of("B602433384B8991302924D8235531D315B21C189"),
+                "corretto.asc", Set.of("6DC3636DAE534049C8B94623A122542AB04F24E3"),
+                "jkit-release.asc", Set.of(Signatures.JKIT_FINGERPRINT),
+                "sbt.asc", Set.of("2EE0EA64E40A89B84B2DF73499E82A75642AC823",
+                        "05B370DC1261451962FFE35ACD4EAA5906F9BF46"),
+                "apache-maven.asc", Set.of("84789D24DF77A32433CE1F079EB80E92EB2135B1",
+                        "29BEA2A645F2D6CED7FB12E02B172E3E156466E8", "88BE34F94BDB2B5357044E2E3A387D43964143E3",
+                        "0181A4828FA27B6BE6F1F5A68611CD28F472E006", "073F7A9345756F3B40CDB99E6C70A3B7599C5736",
+                        "4A61C968D0023541DAE9B1A0BC7DF305D87BDFA7"));
+        List<Signatures.Key> keys = new ArrayList<>(Signatures.KEYS);
+        keys.add(Signatures.JKIT);
+        String nodet = null;
+        for (Signatures.Key key : keys) {
+            Set<String> fit = new HashSet<>();
+            for (PGPPublicKeyRing r : Signatures.ring(key)) {
+                PGPPublicKey primary = r.getPublicKey();
+                for (PGPPublicKey k : r) {
+                    String why = Signatures.unfit(k, primary, "the key");
+                    if (why == null) {
+                        fit.add(fingerprint(k));
+                    } else if (fingerprint(k).equals("EA23DB1360D9029481E7F2EFECDFEA3CB4493B94")) {
+                        nodet = why;
+                    }
+                }
+            }
+            assertThat(fit).as(key.resource()).isEqualTo(signing.get(key.resource()));
+        }
+        assertThat(nodet).isEqualTo("it is made with the key, a DSA-1024 key, which jkit doesn't accept");
+    }
+
     private static String fingerprint(PGPKeyPair pair) {
-        return HexFormat.of().withUpperCase().formatHex(pair.getPublicKey().getFingerprint());
+        return fingerprint(pair.getPublicKey());
+    }
+
+    private static String fingerprint(PGPPublicKey key) {
+        return HexFormat.of().withUpperCase().formatHex(key.getFingerprint());
     }
 
     @Test
@@ -173,7 +301,7 @@ class SignaturesTest {
         // two release managers; the second signs with a subkey, as Guillaume Nodet and sbt do
         PGPKeyPair subkey = rsa();
         PGPPublicKeyRingCollection ring = new PGPPublicKeyRingCollection(List.of(
-                new PGPPublicKeyRing(List.of(stranger.getPublicKey())),
+                ring(stranger),
                 withSubkey(vendor, subkey, "Release Manager (ASF) <rm@apache.example>")));
         Signatures.Key key = Signatures.Key.tool(Tool.MAVEN, "Apache Maven", "test.asc",
                 fingerprint(stranger), fingerprint(vendor));

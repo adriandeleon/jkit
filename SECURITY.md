@@ -45,9 +45,14 @@ matters:
 
   Keys are tied to what they sign: a Temurin download signed by Amazon's key, or a Maven zip signed
   by sbt's, doesn't count. Unlike a checksum, a signature shows who built the file, so it catches
-  a compromised download source, mirror or foojay entry, not only tampering in transit.
+  a compromised download source, mirror or foojay entry, not only tampering in transit. Only a key
+  that may sign counts: its self-signature (for a subkey, its binding signature) must mark it for
+  signing, it must be RSA of at least 2048 bits, EdDSA or ECDSA, and it must not have expired when
+  it signed. So Guillaume Nodet's DSA-1024 primary key, which is in Maven's key file and signed his
+  releases before 3.9.0, isn't accepted; his signing subkeys are.
   - A signature by the publisher's key that doesn't match the download stops the install.
-  - A signature jkit can't fetch, read, or tie to the publisher's keys (a new key, a weak hash)
+  - A signature jkit can't fetch, read, or tie to the publisher's keys (a new key, a weak hash, a key
+    not marked for signing, a DSA or short RSA key, a key that had expired when it signed)
     also stops the install: the checksum usually comes from the same server as the download, so
     whoever can replace one can replace both, and a missing signature is exactly what they would
     serve. `--allow-unverified` installs it anyway, on the checksum alone, marked unverified, and

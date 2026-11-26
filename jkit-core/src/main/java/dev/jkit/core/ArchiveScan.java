@@ -97,11 +97,10 @@ final class ArchiveScan {
                         }
                         byte[] meta = in.readNBytes((int) size);
                         skip(in, pad(size) - size);
-                        String[] path = new String[1];
-                        long sz = pax(meta, type == 'g', path);
+                        Pax pax = pax(meta, type == 'g');
                         if (type == 'x') {
-                            paxSize = sz;
-                            paxPath = path[0];
+                            paxSize = pax.size();
+                            paxPath = pax.path();
                         }
                         continue;
                     }
@@ -142,11 +141,12 @@ final class ArchiveScan {
 
     /**
      * A PAX header's records, parsed as commons-compress does: each is {@code <length> key=value\n},
-     * the length counting the whole record, and the last {@code size} wins. Returns that size or -1, and puts a {@code path} record in {@code path[0]}.
+     * the length counting the whole record, and the last {@code size} and {@code path} win.
      * Sparse-file records and over-long names are refused; a global header may not set a size or a name.
      */
-    private static long pax(byte[] meta, boolean global, String[] path) {
+    private static Pax pax(byte[] meta, boolean global) {
         long size = -1;
+        String path = null;
         int i = 0;
         while (i < meta.length) {
             int sp = i;
@@ -178,7 +178,7 @@ final class ArchiveScan {
                 throw Archives.unsafe("a tar entry has a " + value.length() + "-character name");
             }
             if (key.equals("path")) {
-                path[0] = value;
+                path = value;
             }
             if (global && (key.equals("path") || key.equals("linkpath"))) {
                 // commons-compress merges these into the next entry's own headers in an order of its own
@@ -199,8 +199,11 @@ final class ArchiveScan {
             }
             i = recordEnd;
         }
-        return size;
+        return new Pax(size, path);
     }
+
+    /** What a PAX header sets: the entry's size (-1 if it doesn't) and its name (null if it doesn't). */
+    private record Pax(long size, String path) { }
 
     /**
      * The central directory, walked the way ZipFile walks it: from the offset the end record gives,

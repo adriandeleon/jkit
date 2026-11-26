@@ -107,8 +107,12 @@ class PruneTest {
             PruneCommand cmd = new PruneCommand();
             cmd.json.json = true;
             out.reset();
-            cmd.run(Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8)), project, now);
+            ByteArrayOutputStream err = new ByteArrayOutputStream();
+            cmd.run(Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8),
+                    new PrintStream(err, true, StandardCharsets.UTF_8)), project, now);
             assertThat(old).exists();
+            assertThat(err.toString(StandardCharsets.UTF_8)) // with --json, the prose goes to stderr
+                    .contains("kept jdk 21.0.5+11 temurin: a running program uses it (pid " + running.pid());
             JsonNode doc = new ObjectMapper().readTree(output());
             assertThat(doc.path("builds")).isEmpty();
             assertThat(doc.path("inUse").path(0).path("pid").asLong()).isEqualTo(running.pid());

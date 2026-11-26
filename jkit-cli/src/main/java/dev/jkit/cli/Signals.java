@@ -2,7 +2,7 @@ package dev.jkit.cli;
 
 import dev.jkit.core.Fs;
 import dev.jkit.core.WorkDirs;
-import java.io.File;
+import dev.jkit.model.Platform;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -138,7 +138,7 @@ final class Signals {
                 // the system clears its temp folder in time
             }
         }
-        if (!canRaise(ProcessHandle.current().pid(), File.separatorChar == '\\')) {
+        if (!canRaise(ProcessHandle.current().pid(), Platform.hostIsWindows())) {
             return;
         }
         try {
