@@ -37,6 +37,22 @@ jkit prune --dry-run                   # what old builds, leftovers and old cach
 jkit self-update                       # jkit itself (or how to, for brew, apt, dnf and winget)
 ```
 
+## Why jkit
+
+Next to SDKMAN, mise and asdf, jkit is narrower and stricter:
+
+- One native binary. Running it needs no JDK, bash or plugins.
+- Every download is checked against its published checksum; Temurin, Microsoft and Corretto JDKs,
+  Maven 3.9.0 and later, and sbt also against their publisher's OpenPGP signature, with the keys
+  built into jkit.
+- JDKs from 20+ vendors through foojay. Projects keep their `.sdkmanrc`, `.tool-versions` or
+  `.java-version`: jkit reads them.
+- `jkit exec` and `--json` for scripts, CI, editors and agents.
+- Every change it makes is printed: folders, links, variables.
+
+What it doesn't do: it manages JDKs, GraalVM, Maven, Gradle and sbt, nothing else (no Kotlin,
+JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows support is a preview.
+
 ## Install
 
 | Platform | |
@@ -78,19 +94,17 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 - `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. For programs
   started outside a hooked PowerShell (cmd.exe, IDEs, Explorer) to follow it too, run
   `jkit env --install` once: it sets `JAVA_HOME` and the other `*_HOME` variables in your user
-  environment to the global links, and puts their `bin` folders first on your user `PATH`, so
-  later `jkit use … --global` reaches them with no further change (programs pick it up when they
-  start). It prints each change; `jkit env --uninstall` takes out only what it set. A `java`
-  in the system `PATH` still comes first there; `jkit doctor` says if there is one.
+  environment to the global links and puts their `bin` folders first on your user `PATH`, so a
+  later `jkit use … --global` reaches new programs with no further change. Each change is printed;
+  `jkit env --uninstall` takes out only what it set. A `java` on the system `PATH` still comes
+  first; `jkit doctor` says if there is one.
 - Switching on `cd` isn't available in PowerShell yet.
 - Windows on ARM runs the x64 build under emulation.
-- `jkit.exe` needs the Microsoft Visual C++ runtime. From the release after 0.4.0, the `.zip`
-  carries its two DLLs next to `jkit.exe`, so it runs as is; `jkit self-update` keeps them up to
-  date. The 0.4.0 `.zip` and earlier don't: install the Microsoft Visual C++ Redistributable
-  (2015 or newer, x64) first. winget installs the
-  Microsoft Visual C++ Redistributable (2015 or newer, x64) along with jkit instead. With the
-  Redistributable installed you can delete the two DLLs: Windows Update then keeps the runtime
-  patched.
+- `jkit.exe` needs the Microsoft Visual C++ runtime. winget installs the Visual C++
+  Redistributable (2015 or newer, x64) with jkit. From the release after 0.4.0 the `.zip` carries
+  the runtime's two DLLs next to `jkit.exe`, and `jkit self-update` keeps them up to date; with
+  0.4.0 and earlier, install the Redistributable first. Once the Redistributable is installed you
+  can delete the two DLLs, and Windows Update keeps the runtime patched.
 
 ## How it works
 
@@ -109,6 +123,12 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
   signature that is missing, doesn't match, or isn't by the publisher's key stops the install
   (`--allow-unverified` installs it anyway, marked unverified). Corretto publishes no checksum,
   so its signature is the check. `jkit search` marks builds with neither as ○. See [SECURITY.md](SECURITY.md).
+- No telemetry and no background update checks. Only commands that need version lists or
+  downloads go online (`install`, `search`, `sync`, `upgrade`, `pin`, `config set`, `self-update`,
+  `doctor --network`), and only to the sources below: foojay and the vendor download it lists,
+  services.gradle.org, Maven Central, and GitHub (sbt's and jkit's own releases). `use`, `status`,
+  `list`, `env`, `exec`, `doctor` and the shell hook never do. With `--offline` or
+  `JKIT_NETWORK_OFFLINE=1`, version lists come only from the cache.
 
 | Path | What |
 | --- | --- |
