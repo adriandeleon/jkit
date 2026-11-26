@@ -1,14 +1,19 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Config;
 import dev.jkit.core.Installed;
 import dev.jkit.core.Store;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolState.Source;
 import dev.jkit.core.ToolStates;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.ProjectSpec;
+import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Visible;
+import dev.jkit.platform.UserEnv;
 import dev.jkit.sources.FoojaySource;
 import dev.jkit.sources.GradleSource;
 import dev.jkit.sources.JdkHttp;
@@ -21,6 +26,7 @@ import java.io.PrintStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -61,7 +67,7 @@ final class DoctorCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
+        Context ctx = Context.lenient(Envs.system(), System.out);
         List<Finding> findings = run(ctx, Path.of("").toAbsolutePath(), network);
         if (json.json) {
             ctx.out.println(JsonOut.write(json(findings)));
@@ -141,7 +147,7 @@ final class DoctorCommand implements Callable<Integer> {
         if (shown.matches("[A-Za-z0-9_./~+:\\\\-]+")) {
             return shown;
         }
-        return dev.jkit.model.ShellQuote.quote(WINDOWS ? "pwsh" : "bash", path.toString());
+        return ShellQuote.quote(WINDOWS ? "pwsh" : "bash", path.toString());
     }
 
     /** rm -rf, or PowerShell's Remove-Item on Windows. */
@@ -244,7 +250,7 @@ final class DoctorCommand implements Callable<Integer> {
         }
         if (problems.isEmpty()) {
             // where each comes from, as jkit config says: config.toml may hold other settings only
-            Map<dev.jkit.core.Config.Setting, String> from = new java.util.EnumMap<>(dev.jkit.core.Config.Setting.class);
+            Map<Config.Setting, String> from = new EnumMap<>(Config.Setting.class);
             for (ConfigCommand.Effective e : ConfigCommand.effective(r.ctx)) {
                 from.put(e.setting(), switch (e.source()) {
                     case "env" -> "from " + e.setting().env;
@@ -253,9 +259,9 @@ final class DoctorCommand implements Callable<Integer> {
                 });
             }
             r.ok("default vendors: " + r.ctx.config.defaultVendor(Tool.JDK) + " (jdk, "
-                    + from.get(dev.jkit.core.Config.Setting.JDK_VENDOR) + "), "
+                    + from.get(Config.Setting.JDK_VENDOR) + "), "
                     + r.ctx.config.defaultVendor(Tool.GRAALVM) + " (graalvm, "
-                    + from.get(dev.jkit.core.Config.Setting.GRAALVM_VENDOR) + ")"
+                    + from.get(Config.Setting.GRAALVM_VENDOR) + ")"
                     + (checked ? "" : "; not checked against foojay: no cached vendor list yet"));
         }
     }
@@ -323,7 +329,7 @@ final class DoctorCommand implements Callable<Integer> {
      * PowerShell (cmd.exe, IDEs) jkit's global versions; and what in the system PATH beats them.
      */
     static void userEnv(Report r) throws IOException {
-        dev.jkit.platform.UserEnv env = r.ctx.os.userEnv();
+        UserEnv env = r.ctx.os.userEnv();
         if (env == null) {
             return; // macOS, Linux: the shell's startup file is the place, which hook checks
         }
@@ -331,8 +337,8 @@ final class DoctorCommand implements Callable<Integer> {
         List<String> set = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         for (Tool tool : UserEnvSetup.TOOLS) {
-            java.nio.file.Path link = r.ctx.home.global(tool).toAbsolutePath().normalize();
-            if (!java.nio.file.Files.exists(link)) {
+            Path link = r.ctx.home.global(tool).toAbsolutePath().normalize();
+            if (!Files.exists(link)) {
                 continue;
             }
             (UserEnvSetup.same(current.get(tool.homeVariable()), link.toString()) ? set : missing).add(tool.homeVariable());
@@ -404,7 +410,7 @@ final class DoctorCommand implements Callable<Integer> {
                     // a .name.partial folder is a copy from another disk that never finished, marker or not
                     boolean partial = child.getFileName().toString().startsWith(".");
                     if (Files.isDirectory(child) && !Files.isSymbolicLink(child) && (partial
-                            || !Files.isRegularFile(child.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS))) {
+                            || !Files.isRegularFile(child.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS))) {
                         any = true;
                         r.warn("unfinished install (" + (partial ? "a copy that never finished" : "no " + Store.MARKER)
                                 + "): " + tilde(child),
@@ -661,9 +667,9 @@ final class DoctorCommand implements Callable<Integer> {
 
     static void print(List<Finding> findings, PrintStream out) {
         for (Finding f : findings) {
-            out.println(String.format("%-6s%s", f.level().id(), dev.jkit.model.Visible.of(f.message())));
+            out.println(String.format("%-6s%s", f.level().id(), Visible.of(f.message())));
             if (f.fix() != null) {
-                out.println("      fix: " + dev.jkit.model.Visible.of(f.fix()));
+                out.println("      fix: " + Visible.of(f.fix()));
             }
         }
         Map<Level, Integer> counts = counts(findings);

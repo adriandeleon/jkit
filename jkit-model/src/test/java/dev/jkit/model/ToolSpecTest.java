@@ -3,6 +3,7 @@ package dev.jkit.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ToolSpecTest {
@@ -32,7 +33,7 @@ class ToolSpecTest {
         assertThat(ToolSpec.parse("jdk@LTS").isLts()).isTrue();
         assertThat(ToolSpec.parse("graalvm@lts").isLts()).isTrue();
         assertThatThrownBy(() -> ToolSpec.parse("maven@lts")).hasMessageContaining("only JDKs have LTS releases");
-        assertThat(java.util.stream.IntStream.rangeClosed(8, 30).filter(ToolSpec::isLtsMajor).boxed().toList())
+        assertThat(IntStream.rangeClosed(8, 30).filter(ToolSpec::isLtsMajor).boxed().toList())
                 .containsExactly(8, 11, 17, 21, 25, 29);
     }
 

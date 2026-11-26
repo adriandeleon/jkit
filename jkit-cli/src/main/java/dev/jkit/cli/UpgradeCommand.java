@@ -1,13 +1,20 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.Installer;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.Store;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Visible;
 import dev.jkit.sources.Artifact;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -78,12 +85,12 @@ final class UpgradeCommand implements Callable<Integer> {
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Map<Line, List<Installed>> lines = lines(ctx);
         boolean json = jsonFlag.json;
-        java.io.PrintStream say = json ? ctx.err : ctx.out;
+        PrintStream say = json ? ctx.err : ctx.out;
         if (lines.isEmpty() && spec != null && vendorText != null) {
             // Nothing matched: a typo (zuluu) should say so, as jkit install does, not look up to date.
             try {
                 Resolve.knownVendor(ctx, spec, vendorText);
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 // unreachable: the plain message below still applies
             } catch (JkitException e) {
                 if (!e.getMessage().startsWith("--offline")) {
@@ -136,7 +143,7 @@ final class UpgradeCommand implements Callable<Integer> {
     /** The cached files written to check the lines: the top-level {@code changes}. */
     private Changes lists;
 
-    private Map<String, Object> upgrade(Context ctx, java.io.PrintStream say, Line line, Installed newest) {
+    private Map<String, Object> upgrade(Context ctx, PrintStream say, Line line, Installed newest) {
         Map<String, Object> row = JsonOut.fields(
                 "tool", line.userTool().id(),
                 "major", line.major(),
@@ -175,7 +182,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 // the new build is installed either way: say so, and what is still to do
                 JkitException je = Errors.describe(e);
                 changes.note("warning: couldn't move the global link to the new build: "
-                        + dev.jkit.model.Visible.of(je.getMessage()) + "; to do it yourself: jkit use " + line.userTool()
+                        + Visible.of(je.getMessage()) + "; to do it yourself: jkit use " + line.userTool()
                         + "@" + artifact.version() + (line.vendor() == null ? "" : " " + line.vendor().name())
                         + (line.fx() ? " --fx" : "") + " --global");
             }
@@ -188,7 +195,7 @@ final class UpgradeCommand implements Callable<Integer> {
             JkitException je = Errors.describe(e);
             row.put("status", "failed");
             row.put("error", JsonOut.fields("message", je.getMessage(), "hints", List.copyOf(je.hints())));
-            ctx.err.println("warning: " + line + ": " + dev.jkit.model.Visible.of(je.getMessage()));
+            ctx.err.println("warning: " + line + ": " + Visible.of(je.getMessage()));
             je.hints().forEach(h -> ctx.err.println("  " + h));
         }
         return row;
@@ -242,7 +249,7 @@ final class UpgradeCommand implements Callable<Integer> {
             try (AutoCloseable lock = ctx.store.linkLock()) {
                 Path target = ctx.os.readLink(link);
                 if (target != null && Resolve.same(target, previous.home())
-                        && java.nio.file.Files.isRegularFile(newHome.resolve(dev.jkit.core.Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        && Files.isRegularFile(newHome.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
                     ctx.os.pointLink(link, newHome);
                     moved = true;
                 }
@@ -251,7 +258,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), previous.home())) {
+            if (shell != null && Resolve.same(Fs.path(shell), previous.home())) {
                 changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }

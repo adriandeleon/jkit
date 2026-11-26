@@ -1,20 +1,29 @@
 package dev.jkit.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Tool;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /** jkit prune: superseded builds, interrupted-install leftovers and old cached version lists. */
@@ -59,7 +68,7 @@ class PruneTest {
      * arguments name a jar in an old Gradle (as a Gradle daemon's classpath does).
      */
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aBuildARunningProgramUsesIsKept() throws Exception {
         Path old = install(Tool.GRADLE, "8.14.2", "");
         install(Tool.GRADLE, "8.14.3", "");
@@ -83,7 +92,7 @@ class PruneTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    @EnabledOnOs(OS.LINUX)
     void aBuildWhoseExecutableIsRunningIsKept() throws Exception {
         Path old = install(Tool.JDK, "21.0.5+11", "temurin");
         install(Tool.JDK, "21.0.9+10", "temurin");
@@ -96,7 +105,7 @@ class PruneTest {
             out.reset();
             cmd.run(Context.forEnv(env, new PrintStream(out, true, StandardCharsets.UTF_8)), project, now);
             assertThat(old).exists();
-            com.fasterxml.jackson.databind.JsonNode doc = new com.fasterxml.jackson.databind.ObjectMapper().readTree(output());
+            JsonNode doc = new ObjectMapper().readTree(output());
             assertThat(doc.path("builds")).isEmpty();
             assertThat(doc.path("inUse").path(0).path("pid").asLong()).isEqualTo(running.pid());
             assertThat(doc.path("inUse").path(0).path("command").asText()).isEqualTo(java.toRealPath().toString());
@@ -139,7 +148,7 @@ class PruneTest {
         install(Tool.MAVEN, "3.9.11", "");
         Files.createDirectories(home.resolve("global"));
         Files.createSymbolicLink(home.resolve("global/jdk"), global);
-        env.put(dev.jkit.core.ShellEnv.stateVariable(Tool.MAVEN), shell.toString());
+        env.put(ShellEnv.stateVariable(Tool.MAVEN), shell.toString());
 
         prune(false);
         assertThat(global).exists();
@@ -181,7 +190,7 @@ class PruneTest {
 
     @Test
     void aBuildThatCantBeRemovedDoesntStopTheRest() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+        assumeTrue(FileSystems.getDefault()
                 .supportedFileAttributeViews().contains("posix") && !"root".equals(System.getProperty("user.name")));
         Path stuck = install(Tool.MAVEN, "3.9.9", "");
         install(Tool.MAVEN, "3.9.11", "");
@@ -189,11 +198,11 @@ class PruneTest {
         install(Tool.JDK, "21.0.9+10", "temurin");
         Path leftover = Files.createDirectories(home.resolve("tmp/install-999"));
         Path mavenDir = stuck.getParent();
-        Files.setPosixFilePermissions(mavenDir, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+        Files.setPosixFilePermissions(mavenDir, PosixFilePermissions.fromString("r-xr-xr-x"));
         try {
             assertThat(prune(false)).isZero();
         } finally {
-            Files.setPosixFilePermissions(mavenDir, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+            Files.setPosixFilePermissions(mavenDir, PosixFilePermissions.fromString("rwxr-xr-x"));
         }
         assertThat(stuck).exists();
         assertThat(old).doesNotExist();

@@ -3,6 +3,7 @@ package dev.jkit.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,7 +33,7 @@ class AtomicFileTest {
     void textTheCharsetCantHoldIsAnErrorAndTheFileStaysAsItWas() throws Exception {
         Path rc = Files.writeString(tmp.resolve(".zshrc"), "old\n");
         assertThatThrownBy(() -> AtomicFile.write(rc, "José ☕\n", StandardCharsets.ISO_8859_1, true))
-                .isInstanceOf(java.nio.charset.CharacterCodingException.class);
+                .isInstanceOf(CharacterCodingException.class);
         assertThat(Files.readString(rc)).isEqualTo("old\n");
     }
 

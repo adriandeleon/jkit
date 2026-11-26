@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * The block {@code jkit hook <shell> --install} adds to a shell's startup file, between marker
@@ -187,7 +188,7 @@ public final class ShellRc {
      * {@code jkit hook pwsh | Invoke-Expression}, {@code source <(jkit hook zsh)}. Not an alias or a
      * function that merely mentions it ({@code alias jh='jkit hook bash'}).
      */
-    private static final java.util.regex.Pattern LOADS_HOOK = java.util.regex.Pattern.compile(
+    private static final Pattern LOADS_HOOK = Pattern.compile(
             // eval "$(jkit hook bash)", eval "`jkit hook bash`", eval "$(JKIT_AUTO_SWITCH=1 jkit hook bash)"
             "(eval\\s+[\"']?(\\$\\(|`)\\s*(command\\s+|env\\s+|\\w+=\\S*\\s+)*\\S*jkit\\s+hook"
                     + "|\\S*jkit\\s+hook\\b[^|#]*\\|\\s*(source|\\.|iex|Invoke-Expression|Out-String)"

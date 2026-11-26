@@ -1,5 +1,6 @@
 package dev.jkit.model;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -37,8 +38,8 @@ public final class Version implements Comparable<Version> {
         this.suffix = suffix;
     }
 
-    private static final java.util.regex.Pattern SAFE_TEXT =
-            java.util.regex.Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}");
+    private static final Pattern SAFE_TEXT =
+            Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}");
 
     /**
      * Whether a version from a source is plain enough to become a folder name, a PATH entry and a
@@ -196,8 +197,8 @@ public final class Version implements Comparable<Version> {
                 while (ej < b.length() && Character.isDigit(b.charAt(ej))) {
                     ej++;
                 }
-                java.math.BigInteger na = new java.math.BigInteger(a.substring(i, ei));
-                java.math.BigInteger nb = new java.math.BigInteger(b.substring(j, ej));
+                BigInteger na = new BigInteger(a.substring(i, ei));
+                BigInteger nb = new BigInteger(b.substring(j, ej));
                 int c = na.compareTo(nb);
                 if (c != 0) {
                     return c;

@@ -10,10 +10,14 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /** jkit hook --install and --uninstall: what they write, and that they say so. */
@@ -47,22 +51,22 @@ class HookInstallTest {
         Files.write(rc, latin1);
         HookCommand.install(ctx(), "bash", user);
         byte[] after = Files.readAllBytes(rc);
-        assertThat(java.util.Arrays.copyOf(after, latin1.length)).isEqualTo(latin1);
+        assertThat(Arrays.copyOf(after, latin1.length)).isEqualTo(latin1);
         HookCommand.uninstall(ctx(), "bash", user);
         assertThat(Files.readAllBytes(rc)).isEqualTo(latin1);
     }
 
     /** A dotfile manager's ~/.bashrc link stays a link, keeps its mode, and the change is said to go to its file. */
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aLinkedStartupFileStaysALinkWithItsMode() throws Exception {
         Path real = Files.writeString(Files.createDirectories(user.resolve("dotfiles")).resolve("bashrc"), "export A=1\r\n");
-        Files.setPosixFilePermissions(real, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        Files.setPosixFilePermissions(real, PosixFilePermissions.fromString("rw-------"));
         Path rc = Files.createSymbolicLink(user.resolve(".bashrc"), Path.of("dotfiles/bashrc"));
         HookCommand.install(ctx(), "bash", user);
         assertThat(Files.isSymbolicLink(rc)).isTrue();
         assertThat(Files.readString(real)).startsWith("export A=1\r\n\n" + ShellRc.START + "\n");
-        assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(real)))
+        assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(real)))
                 .isEqualTo("rw-------");
         assertThat(output()).contains("is a link: the change went to");
         HookCommand.uninstall(ctx(), "bash", user);

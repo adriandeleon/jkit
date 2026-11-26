@@ -8,7 +8,12 @@ import dev.jkit.model.Tool;
 import dev.jkit.model.ToolVersionsIds;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -17,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 import org.tomlj.Toml;
 import org.tomlj.TomlParseError;
 import org.tomlj.TomlParseResult;
@@ -197,10 +203,10 @@ public final class ProjectFile {
     }
 
     private static final boolean POSIX =
-            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
-    private static final java.util.regex.Pattern SAFE_VERSION = java.util.regex.Pattern.compile("[0-9A-Za-z.+_-]{1,64}");
-    private static final java.util.regex.Pattern SAFE_VENDOR = java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,64}");
+    private static final Pattern SAFE_VERSION = Pattern.compile("[0-9A-Za-z.+_-]{1,64}");
+    private static final Pattern SAFE_VENDOR = Pattern.compile("[A-Za-z0-9._-]{1,64}");
 
     /**
      * Drops pins whose version or vendor isn't plain text: project files come with cloned repos and
@@ -255,7 +261,7 @@ public final class ProjectFile {
             long mtime;
             try {
                 mtime = Files.getLastModifiedTime(f).toMillis();
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 mtime = -1;
             }
             parts.add(f + ":" + mtime);
@@ -541,7 +547,7 @@ public final class ProjectFile {
 
     /** {@code 1.8} → {@code 8}, {@code 1.8.0_392} → {@code 8.0_392}: the pre-9 numbering. */
     static String legacyJavaVersion(String text) {
-        return dev.jkit.model.Version.fromLegacyJava(text);
+        return Version.fromLegacyJava(text);
     }
 
     // helpers
@@ -572,19 +578,19 @@ public final class ProjectFile {
             throw new JkitException(file + " is over " + MAX_SIZE / 1024 + " KiB, too big for a project or config file");
         }
         if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
-            return new String(bytes, 3, bytes.length - 3, java.nio.charset.StandardCharsets.UTF_8);
+            return new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8);
         }
         if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xfe) {
-            return new String(bytes, 2, bytes.length - 2, java.nio.charset.StandardCharsets.UTF_16LE);
+            return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_16LE);
         }
         if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xfe && (bytes[1] & 0xff) == 0xff) {
-            return new String(bytes, 2, bytes.length - 2, java.nio.charset.StandardCharsets.UTF_16BE);
+            return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_16BE);
         }
         try {
-            return java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
-        } catch (java.nio.charset.CharacterCodingException e) {
-            return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+            return StandardCharsets.UTF_8.newDecoder()
+                    .decode(ByteBuffer.wrap(bytes)).toString();
+        } catch (CharacterCodingException e) {
+            return new String(bytes, StandardCharsets.ISO_8859_1);
         }
     }
 
@@ -597,7 +603,7 @@ public final class ProjectFile {
             return "";
         }
         String t = text.length() > 40 ? text.substring(0, 40) + "…" : text;
-        return dev.jkit.model.Visible.of(t);
+        return Visible.of(t);
     }
 
     /** The largest project or config file jkit reads. */

@@ -5,10 +5,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.Channels;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 
 /**
@@ -241,12 +244,12 @@ final class ArchiveScan {
                 return; // ZipFile reports the damage
             }
             ch.position(offset);
-            InputStream in = new BufferedInputStream(java.nio.channels.Channels.newInputStream(ch), 64 * 1024);
+            InputStream in = new BufferedInputStream(Channels.newInputStream(ch), 64 * 1024);
             byte[] fixed = new byte[46];
             ByteBuffer h = ByteBuffer.wrap(fixed).order(ByteOrder.LITTLE_ENDIAN);
             long entries = 0;
             long bytes = 0;
-            java.util.List<Long> locals = new java.util.ArrayList<>();
+            List<Long> locals = new ArrayList<>();
             while (in.readNBytes(fixed, 0, 46) == 46 && h.getInt(0) == 0x02014b50) {
                 if (++entries > maxEntries) {
                     throw Archives.unsafe("more than " + maxEntries + " entries");
@@ -299,7 +302,7 @@ final class ArchiveScan {
      * entries pointing at one header with a 64 KB extra field would take gigabytes from a small
      * file. So each entry must have a local header of its own, ending before the next one starts.
      */
-    private static void localHeaders(SeekableByteChannel ch, long length, java.util.List<Long> offsets) throws IOException {
+    private static void localHeaders(SeekableByteChannel ch, long length, List<Long> offsets) throws IOException {
         long[] sorted = offsets.stream().mapToLong(Long::longValue).sorted().toArray();
         ByteBuffer local = ByteBuffer.allocate(30).order(ByteOrder.LITTLE_ENDIAN);
         for (int i = 0; i < sorted.length; i++) {

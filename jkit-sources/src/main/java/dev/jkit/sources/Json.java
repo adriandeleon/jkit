@@ -1,7 +1,10 @@
 package dev.jkit.sources;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.jkit.model.JkitException;
 import java.io.IOException;
 import java.net.URI;
 
@@ -11,8 +14,8 @@ final class Json {
      * Limits for answers from a source or mirror: a few megabytes of {@code [[],[],…]} would
      * otherwise become millions of tree nodes. foojay's largest answer has about 50,000 tokens.
      */
-    private static final ObjectMapper MAPPER = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
-            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
+    private static final ObjectMapper MAPPER = new ObjectMapper(JsonFactory.builder()
+            .streamReadConstraints(StreamReadConstraints.builder()
                     .maxNestingDepth(64)
                     .maxTokenCount(1_000_000)
                     .maxStringLength(1 << 20)
@@ -39,7 +42,7 @@ final class Json {
             return node;
         } catch (IOException | RuntimeException e) {
             http.evict(uri);
-            throw new dev.jkit.model.JkitException(uri.getHost() + " sent data jkit can't read",
+            throw new JkitException(uri.getHost() + " sent data jkit can't read",
                     "try again later, or with --refresh; check JKIT_SOURCES_*_URL if you use a mirror");
         }
     }

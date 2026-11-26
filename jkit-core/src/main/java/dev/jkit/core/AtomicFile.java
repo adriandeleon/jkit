@@ -6,9 +6,11 @@ import java.nio.CharBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -42,9 +44,9 @@ public final class AtomicFile {
         byte[] bytes = encode(text, charset);
         Set<PosixFilePermission> perms = null;
         if (POSIX) {
-            perms = Files.exists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+            perms = Files.exists(target, LinkOption.NOFOLLOW_LINKS)
                     && !Files.isSymbolicLink(target)
-                    ? Files.getPosixFilePermissions(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    ? Files.getPosixFilePermissions(target, LinkOption.NOFOLLOW_LINKS)
                     : PosixFilePermissions.fromString("rw-r--r--");
         }
         FileAttribute<?>[] owner = POSIX
@@ -53,7 +55,7 @@ public final class AtomicFile {
         Path tmp;
         try {
             tmp = Files.createTempFile(dir, "." + target.getFileName() + ".", ".jkit-tmp", owner);
-        } catch (java.nio.file.AccessDeniedException e) {
+        } catch (AccessDeniedException e) {
             if (Files.isSymbolicLink(target) || !Files.isWritable(target)) {
                 throw e;
             }

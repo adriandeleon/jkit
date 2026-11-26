@@ -11,10 +11,15 @@ import dev.jkit.model.Vendor;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class ProjectFileTest {
@@ -215,10 +220,10 @@ class ProjectFileTest {
                 .containsExactly(tmp.resolve("home/legacy/.sdkmanrc"), jv);
         assertThat(ProjectFile.locate(dir("home/none"), env)).isEmpty();
 
-        String key = ProjectFile.key(java.util.List.of(toml));
+        String key = ProjectFile.key(List.of(toml));
         assertThat(key).startsWith(toml + ":");
-        Files.setLastModifiedTime(toml, java.nio.file.attribute.FileTime.fromMillis(12345));
-        assertThat(ProjectFile.key(java.util.List.of(toml))).isEqualTo(toml + ":12345").isNotEqualTo(key);
+        Files.setLastModifiedTime(toml, FileTime.fromMillis(12345));
+        assertThat(ProjectFile.key(List.of(toml))).isEqualTo(toml + ":12345").isNotEqualTo(key);
     }
 
     @Test
@@ -228,22 +233,22 @@ class ProjectFileTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aFolderOthersCanWriteStopsTheSearch() throws IOException {
         // like /tmp: another user's jkit.toml there must not apply to folders below it
         write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
         dir("shared/mine/repo");
-        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        Files.setPosixFilePermissions(tmp.resolve("shared"), PosixFilePermissions.fromString("rwxrwxrwx"));
         assertThat(ProjectFile.find(tmp.resolve("shared/mine/repo"), env)).isEqualTo(Optional.empty());
         assertThat(ProjectFile.trusted(tmp.resolve("shared/mine"))).isTrue();
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void anIgnoredProjectFileIsReportedWithTheReason() throws IOException {
         write("shared/jkit.toml", "[tools]\njdk = \"21\"\n");
         dir("shared/repo");
-        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        Files.setPosixFilePermissions(tmp.resolve("shared"), PosixFilePermissions.fromString("rwxrwxrwx"));
         assertThat(ProjectFile.skipped(tmp.resolve("shared/repo"), env).orElseThrow())
                 .contains("shared/jkit.toml").contains("every user can write to the folder");
         write("home/ok/jkit.toml", "[tools]\njdk = \"21\"\n");
@@ -251,17 +256,17 @@ class ProjectFileTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aProjectFileEveryoneCanWriteIsIgnored() throws IOException {
         write("home/p/jkit.toml", "[tools]\njdk = \"21\"\n");
         Files.setPosixFilePermissions(tmp.resolve("home/p/jkit.toml"),
-                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+                PosixFilePermissions.fromString("rw-rw-rw-"));
         assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
         assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains("every user can write to it");
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aProjectFileLinkingOutOfItsFolderIsIgnored() throws IOException {
         // .java-version -> /proc/self/environ would print every variable in a warning
         Path secret = write("home/secret.txt", "TOKEN=ghp_x\n");
@@ -283,22 +288,22 @@ class ProjectFileTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void everyFileReadTogetherIsChecked() throws IOException {
         // .sdkmanrc, .tool-versions and .java-version are read together: a bad second one counts too
         write("home/p/.sdkmanrc", "java=21.0.2-tem\n");
         write("home/p/.tool-versions", "maven 3.9.9\n");
         Files.setPosixFilePermissions(tmp.resolve("home/p/.tool-versions"),
-                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+                PosixFilePermissions.fromString("rw-rw-rw-"));
         assertThat(ProjectFile.find(tmp.resolve("home/p"), env)).isEmpty();
         assertThat(ProjectFile.skipped(tmp.resolve("home/p"), env).orElseThrow()).contains(".tool-versions");
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aRelativeOverrideFollowsTheSameRules() throws IOException {
         write("shared/x.toml", "[tools]\njdk = \"21\"\n");
-        Files.setPosixFilePermissions(tmp.resolve("shared"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        Files.setPosixFilePermissions(tmp.resolve("shared"), PosixFilePermissions.fromString("rwxrwxrwx"));
         assertThatThrownBy(() -> ProjectFile.find(tmp.resolve("shared"), Map.of(ProjectFile.OVERRIDE, "x.toml")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("every user can write");
         // an absolute path is the user's own choice

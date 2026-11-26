@@ -1,20 +1,28 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -114,7 +122,7 @@ final class ExecCommand implements Callable<Integer> {
 
     static Plan plan(Context ctx, Path dir, boolean ignoreProject, List<Choice> choices, List<String> command)
             throws Exception {
-        java.util.Set<Tool> named = java.util.EnumSet.noneOf(Tool.class);
+        Set<Tool> named = EnumSet.noneOf(Tool.class);
         choices.forEach(c -> named.add(c.spec().tool()));
         EnvCommand.Result base = EnvCommand.compute(ctx, dir, ignoreProject, named,
                 "jkit exec --no-project " + (choices.isEmpty() ? "" : "<tools> ") + "-- <command>");
@@ -137,8 +145,8 @@ final class ExecCommand implements Callable<Integer> {
             variables.put(ShellEnv.projectVariable(t), null); // nor what jkit sync applied to it
             String current = ctx.env.get(t.homeVariable());
             if (!variables.containsKey(t.homeVariable()) && current != null
-                    && dev.jkit.core.Fs.path(current) != null
-                    && dev.jkit.core.Fs.path(current).toAbsolutePath().normalize().startsWith(tools)) {
+                    && Fs.path(current) != null
+                    && Fs.path(current).toAbsolutePath().normalize().startsWith(tools)) {
                 variables.put(t.homeVariable(), null); // a jkit install whose bin is no longer on PATH
             }
         }
@@ -149,7 +157,7 @@ final class ExecCommand implements Callable<Integer> {
 
     /** The child environment: the parent's, with the plan's changes applied. */
     static Map<String, String> childEnv(Map<String, String> parent, Plan plan) {
-        Map<String, String> env = dev.jkit.model.Envs.copy(parent);
+        Map<String, String> env = Envs.copy(parent);
         plan.variables().forEach((k, v) -> {
             if (v == null) {
                 env.remove(k);
@@ -173,7 +181,7 @@ final class ExecCommand implements Callable<Integer> {
         List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
         for (String raw : path.split(File.pathSeparator)) {
             // some installers add quoted entries ("C:\Program Files\x"), which aren't valid paths
-            Path entry = dev.jkit.core.Fs.path(raw);
+            Path entry = Fs.path(raw);
             if (entry == null) {
                 continue;
             }
@@ -181,7 +189,7 @@ final class ExecCommand implements Callable<Integer> {
                 Path candidate;
                 try {
                     candidate = dir.resolve(entry).resolve(name + suffix);
-                } catch (java.nio.file.InvalidPathException e) {
+                } catch (InvalidPathException e) {
                     continue;
                 }
                 if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
@@ -205,8 +213,8 @@ final class ExecCommand implements Callable<Integer> {
         // SIGTERM (a second one kills it), and jkit still waits, so its exit code is the child's and
         // a child that ignores TERM is never left running on its own. In place before the child
         // starts: a Ctrl-C as it starts must not end jkit and leave the child running on its own.
-        java.util.concurrent.atomic.AtomicReference<Process> child = new java.util.concurrent.atomic.AtomicReference<>();
-        java.util.concurrent.atomic.AtomicInteger stops = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicReference<Process> child = new AtomicReference<>();
+        AtomicInteger stops = new AtomicInteger();
         List<Signals.Saved> ignored = Signals.ignore("INT", "QUIT");
         ignored.addAll(Signals.handle(() -> {
             int n = stops.getAndIncrement();
@@ -223,7 +231,7 @@ final class ExecCommand implements Callable<Integer> {
             Process process;
             try {
                 process = pb.start();
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 throw new JkitException(126, "can't start " + plan.command().getFirst() + ": " + e.getMessage());
             }
             child.set(process);

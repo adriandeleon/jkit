@@ -5,8 +5,8 @@ import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Locale;
 import java.util.Map;
-import org.tomlj.Toml;
 import org.tomlj.TomlParseResult;
 
 /**
@@ -64,7 +64,7 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
 
     /** 1/true/yes/on or 0/false/no/off, any case; null for anything else. */
     public static Boolean parseSwitch(String text) {
-        return switch (text.trim().toLowerCase(java.util.Locale.ROOT)) {
+        return switch (text.trim().toLowerCase(Locale.ROOT)) {
             case "1", "true", "yes", "on" -> true;
             case "0", "false", "no", "off" -> false;
             default -> null;
@@ -104,7 +104,7 @@ public record Config(String jdkVendor, String graalvmVendor, boolean autoSwitch)
         /** The setting for a typed key; null when there is none. */
         public static Setting of(String key) {
             for (Setting s : values()) {
-                if (s.key().equals(key.trim().toLowerCase(java.util.Locale.ROOT))) {
+                if (s.key().equals(key.trim().toLowerCase(Locale.ROOT))) {
                     return s;
                 }
             }

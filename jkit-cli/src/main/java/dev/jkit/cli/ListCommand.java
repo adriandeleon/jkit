@@ -1,5 +1,6 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ToolState;
@@ -8,15 +9,15 @@ import dev.jkit.model.Tool;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Option;
 
 @Command(name = "list", description = "Shows what is installed. Never uses the network.")
 final class ListCommand implements Callable<Integer> {
 
-    @picocli.CommandLine.Mixin
+    @CommandLine.Mixin
     JsonOut.Flag jsonFlag = new JsonOut.Flag();
 
     @Override
@@ -113,7 +114,7 @@ final class ListCommand implements Callable<Integer> {
                 notes.add(t == Tool.GRAALVM ? "global graalvm" : "global");
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), i.home())) {
+            if (shell != null && Resolve.same(Fs.path(shell), i.home())) {
                 notes.add(t == Tool.GRAALVM ? "graalvm in this shell" : "this shell");
             }
         }

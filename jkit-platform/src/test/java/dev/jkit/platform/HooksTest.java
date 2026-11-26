@@ -1,12 +1,16 @@
 package dev.jkit.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -89,9 +93,9 @@ class HooksTest {
     @Test
     @DisabledOnOs(OS.WINDOWS)
     void zshAutoSwitchSkipsSubshells() throws Exception {
-        Path zsh = java.util.stream.Stream.of("/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh")
+        Path zsh = Stream.of("/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh")
                 .map(Path::of).filter(Files::isExecutable).findFirst().orElse(null);
-        org.junit.jupiter.api.Assumptions.assumeTrue(zsh != null, "zsh isn't installed");
+        assumeTrue(zsh != null, "zsh isn't installed");
         Path root = tmp.resolve("home/.jkit");
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         Path log = tmp.resolve("calls.log");
@@ -224,7 +228,7 @@ class HooksTest {
                 $s = 'exec', '--', 'x'; jkit @s
                 jkit use jdk@17; "home: $env:JAVA_HOME"
                 """;
-        String encoded = java.util.Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         int ran = 0;
         for (String shell : new String[] {"powershell", "pwsh"}) {
             ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
@@ -233,7 +237,7 @@ class HooksTest {
             Process p;
             try {
                 p = pb.start();
-            } catch (java.io.IOException notInstalled) {
+            } catch (IOException notInstalled) {
                 continue;
             }
             ran++;
@@ -248,6 +252,6 @@ class HooksTest {
                     "home: " + (windows ? "C:\\x\\jdk17" : "/x/jdk17"));
             assertThat(out).as(shell).doesNotContain("-- --");
         }
-        org.junit.jupiter.api.Assumptions.assumeTrue(ran > 0, "no PowerShell on this machine");
+        assumeTrue(ran > 0, "no PowerShell on this machine");
     }
 }

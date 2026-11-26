@@ -1,13 +1,19 @@
 package dev.jkit.core;
 
+import dev.jkit.model.JkitException;
+import dev.jkit.model.Visible;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -52,7 +58,7 @@ public final class Archives {
 
         /** Copies {@code in} to a new file {@code out}, counting against the size limit. */
         void copy(InputStream in, Path out) throws IOException {
-            try (var os = Files.newOutputStream(out, java.nio.file.StandardOpenOption.CREATE_NEW)) {
+            try (var os = Files.newOutputStream(out, StandardOpenOption.CREATE_NEW)) {
                 byte[] buffer = new byte[1 << 16];
                 int n;
                 while ((n = in.read(buffer)) > 0) {
@@ -67,8 +73,8 @@ public final class Archives {
     }
 
     /** A download that is well-formed but would escape its folder or fill the disk: not a jkit bug. */
-    static dev.jkit.model.JkitException unsafe(String detail) {
-        return new dev.jkit.model.JkitException("the downloaded archive is unsafe to unpack (" + detail
+    static JkitException unsafe(String detail) {
+        return new JkitException("the downloaded archive is unsafe to unpack (" + detail
                 + "); nothing was installed", "the source or a mirror served a broken or hostile archive; "
                 + "try another version or vendor, and report it to the source");
     }
@@ -210,7 +216,7 @@ public final class Archives {
         createDirectories(target, out.getParent());
         try {
             Files.deleteIfExists(out);
-        } catch (java.nio.file.DirectoryNotEmptyException e) {
+        } catch (DirectoryNotEmptyException e) {
             throw unsafe("a link replaces a folder already unpacked: " + entryName);
         }
         Files.createSymbolicLink(out, link);
@@ -226,7 +232,7 @@ public final class Archives {
             if (bytes.length > ArchiveScan.MAX_NAME) {
                 throw unsafe("a symlink entry is too long: " + entry.getName());
             }
-            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            return new String(bytes, StandardCharsets.UTF_8);
         }
     }
 
@@ -260,8 +266,8 @@ public final class Archives {
     private static Path path(String name, String entryName) {
         try {
             return Path.of(name);
-        } catch (java.nio.file.InvalidPathException e) {
-            throw unsafe("an entry name this system can't use: " + dev.jkit.model.Visible.of(entryName));
+        } catch (InvalidPathException e) {
+            throw unsafe("an entry name this system can't use: " + Visible.of(entryName));
         }
     }
 

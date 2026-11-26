@@ -1,18 +1,38 @@
 package dev.jkit.core;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
 import dev.jkit.model.Tool;
+import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Download, check checksum, unpack into tmp/, check the tool's executable, then move into
@@ -76,16 +96,16 @@ public final class Installer {
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         home.create();
         try (FileChannel channel = FileChannel.open(home.lockFile(),
-                java.util.Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), dev.jkit.model.Perms.file());
+                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
              FileLock ignored = lock(channel)) {
             if (Files.isDirectory(dest)) {
-                if (!Files.isRegularFile(dest.resolve(Store.MARKER), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                if (!Files.isRegularFile(dest.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
                     throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
                             "move or delete that folder, then install again");
                 }
                 return new Result(installed, false, Store.verified(dest), List.of());
             }
-            dev.jkit.model.Perms.mkdirs(home.tmp());
+            Perms.mkdirs(home.tmp());
             List<Path> removed = removeLeftovers(home.tmp());
             Path work = Files.createTempDirectory(home.tmp(), "install-");
             WorkDirs.add(work); // Ctrl-C deletes it (jkit's signal handler)
@@ -99,7 +119,7 @@ public final class Installer {
                     Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
                     verified = Checksums.strong(artifact.checksumAlgorithm());
                 }
-                List<String> notes = new java.util.ArrayList<>();
+                List<String> notes = new ArrayList<>();
                 boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
                 if (signatureRequired && !signable) {
                     throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
@@ -121,11 +141,11 @@ public final class Installer {
                     Archives.extract(archive, out, artifact.archiveType());
                 } catch (IOException e) {
                     // truncated or corrupt (EOF, "not a ZIP archive"): the download, not this disk
-                    if (e instanceof java.nio.file.FileSystemException) {
+                    if (e instanceof FileSystemException) {
                         throw e;
                     }
                     throw new JkitException("the downloaded archive for " + artifact.label() + " is damaged ("
-                            + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + "); nothing was installed",
+                            + Visible.of(String.valueOf(e.getMessage())) + "); nothing was installed",
                             "try again; if it keeps happening, the source has a broken file: pick another version");
                 }
                 Path toolHome = locateHome(out);
@@ -138,7 +158,7 @@ public final class Installer {
                     requireSignedVersion(storeTool, toolHome, artifact);
                 }
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
-                dev.jkit.model.Perms.mkdirs(dest.getParent());
+                Perms.mkdirs(dest.getParent());
                 moveIntoPlace(toolHome, dest);
                 return new Result(installed, true, verified, removed, signedBy, List.copyOf(notes));
             } catch (IOException | RuntimeException e) {
@@ -182,7 +202,7 @@ public final class Installer {
             bytes = Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
             String why = "couldn't fetch the signature of " + label + " ("
-                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")";
+                    + Visible.of(String.valueOf(e.getMessage())) + ")";
             if (required) {
                 throw new SignatureRequired(why + refused);
             }
@@ -214,7 +234,7 @@ public final class Installer {
 
     /** Folders an interrupted install (Ctrl-C skips finally blocks) left; only called with the lock held. */
     private static List<Path> removeLeftovers(Path tmp) {
-        List<Path> removed = new java.util.ArrayList<>();
+        List<Path> removed = new ArrayList<>();
         try (Stream<Path> children = Files.list(tmp)) {
             for (Path child : children.toList()) {
                 String name = child.getFileName().toString();
@@ -249,26 +269,26 @@ public final class Installer {
         Path candidate = out;
         try (Stream<Path> children = Files.list(out)) {
             List<Path> list = children.toList();
-            if (list.size() == 1 && Files.isDirectory(list.getFirst(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            if (list.size() == 1 && Files.isDirectory(list.getFirst(), LinkOption.NOFOLLOW_LINKS)) {
                 candidate = list.getFirst();
             }
         }
         Path macHome = candidate.resolve("Contents").resolve("Home");
         // real folders only: a Contents/Home that is a link (to "..") would install a link
-        boolean real = Files.isDirectory(macHome, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                && Files.isDirectory(macHome.getParent(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        boolean real = Files.isDirectory(macHome, LinkOption.NOFOLLOW_LINKS)
+                && Files.isDirectory(macHome.getParent(), LinkOption.NOFOLLOW_LINKS);
         if (!real && Files.isSymbolicLink(macHome)) {
             throw Archives.unsafe("its Contents/Home is a symbolic link");
         }
         Path frameworks = candidate.resolve("Contents").resolve("Frameworks");
-        if (real && Files.isDirectory(frameworks, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        if (real && Files.isDirectory(frameworks, LinkOption.NOFOLLOW_LINKS)) {
             // JetBrains' JCEF build keeps Chromium in Contents/Frameworks, next to Home, and finds it
             // from java.home: install the whole bundle, with links to Home's folders at its top, so
             // JAVA_HOME/bin/java works and java still sees Contents/Home as its home
             try (Stream<Path> children = Files.list(macHome)) {
                 for (Path child : children.toList()) {
                     Path link = candidate.resolve(child.getFileName().toString());
-                    if (!Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    if (!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
                         Files.createSymbolicLink(link, Path.of("Contents", "Home", child.getFileName().toString()));
                     }
                 }
@@ -297,19 +317,19 @@ public final class Installer {
     }
 
     private static final boolean POSIX =
-            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     /**
      * The final move into tools/. On Windows an antivirus scan of the files just unpacked often
      * holds them for a moment and the move fails with access denied: try again for a few seconds.
      */
     private static void moveIntoPlace(Path from, Path to) throws IOException {
-        boolean windows = java.io.File.separatorChar == '\\';
+        boolean windows = File.separatorChar == '\\';
         for (int attempt = 1; ; attempt++) {
             try {
                 Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
                 return;
-            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            } catch (AtomicMoveNotSupportedException e) {
                 // tools/ is on another disk than tmp/ (a link to it): copy next to the destination,
                 // then rename there, so the install still appears in one step
                 Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
@@ -318,7 +338,7 @@ public final class Installer {
                 Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
                 Fs.deleteRecursively(from);
                 return;
-            } catch (java.nio.file.AccessDeniedException e) {
+            } catch (AccessDeniedException e) {
                 if (!windows || attempt >= 10) {
                     throw e;
                 }
@@ -355,13 +375,13 @@ public final class Installer {
                 if (only != null && !n.equals(only)) {
                     continue;
                 }
-                if (Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS) && !n.endsWith(".bat")
+                if (Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) && !n.endsWith(".bat")
                         && !n.endsWith(".cmd") && !n.endsWith(".exe")) {
-                    java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
-                            new java.util.HashSet<>(Files.getPosixFilePermissions(f));
-                    perms.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
-                    perms.add(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE);
-                    perms.add(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE);
+                    Set<PosixFilePermission> perms =
+                            new HashSet<>(Files.getPosixFilePermissions(f));
+                    perms.add(PosixFilePermission.OWNER_EXECUTE);
+                    perms.add(PosixFilePermission.GROUP_EXECUTE);
+                    perms.add(PosixFilePermission.OTHERS_EXECUTE);
                     Files.setPosixFilePermissions(f, perms);
                 }
             }
@@ -387,7 +407,7 @@ public final class Installer {
      */
     static void requireReleaseVersion(Path jdkHome, Artifact artifact) {
         String found = ToolStates.releaseVersion(jdkHome);
-        String compared = found == null ? null : dev.jkit.model.Version.fromLegacyJava(found);
+        String compared = found == null ? null : Version.fromLegacyJava(found);
         // the parts after the third in version.txt (8.514.01.1) are Corretto's build and revision,
         // which the version jkit asked for (8.0.514) doesn't have
         int parts = Integer.MAX_VALUE;
@@ -396,8 +416,8 @@ public final class Installer {
             compared = found == null ? null : fromCorrettoEight(found);
             parts = 3;
         }
-        dev.jkit.model.Version wanted = artifact.version();
-        dev.jkit.model.Version got = compared == null ? null : dev.jkit.model.Version.parse(compared);
+        Version wanted = artifact.version();
+        Version got = compared == null ? null : Version.parse(compared);
         boolean same = got != null && got.partCount() > 0;
         int count = got == null ? 0 : Math.min(parts, Math.max(got.partCount(), wanted.partCount()));
         for (int i = 0; same && i < count; i++) {
@@ -423,9 +443,9 @@ public final class Installer {
             found = libs.map(p -> p.getFileName().toString())
                     .filter(n -> n.startsWith("maven-core-") && n.endsWith(".jar"))
                     .map(n -> n.substring("maven-core-".length(), n.length() - ".jar".length()))
-                    .filter(dev.jkit.model.Version::isSafeText)
+                    .filter(Version::isSafeText)
                     .findFirst().orElse(null);
-        } catch (IOException | java.io.UncheckedIOException e) {
+        } catch (IOException | UncheckedIOException e) {
             // found stays null
         }
         if (!artifact.version().raw().equals(found)) {
@@ -433,8 +453,8 @@ public final class Installer {
         }
     }
 
-    private static final java.util.regex.Pattern SBT_VERSION =
-            java.util.regex.Pattern.compile("sbt\\.version-read\\(sbt\\.version\\)\\[([^\\]\\s]{1,64})\\]");
+    private static final Pattern SBT_VERSION =
+            Pattern.compile("sbt\\.version-read\\(sbt\\.version\\)\\[([^\\]\\s]{1,64})\\]");
 
     /**
      * For a signed sbt: the launcher's {@code sbt/sbt.boot.properties} names the sbt version it
@@ -444,15 +464,15 @@ public final class Installer {
     static void requireSbtVersion(Path sbtHome, Artifact artifact) {
         String found = null;
         Path launcher = sbtHome.resolve("bin").resolve("sbt-launch.jar");
-        if (Files.isRegularFile(launcher, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            try (java.util.zip.ZipFile jar = new java.util.zip.ZipFile(launcher.toFile())) {
-                java.util.zip.ZipEntry entry = jar.getEntry("sbt/sbt.boot.properties");
+        if (Files.isRegularFile(launcher, LinkOption.NOFOLLOW_LINKS)) {
+            try (ZipFile jar = new ZipFile(launcher.toFile())) {
+                ZipEntry entry = jar.getEntry("sbt/sbt.boot.properties");
                 if (entry != null) {
-                    try (java.io.InputStream in = jar.getInputStream(entry)) {
+                    try (InputStream in = jar.getInputStream(entry)) {
                         // a few hundred bytes; more is read no further
-                        String text = new String(in.readNBytes(64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
-                        java.util.regex.Matcher m = SBT_VERSION.matcher(text);
-                        found = m.find() && dev.jkit.model.Version.isSafeText(m.group(1)) ? m.group(1) : null;
+                        String text = new String(in.readNBytes(64 * 1024), StandardCharsets.UTF_8);
+                        Matcher m = SBT_VERSION.matcher(text);
+                        found = m.find() && Version.isSafeText(m.group(1)) ? m.group(1) : null;
                     }
                 }
             } catch (IOException | RuntimeException e) {
@@ -476,12 +496,12 @@ public final class Installer {
     static String correttoVersionTxt(Path jdkHome) {
         Path file = jdkHome.resolve("version.txt");
         try {
-            if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.size(file) > 1024) {
+            if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.size(file) > 1024) {
                 return null;
             }
             String line = Files.readString(file).lines().findFirst().orElse("").trim();
-            return dev.jkit.model.Version.isSafeText(line) && dev.jkit.model.Version.looksLikeVersion(line) ? line : null;
-        } catch (IOException | java.io.UncheckedIOException e) {
+            return Version.isSafeText(line) && Version.looksLikeVersion(line) ? line : null;
+        } catch (IOException | UncheckedIOException e) {
             return null;
         }
     }
@@ -491,7 +511,7 @@ public final class Installer {
      * where everything else says 8.0.514; later Corretto releases already use 11.0.33.1.1.
      */
     static String fromCorrettoEight(String text) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)").matcher(text);
+        Matcher m = Pattern.compile("8\\.([1-9]\\d*)((?:\\.\\d+)*)").matcher(text);
         return m.matches() ? "8.0." + m.group(1) + m.group(2) : text;
     }
 
@@ -510,7 +530,7 @@ public final class Installer {
                     // the JDK starts child processes through these: without +x, ProcessBuilder fails
                     for (String helper : List.of("jspawnhelper", "jexec")) {
                         Path file = toolHome.resolve("lib").resolve(helper);
-                        if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
                             makeExecutable(file.getParent(), helper);
                         }
                     }

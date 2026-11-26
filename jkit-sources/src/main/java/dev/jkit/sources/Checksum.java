@@ -1,6 +1,7 @@
 package dev.jkit.sources;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Visible;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -97,7 +98,7 @@ public record Checksum(String algorithm, String hash) {
         }
         String h = hash.strip().toLowerCase(Locale.ROOT);
         if (!h.matches("[0-9a-f]+")) {
-            throw new JkitException("the published checksum isn't a hex hash: " + dev.jkit.model.Visible.of(
+            throw new JkitException("the published checksum isn't a hex hash: " + Visible.of(
                     h.length() > 40 ? h.substring(0, 40) + "…" : h),
                     "a proxy or captive portal may have answered instead; try again on another network");
         }

@@ -4,14 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.JkitException;
-import dev.jkit.sources.FoojaySource.Pkg;
 import dev.jkit.model.Platform;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
+import dev.jkit.sources.FoojaySource.Pkg;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +28,7 @@ class SourcesTest {
             public String get(URI uri) throws IOException {
                 return routes.entrySet().stream()
                         .filter(e -> uri.toString().contains(e.getKey()))
-                        .max(java.util.Comparator.comparingInt(e -> e.getKey().length()))
+                        .max(Comparator.comparingInt(e -> e.getKey().length()))
                         .map(Map.Entry::getValue)
                         .orElseThrow(() -> new HttpStatusException(404, uri));
             }
@@ -120,7 +124,7 @@ class SourcesTest {
         // for, a plain http one is refused, not quietly dropped
         assertThat(one("temurin", "17.0.3+7", info(old, old + ".sig")).signature()).hasToString(old + ".sig");
         assertThatThrownBy(() -> one("temurin", "17.0.3+7", info(old, "http://example.invalid/x.sig")))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("refusing a signature over http");
+                .isInstanceOf(JkitException.class).hasMessageContaining("refusing a signature over http");
         // other vendors' links are never fetched: a bad one is dropped
         assertThat(one("zulu", "21.0.13", info("https://example.invalid/z.tar.gz", "http://example.invalid/z.sig"))
                 .signature()).isNull();
@@ -305,8 +309,8 @@ class SourcesTest {
     void manyBuildsWithoutADownloadAreSkippedUpToALimit() throws IOException {
         // Oracle lists its newer 17 updates without a download link; the newest one with a link is
         // further down the list every quarter
-        java.util.List<String> pkgs = new java.util.ArrayList<>();
-        java.util.Map<String, String> routes = new java.util.HashMap<>();
+        List<String> pkgs = new ArrayList<>();
+        Map<String, String> routes = new HashMap<>();
         String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
         for (int u = 40; u >= 1; u--) {
             pkgs.add(pkg("o" + u, "oracle", 17, "17.0." + u, "glibc", ""));
@@ -321,8 +325,8 @@ class SourcesTest {
         routes.put("ids/o9", none);
         assertThatThrownBy(() -> new FoojaySource(fake(routes), FoojaySource.DEFAULT_BASE)
                 .resolve(Tool.JDK, "17", Vendor.of("oracle"), Platform.LINUX_X64, false, false))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("nor do the next 31 builds")
-                .satisfies(e -> assertThat(((dev.jkit.model.JkitException) e).hints())
+                .isInstanceOf(JkitException.class).hasMessageContaining("nor do the next 31 builds")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
                         .contains("an older build may have one: jkit install jdk@17.0.8 oracle"));
     }
 
@@ -362,8 +366,8 @@ class SourcesTest {
 
     @Test
     void availabilityLooksFurtherWhenTheNewestHasNoDownloadLikeInstallDoes() throws IOException {
-        java.util.List<String> pkgs = new java.util.ArrayList<>();
-        java.util.Map<String, String> routes = new java.util.HashMap<>();
+        List<String> pkgs = new ArrayList<>();
+        Map<String, String> routes = new HashMap<>();
         String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
         for (int u = 40; u >= 1; u--) {
             pkgs.add(pkg("o" + u, "oracle", 17, "17.0." + u, "glibc", ""));
@@ -403,7 +407,7 @@ class SourcesTest {
                  {"version":"1.0-milestone-9","downloadUrl":"https://example.invalid/gradle-1.0-milestone-9-bin.zip",
                   "checksum":"","checksumUrl":"","rcFor":"","milestoneFor":""}]""".formatted("a".repeat(64));
         GradleSource gradle = new GradleSource(fake(Map.of("versions/all", all)), GradleSource.DEFAULT_BASE);
-        assertThat(gradle.versions(false)).extracting(dev.jkit.model.Version::raw).containsExactly("8.10.2");
+        assertThat(gradle.versions(false)).extracting(Version::raw).containsExactly("8.10.2");
         assertThat(gradle.resolve("8", false).checksumAlgorithm()).isEqualTo("sha256");
     }
 
@@ -418,9 +422,9 @@ class SourcesTest {
     void sbtListsReleasesWithZipsNewestFirst() throws IOException {
         SbtSource sbt = new SbtSource(fake(Map.of("org/scala-sbt/sbt/maven-metadata.xml", SBT_METADATA)),
                 MavenSource.DEFAULT_BASE, SbtSource.DEFAULT_DOWNLOADS);
-        assertThat(sbt.versions(false)).extracting(dev.jkit.model.Version::raw)
+        assertThat(sbt.versions(false)).extracting(Version::raw)
                 .containsExactly("2.1.0", "1.10.7", "1.3.0");
-        assertThat(sbt.versions(true)).extracting(dev.jkit.model.Version::raw)
+        assertThat(sbt.versions(true)).extracting(Version::raw)
                 .containsExactly("2.1.0", "2.1.0-RC1", "1.10.7", "1.3.0");
     }
 

@@ -1,11 +1,16 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.ToolState;
+import dev.jkit.core.ToolStates;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
@@ -23,11 +28,11 @@ final class ResetCommand implements Callable<Integer> {
             converter = ToolConverter.class)
     Tool tool;
 
-    @picocli.CommandLine.Option(names = "--global", description = "Clear the global default; installs stay.")
+    @CommandLine.Option(names = "--global", description = "Clear the global default; installs stay.")
     boolean global;
 
     /** Parsing here, not in call(), so an unknown tool is a usage error (exit 2). */
-    static final class ToolConverter implements picocli.CommandLine.ITypeConverter<Tool> {
+    static final class ToolConverter implements CommandLine.ITypeConverter<Tool> {
         @Override
         public Tool convert(String value) {
             return Tool.parse(value.trim());
@@ -46,15 +51,15 @@ final class ResetCommand implements Callable<Integer> {
         }
         // the project's install applies again only while this folder's project still pins it
         String projectVar = ShellEnv.projectVariable(tool);
-        java.util.Map<String, String> env = dev.jkit.model.Envs.copy(ctx.env);
+        Map<String, String> env = Envs.copy(ctx.env);
         String applied = env.get(projectVar);
         Path project = null;
         if (applied != null && !applied.isBlank()) {
-            dev.jkit.core.ToolState state = dev.jkit.core.ToolStates.read(ctx.env, Path.of("").toAbsolutePath(),
+            ToolState state = ToolStates.read(ctx.env, Path.of("").toAbsolutePath(),
                     ctx.home, ctx.store, ctx.config, ctx.os::readLink).get(tool);
             project = state.pinInstall() == null ? null : state.pinInstall().home();
         }
-        java.util.Map<String, String> changes;
+        Map<String, String> changes;
         if (project == null) {
             env.remove(projectVar);
             changes = ShellEnv.reset(env, ctx.home, tool, false);
@@ -62,7 +67,7 @@ final class ResetCommand implements Callable<Integer> {
             env.put(projectVar, project.toString());
             changes = ShellEnv.reset(env, ctx.home, tool, tool == Tool.JDK && EnvCommand.isGraalVm(ctx, project));
         }
-        if (applied != null && !java.util.Objects.equals(env.get(projectVar), applied)) {
+        if (applied != null && !Objects.equals(env.get(projectVar), applied)) {
             changes.put(projectVar, env.get(projectVar));
         }
         ProjectShell.writeEnvFile(ctx, envFile, changes);

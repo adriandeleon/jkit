@@ -1,8 +1,23 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Visible;
+import java.io.File;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+import sun.misc.SignalHandler;
 
 @Command(name = "jkit",
         mixinStandardHelpOptions = true,
@@ -44,13 +59,13 @@ public final class Main implements Runnable {
     }
 
     /** Commands whose stdout is shell code to eval or a script, not text for a person. */
-    private static final java.util.Set<String> MACHINE_STDOUT = java.util.Set.of("env", "hook-env", "hook", "completion");
+    private static final Set<String> MACHINE_STDOUT = Set.of("env", "hook-env", "hook", "completion");
 
     public static void main(String[] args) {
         // messages carry text from project files and the network: never raw escape sequences
         System.setErr(SafeOutput.wrap(System.err));
         // --json documents escape their own control characters (JsonOut); \xNN would break the JSON
-        java.util.List<String> own = java.util.Arrays.asList(args);
+        List<String> own = Arrays.asList(args);
         if (own.contains("--")) {
             own = own.subList(0, own.indexOf("--"));
         }
@@ -101,12 +116,12 @@ public final class Main implements Runnable {
      * only where a path starts (after a space, a parenthesis or the start), and only the whole folder.
      */
     static String homeAsTilde(String message, String home) {
-        if (message == null || home == null || home.isEmpty() || home.equals(java.io.File.separator)) {
+        if (message == null || home == null || home.isEmpty() || home.equals(File.separator)) {
             return message;
         }
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(^|[\\s(])" + java.util.regex.Pattern.quote(home)
+        Pattern p = Pattern.compile("(^|[\\s(])" + Pattern.quote(home)
                 + "(?=[/\\\\\\s:;,)]|$)"); // either slash: Windows paths can come with /
-        return p.matcher(message).replaceAll(m -> java.util.regex.Matcher.quoteReplacement(m.group(1) + "~"));
+        return p.matcher(message).replaceAll(m -> Matcher.quoteReplacement(m.group(1) + "~"));
     }
 
     /**
@@ -115,9 +130,9 @@ public final class Main implements Runnable {
      * A signal the shell set to be ignored (a background job's SIGINT) stays ignored.
      */
     private static void cleanUpOnSignals() {
-        for (String name : java.util.List.of("INT", "TERM", "HUP")) {
-            java.util.List<Signals.Saved> saved = Signals.handle(() -> {
-                java.util.List<java.nio.file.Path> deleted = dev.jkit.core.WorkDirs.deleteAll();
+        for (String name : List.of("INT", "TERM", "HUP")) {
+            List<Signals.Saved> saved = Signals.handle(() -> {
+                List<Path> deleted = WorkDirs.deleteAll();
                 if (!deleted.isEmpty()) {
                     System.err.println();
                     System.err.println("interrupted: nothing was installed; deleted the partial download in "
@@ -125,7 +140,7 @@ public final class Main implements Runnable {
                 }
                 System.exit(128 + signalNumber(name));
             }, name);
-            if (!saved.isEmpty() && saved.getFirst().previous() == sun.misc.SignalHandler.SIG_IGN) {
+            if (!saved.isEmpty() && saved.getFirst().previous() == SignalHandler.SIG_IGN) {
                 Signals.restore(saved);
             }
         }
@@ -142,7 +157,7 @@ public final class Main implements Runnable {
     private static boolean cwdExists() {
         try {
             String dir = System.getProperty("user.dir");
-            return dir != null && !dir.isEmpty() && java.nio.file.Files.isDirectory(java.nio.file.Path.of(dir));
+            return dir != null && !dir.isEmpty() && Files.isDirectory(Path.of(dir));
         } catch (RuntimeException | Error e) { // a native image reads user.dir lazily and throws an Error
             return false;
         }
@@ -150,8 +165,8 @@ public final class Main implements Runnable {
 
     static int run(String... args) {
         // only jkit's own arguments: everything after -- belongs to the command jkit exec runs
-        java.util.List<String> all = java.util.Arrays.asList(args);
-        java.util.List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
+        List<String> all = Arrays.asList(args);
+        List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
         boolean json = list.contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
         // no colors: SafeOutput would print picocli's escape codes as text, and plain help reads fine
@@ -187,11 +202,11 @@ public final class Main implements Runnable {
                 || list.contains("-V") || list.contains("--version"))) {
             // help and version under --json: still one JSON document on stdout. Parse errors print
             // their own error document through the handler above.
-            java.io.StringWriter text = new java.io.StringWriter();
-            cli.setOut(new java.io.PrintWriter(text, true));
+            StringWriter text = new StringWriter();
+            cli.setOut(new PrintWriter(text, true));
             int code = cli.execute(all.stream().filter(a -> !a.equals(JsonOut.FLAG)).toArray(String[]::new));
             if (code == 0) {
-                java.util.Map<String, Object> doc = JsonOut.document();
+                Map<String, Object> doc = JsonOut.document();
                 doc.put(list.contains("-V") || list.contains("--version") ? "version" : "help", text.toString().strip());
                 System.out.println(JsonOut.write(doc));
             }
@@ -204,9 +219,9 @@ public final class Main implements Runnable {
      * A parse error as one line plus hints, not the whole usage screen: "did you mean" for a
      * mistyped command, the missing -- for exec, and the command's synopsis.
      */
-    static JkitException usageError(CommandLine.ParameterException ex, java.util.List<String> args) {
+    static JkitException usageError(CommandLine.ParameterException ex, List<String> args) {
         CommandLine cmd = ex.getCommandLine();
-        java.util.List<String> hints = new java.util.ArrayList<>();
+        List<String> hints = new ArrayList<>();
         boolean exec = cmd.getCommandName().equals("exec");
         if (!exec && ex instanceof CommandLine.UnmatchedArgumentException unmatched
                 && !unmatched.getSuggestions().isEmpty()) {
@@ -225,11 +240,11 @@ public final class Main implements Runnable {
     }
 
     private static void printError(JkitException e) {
-        System.err.println("error: " + homeAsTilde(dev.jkit.model.Visible.of(Errors.capped(e.getMessage())),
+        System.err.println("error: " + homeAsTilde(Visible.of(Errors.capped(e.getMessage())),
                 System.getProperty("user.home")));
         // hints keep full paths: they can be commands, where a quoted ~ isn't expanded
         for (String hint : e.hints()) {
-            System.err.println("  " + dev.jkit.model.Visible.of(Errors.capped(hint)));
+            System.err.println("  " + Visible.of(Errors.capped(hint)));
         }
     }
 }

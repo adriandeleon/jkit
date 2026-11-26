@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.JkitException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class ShellRcTest {
     private static final Path HOME = Path.of("/home/u");
@@ -94,16 +99,16 @@ class ShellRcTest {
 
     /** The block added to a \r\n file runs under bash. */
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void bashRunsTheBlockAddedToACrlfFile() throws Exception {
-        Path self = java.nio.file.Files.createDirectories(tmp.resolve("crlf")).resolve("jkit");
-        java.nio.file.Files.writeString(self, "#!/bin/sh\necho 'echo loaded'\n");
+        Path self = Files.createDirectories(tmp.resolve("crlf")).resolve("jkit");
+        Files.writeString(self, "#!/bin/sh\necho 'echo loaded'\n");
         self.toFile().setExecutable(true);
         String rc = ShellRc.add("# a comment\r\n", "bash", self.toString(), tmp.resolve(".jkit")).text();
         assertThat(runBash(rc, "/usr/bin:/bin")).isEqualTo("loaded");
     }
 
-    @org.junit.jupiter.api.io.TempDir
+    @TempDir
     Path tmp;
 
     /**
@@ -111,31 +116,31 @@ class ShellRcTest {
      * path gone, the first jkit on PATH outside jkit's own folder.
      */
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void theBlockRunsJkitByPathAndSkipsToolFolders() throws Exception {
         Path root = tmp.resolve("o'b home/.jkit");
-        Path tool = java.nio.file.Files.createDirectories(root.resolve("tools/jdk/21/bin"));
-        Path other = java.nio.file.Files.createDirectories(tmp.resolve("usr bin"));
-        Path self = java.nio.file.Files.createDirectories(tmp.resolve("self")).resolve("jkit");
+        Path tool = Files.createDirectories(root.resolve("tools/jdk/21/bin"));
+        Path other = Files.createDirectories(tmp.resolve("usr bin"));
+        Path self = Files.createDirectories(tmp.resolve("self")).resolve("jkit");
         for (Path p : new Path[] {tool.resolve("jkit"), other.resolve("jkit"), self}) {
-            java.nio.file.Files.writeString(p, "#!/bin/sh\necho 'echo " + p.getParent().getFileName() + "'\n");
+            Files.writeString(p, "#!/bin/sh\necho 'echo " + p.getParent().getFileName() + "'\n");
             p.toFile().setExecutable(true);
         }
         String path = tool + ":" + other + ":/usr/bin:/bin";
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("self");
-        java.nio.file.Files.delete(self);
+        Files.delete(self);
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("usr bin");
-        java.nio.file.Files.delete(other.resolve("jkit"));
+        Files.delete(other.resolve("jkit"));
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEmpty();
     }
 
     private String runBash(String script, String path) throws Exception {
         Path file = tmp.resolve("rc.sh");
-        java.nio.file.Files.writeString(file, script + "\n");
+        Files.writeString(file, script + "\n");
         ProcessBuilder pb = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", file.toString()).redirectErrorStream(true);
         pb.environment().put("PATH", path);
         Process p = pb.start();
-        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         assertThat(p.waitFor()).as(out).isZero();
         return out;
     }

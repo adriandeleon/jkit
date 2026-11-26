@@ -3,6 +3,7 @@ package dev.jkit.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.jkit.model.JkitException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -101,7 +102,7 @@ class ArchiveEscapeTest {
             hardlink(t, "jdk/copy", "jdk/s/key");
         });
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("run/out"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("unsafe");
+                .isInstanceOf(JkitException.class).hasMessageContaining("unsafe");
         assertThat(tmp.resolve("run/out/jdk/copy")).doesNotExist();
     }
 

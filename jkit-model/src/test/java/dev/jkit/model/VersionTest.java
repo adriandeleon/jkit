@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
@@ -43,7 +44,7 @@ class VersionTest {
         Collections.shuffle(shuffled, new Random(42));
         assertThat(shuffled.stream().map(Version::parse).sorted().map(Version::raw).toList())
                 .containsExactlyElementsOf(ascending);
-        assertThat(shuffled.stream().map(Version::parse).sorted(java.util.Comparator.reverseOrder())
+        assertThat(shuffled.stream().map(Version::parse).sorted(Comparator.reverseOrder())
                 .map(Version::raw).toList()).containsExactlyElementsOf(ascending.reversed());
     }
 

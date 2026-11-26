@@ -8,8 +8,15 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
+import dev.jkit.sources.CachingHttp;
+import dev.jkit.sources.FoojaySource;
+import dev.jkit.sources.Http;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -46,15 +53,15 @@ class ResolveTest {
         assertThat(Resolve.lts(ctx, ToolSpec.parse("jdk@21"), false).version()).isEqualTo("21"); // others untouched
     }
 
-    private static dev.jkit.sources.FoojaySource.Pkg pkg(String vendor, String version, String term) {
-        return new dev.jkit.sources.FoojaySource.Pkg("id", Vendor.of(vendor), dev.jkit.model.Version.parse(version).part(0),
-                dev.jkit.model.Version.parse(version), "jdk.tar.gz", "tar.gz", term, true);
+    private static FoojaySource.Pkg pkg(String vendor, String version, String term) {
+        return new FoojaySource.Pkg("id", Vendor.of(vendor), Version.parse(version).part(0),
+                Version.parse(version), "jdk.tar.gz", "tar.gz", term, true);
     }
 
     /** jdk@lts zulu online: zulu's own newest LTS, not one only another vendor has shipped yet. */
     @Test
     void ltsOnlineIsTheVendorsOwnNewestLts() {
-        List<dev.jkit.sources.FoojaySource.Pkg> builds = List.of(
+        List<FoojaySource.Pkg> builds = List.of(
                 pkg("temurin", "25.0.1", "lts"), pkg("temurin", "21.0.9", "lts"), pkg("temurin", "24.0.2", "sts"),
                 pkg("zulu", "21.0.9", "lts"), pkg("zulu", "17.0.17", "lts"), pkg("zulu", "24.0.2", "sts"),
                 pkg("corretto", "17.0.17", ""), pkg("corretto", "23.0.2", ""));
@@ -98,20 +105,20 @@ class ResolveTest {
                 {"result":[{"major_version":27,"term_of_support":"STS","maintained":true},
                 {"major_version":25,"term_of_support":"LTS","maintained":true},
                 {"major_version":21,"term_of_support":"LTS","maintained":true}]}""";
-        dev.jkit.sources.Http answer = new dev.jkit.sources.Http() {
+        Http answer = new Http() {
             @Override
-            public String get(java.net.URI uri) {
+            public String get(URI uri) {
                 return majors;
             }
 
             @Override
-            public void download(java.net.URI uri, Path target, Progress progress) {
+            public void download(URI uri, Path target, Progress progress) {
                 throw new UnsupportedOperationException();
             }
         };
-        new dev.jkit.sources.FoojaySource(new dev.jkit.sources.CachingHttp(answer, home.resolve("index"),
-                java.time.Duration.ofHours(24), java.time.Clock.systemUTC(), false, false),
-                dev.jkit.sources.FoojaySource.DEFAULT_BASE).majors();
+        new FoojaySource(new CachingHttp(answer, home.resolve("index"),
+                Duration.ofHours(24), Clock.systemUTC(), false, false),
+                FoojaySource.DEFAULT_BASE).majors();
     }
 
     @Test

@@ -1,17 +1,22 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.JkitHome;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.platform.UserEnv;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * jkit env --install and --uninstall: the global versions in the user's own environment variables
@@ -95,7 +100,7 @@ final class UserEnvSetup {
         }
         // only jkit's entries go: the rest, empty ones included, stays exactly as written
         String raw = current.getOrDefault("Path", "");
-        List<String> parts = List.of(raw.split(java.util.regex.Pattern.quote(File.pathSeparator), -1));
+        List<String> parts = List.of(raw.split(Pattern.quote(File.pathSeparator), -1));
         List<String> kept = new ArrayList<>();
         for (String entry : parts) {
             if (!entry.isBlank() && bins.stream().anyMatch(b -> same(entry, b))) {
@@ -117,7 +122,7 @@ final class UserEnvSetup {
     static List<String> shadowing(String systemPath) {
         List<String> found = new ArrayList<>();
         for (String entry : entries(systemPath)) {
-            Path dir = dev.jkit.core.Fs.path(entry);
+            Path dir = Fs.path(entry);
             if (dir == null) {
                 continue;
             }
@@ -126,7 +131,7 @@ final class UserEnvSetup {
                     if (Files.isRegularFile(dir.resolve(command))) {
                         found.add(entry + " (" + command + ")");
                     }
-                } catch (java.nio.file.InvalidPathException e) {
+                } catch (InvalidPathException e) {
                     // not a folder name: nothing to find there
                 }
             }
@@ -155,7 +160,7 @@ final class UserEnvSetup {
     static int run(Context ctx, boolean install, boolean json) throws IOException {
         UserEnv env = ctx.os.userEnv();
         if (env == null) {
-            throw new dev.jkit.model.JkitException(
+            throw new JkitException(
                     "jkit env --" + (install ? "install" : "uninstall") + " is for Windows, where programs get their "
                             + "variables from the user's environment",
                     "on macOS and Linux the shell's startup file is the place: jkit hook --"
@@ -168,7 +173,7 @@ final class UserEnvSetup {
             }
         }
         if (install && missing.size() == TOOLS.size()) {
-            throw new dev.jkit.model.JkitException("no global versions yet, so there is nothing to set",
+            throw new JkitException("no global versions yet, so there is nothing to set",
                     "set one first: jkit install jdk@21, or jkit use jdk@21 --global; then jkit env --install");
         }
         Map<String, String> current = env.read(names());
@@ -200,7 +205,7 @@ final class UserEnvSetup {
                         : "your user environment has nothing jkit set; nothing changed")
                 : (install ? "set jkit's global versions in your user environment"
                         : "removed jkit's global versions from your user environment");
-        java.io.PrintStream say = json ? ctx.err : ctx.out;
+        PrintStream say = json ? ctx.err : ctx.out;
         say.println(message);
         report.print(say);
         if (json) {
@@ -230,7 +235,7 @@ final class UserEnvSetup {
     static List<String> entries(String path) {
         List<String> list = new ArrayList<>();
         if (path != null) {
-            for (String e : path.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            for (String e : path.split(Pattern.quote(File.pathSeparator))) {
                 if (!e.isBlank()) {
                     list.add(e);
                 }

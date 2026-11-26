@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
+import dev.jkit.model.Version;
 import dev.jkit.sources.Http;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -101,7 +102,7 @@ class SelfUpdateTest {
                         + "download/v0.4.0/jkit_0.4.0_arm64.deb && sudo apt install \"$d/jkit_0.4.0_arm64.deb\"");
         assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64)).isNull();
         // a pre-release's package names, as GitHub publishes them
-        SelfUpdate.Release rc = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0-rc.1"), "x", "0".repeat(64));
+        SelfUpdate.Release rc = new SelfUpdate.Release(Version.parse("0.4.0-rc.1"), "x", "0".repeat(64));
         assertThat(SelfUpdate.Kind.RPM.command(rc, Platform.LINUX_X64)).endsWith("/v0.4.0-rc.1/jkit-0.4.0.rc.1-1.x86_64.rpm");
     }
 
@@ -143,7 +144,7 @@ class SelfUpdateTest {
     void fetchChecksAndReplaceSwapsTheBinary() throws Exception {
         assumeFalse(System.getProperty("os.name").startsWith("Windows"));
         byte[] bytes = archive("jkit 0.4.0");
-        SelfUpdate.Release r = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0"),
+        SelfUpdate.Release r = new SelfUpdate.Release(Version.parse("0.4.0"),
                 "jkit-0.4.0-linux-x64.tar.gz", sha256(bytes));
         Path work = Files.createDirectories(tmp.resolve("work"));
         Path fresh = SelfUpdate.fetch(serving(bytes), URI.create("https://example.test/"), r, Platform.LINUX_X64, work,
@@ -165,13 +166,13 @@ class SelfUpdateTest {
         assumeFalse(System.getProperty("os.name").startsWith("Windows"));
         byte[] bytes = archive("jkit 0.4.0");
         Path work = Files.createDirectories(tmp.resolve("work"));
-        SelfUpdate.Release wrongSum = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0"),
+        SelfUpdate.Release wrongSum = new SelfUpdate.Release(Version.parse("0.4.0"),
                 "jkit-0.4.0-linux-x64.tar.gz", "0".repeat(64));
         assertThatThrownBy(() -> SelfUpdate.fetch(serving(bytes), URI.create("https://example.test/"), wrongSum,
                 Platform.LINUX_X64, work, Http.Progress.NONE)).hasMessageContaining("checksum mismatch");
 
         byte[] other = archive("jkit 0.3.9");
-        SelfUpdate.Release lies = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0"),
+        SelfUpdate.Release lies = new SelfUpdate.Release(Version.parse("0.4.0"),
                 "jkit-0.4.0-linux-x64.tar.gz", sha256(other));
         Path work2 = Files.createDirectories(tmp.resolve("work2"));
         assertThatThrownBy(() -> SelfUpdate.fetch(serving(other), URI.create("https://example.test/"), lies,

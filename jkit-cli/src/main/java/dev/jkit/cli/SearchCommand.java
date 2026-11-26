@@ -1,14 +1,21 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.Installed;
+import dev.jkit.core.Signatures;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import dev.jkit.sources.FoojaySource;
 import dev.jkit.sources.FoojaySource.Major;
 import dev.jkit.sources.FoojaySource.Pkg;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +24,14 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
@@ -47,7 +62,7 @@ final class SearchCommand implements Callable<Integer> {
     @Option(names = "--maintained", description = "Hide JDK versions that are no longer maintained.")
     boolean maintained;
 
-    @picocli.CommandLine.Mixin
+    @CommandLine.Mixin
     JsonOut.Flag jsonFlag = new JsonOut.Flag();
 
     @Mixin
@@ -92,7 +107,7 @@ final class SearchCommand implements Callable<Integer> {
             doc.put("vendor", vendor.name());
             doc.put("vendorChosen", vendorText != null);
             FoojaySource foojay = ctx.foojay();
-            Map<Integer, Major> info = new TreeMap<>(java.util.Comparator.reverseOrder());
+            Map<Integer, Major> info = new TreeMap<>(Comparator.reverseOrder());
             foojay.majors().forEach(m -> info.put(m.major(), m));
             List<Pkg> pkgs;
             if (spec.version() != null && vendorText != null) {
@@ -116,7 +131,7 @@ final class SearchCommand implements Callable<Integer> {
             if (maintained) {
                 pkgs.removeIf(p -> info.containsKey(p.major()) && !info.get(p.major()).maintained());
             }
-            pkgs.sort(java.util.Comparator.comparing(Pkg::version).reversed()
+            pkgs.sort(Comparator.comparing(Pkg::version).reversed()
                     .thenComparing(p -> p.vendor().name()));
             List<Object> majors = new ArrayList<>();
             for (Major m : info.values()) {
@@ -188,7 +203,7 @@ final class SearchCommand implements Callable<Integer> {
             List<Pkg> builds = foojay.builds(spec.major(), vendor, ctx.platform, fx, pre).stream()
                     .filter(p -> p.version().matches(spec.version())).toList();
             Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, builds, true);
-            Set<Verdict> shown = java.util.EnumSet.noneOf(Verdict.class);
+            Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
             for (Pkg p : builds) {
                 String installedMark = mark(installed, p.version(), p.vendor(), fx);
                 Verdict v = verdicts.getOrDefault(p, Verdict.UNKNOWN);
@@ -229,28 +244,28 @@ final class SearchCommand implements Callable<Integer> {
      * what install picks for the version typed (the newest matching build with a direct download).
      */
     Map<Pkg, Verdict> verdicts(Context ctx, FoojaySource foojay, List<Pkg> pkgs, boolean exact) {
-        Map<Pkg, Verdict> out = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<Pkg, Verdict> out = new ConcurrentHashMap<>();
         if (pkgs.isEmpty()) {
             return out;
         }
-        java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicReference<String> why = new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicInteger failed = new AtomicInteger();
+        AtomicReference<String> why = new AtomicReference<>();
         boolean offline = ctx.http().offline();
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(
+        ExecutorService pool = Executors.newFixedThreadPool(
                 Math.min(LOOKUP_THREADS, pkgs.size()), r -> {
                     Thread t = new Thread(r, "jkit-search-lookup");
                     t.setDaemon(true);
                     return t;
                 });
         try {
-            List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            List<Future<?>> futures = new ArrayList<>();
             for (Pkg p : pkgs) {
                 futures.add(pool.submit(() -> {
                     try {
                         FoojaySource.Availability a = exact ? foojay.availability(p)
                                 : foojay.availability(p, spec.version(), ctx.platform, fx, pre);
                         out.put(p, verdict(a));
-                    } catch (java.io.IOException | RuntimeException e) {
+                    } catch (IOException | RuntimeException e) {
                         // offline and not cached, or the lookup failed: the build is listed as before
                         if (!offline) {
                             failed.incrementAndGet();
@@ -259,10 +274,10 @@ final class SearchCommand implements Callable<Integer> {
                     }
                 }));
             }
-            for (java.util.concurrent.Future<?> f : futures) {
+            for (Future<?> f : futures) {
                 try {
                     f.get();
-                } catch (java.util.concurrent.ExecutionException e) {
+                } catch (ExecutionException e) {
                     // each task catches its own failures
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -274,7 +289,7 @@ final class SearchCommand implements Callable<Integer> {
         }
         if (failed.get() > 0) {
             ctx.err.println("warning: couldn't check " + failed.get() + " of " + pkgs.size()
-                    + " builds for a checksum (" + dev.jkit.model.Visible.of(why.get())
+                    + " builds for a checksum (" + Visible.of(why.get())
                     + "); they're listed as available");
         }
         return out;
@@ -285,7 +300,7 @@ final class SearchCommand implements Callable<Integer> {
             return Verdict.NO_DOWNLOAD;
         }
         boolean signed = a.signature() != null
-                && dev.jkit.core.Signatures.owner(spec.tool(), a.pkg().vendor()) != null;
+                && Signatures.owner(spec.tool(), a.pkg().vendor()) != null;
         return a.checksum() || signed ? Verdict.OK : Verdict.UNVERIFIED;
     }
 
@@ -309,7 +324,7 @@ final class SearchCommand implements Callable<Integer> {
                             List<Installed> installed) {
         Map<Integer, Major> info = new TreeMap<>();
         majors.forEach(m -> info.put(m.major(), m));
-        TreeSet<Integer> all = new TreeSet<>(java.util.Comparator.reverseOrder());
+        TreeSet<Integer> all = new TreeSet<>(Comparator.reverseOrder());
         Map<String, Set<Integer>> byVendor = new TreeMap<>();
         Map<String, Pkg> newest = new LinkedHashMap<>(); // per vendor and major
         for (Pkg p : index) {
@@ -333,7 +348,7 @@ final class SearchCommand implements Callable<Integer> {
                 .filter(p -> current.contains(p.major()) || ended.contains(p.major()))
                 .toList();
         Map<Pkg, Verdict> found = verdicts(ctx, foojay, shownPkgs, false);
-        Map<String, Verdict> verdicts = new java.util.HashMap<>();
+        Map<String, Verdict> verdicts = new HashMap<>();
         found.forEach((p, v) -> verdicts.put(p.vendor().name() + "|" + p.major(), v));
 
         String chosen = vendor.name();
@@ -429,7 +444,7 @@ final class SearchCommand implements Callable<Integer> {
             byVendor.put(p.vendor().name(), p);
         }
         Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, new ArrayList<>(byVendor.values()), false);
-        Set<Verdict> shown = java.util.EnumSet.noneOf(Verdict.class);
+        Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
         for (Pkg p : byVendor.values()) {
             String name = p.vendor().equals(vendor) ? p.vendor().name() + " *" : p.vendor().name();
             String installedMark = mark(installed, p.version(), p.vendor(), fx);
@@ -489,15 +504,15 @@ final class SearchCommand implements Callable<Integer> {
             if (++lookups > MAX_VENDOR_LOOKUPS) {
                 // one request per vendor: real lists name about 30, a hostile one could name thousands
                 failed.add(p.vendor().name());
-                last = new java.io.IOException("more than " + MAX_VENDOR_LOOKUPS + " vendors to ask");
+                last = new IOException("more than " + MAX_VENDOR_LOOKUPS + " vendors to ask");
                 continue;
             }
             try {
                 foojay.builds(spec.major(), p.vendor(), ctx.platform, fx, pre).stream()
                         .filter(b -> b.version().matches(spec.version()))
-                        .max(java.util.Comparator.comparing(Pkg::version))
+                        .max(Comparator.comparing(Pkg::version))
                         .ifPresent(out::add);
-            } catch (java.io.IOException | dev.jkit.model.JkitException e) {
+            } catch (IOException | JkitException e) {
                 // one vendor's list failing mustn't hide every other vendor's builds
                 failed.add(p.vendor().name());
                 last = e;

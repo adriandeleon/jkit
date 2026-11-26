@@ -1,16 +1,26 @@
 package dev.jkit.cli;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.SerializableString;
+import com.fasterxml.jackson.core.io.CharacterEscapes;
+import com.fasterxml.jackson.core.io.SerializedString;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.Store;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Version;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import picocli.CommandLine.Option;
 
 /**
@@ -33,7 +43,7 @@ final class JsonOut {
      * {@code \u0080..\u009f}), so a document printed to a terminal can't carry an escape sequence.
      * stdout under {@code --json} skips {@link SafeOutput}, whose {@code \xNN} isn't valid JSON.
      */
-    private static final class TerminalSafeEscapes extends com.fasterxml.jackson.core.io.CharacterEscapes {
+    private static final class TerminalSafeEscapes extends CharacterEscapes {
         private final int[] table = standardAsciiEscapesForJSON();
 
         TerminalSafeEscapes() {
@@ -46,22 +56,22 @@ final class JsonOut {
         }
 
         @Override
-        public com.fasterxml.jackson.core.SerializableString getEscapeSequence(int ch) {
+        public SerializableString getEscapeSequence(int ch) {
             // also the bidirectional overrides and invisible characters Visible escapes in text output
             boolean hidden = ch == 0x061c || ch == 0x200e || ch == 0x200f || (ch >= 0x202a && ch <= 0x202e)
                     || (ch >= 0x2066 && ch <= 0x2069) || (ch >= 0x200b && ch <= 0x200d) || (ch >= 0x2060 && ch <= 0x2064)
                     || ch == 0xfeff || ch == 0x00ad || ch == 0x2028 || ch == 0x2029 || ch == 0x180e;
             return ch >= 0x80 && ch <= 0x9f || hidden
-                    ? new com.fasterxml.jackson.core.io.SerializedString(String.format("\\u%04x", ch))
+                    ? new SerializedString(String.format("\\u%04x", ch))
                     : null;
         }
     }
 
     /** Pretty JSON text with the escapes above. */
-    static String pretty(com.fasterxml.jackson.databind.JsonNode node) {
+    static String pretty(JsonNode node) {
         try {
             return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -120,8 +130,8 @@ final class JsonOut {
         node.put("preRelease", i.version().isPreRelease());
         node.put("home", i.home().toAbsolutePath().toString());
         // checked against a sha256/384/512 checksum when it was installed (see docs/json.md)
-        node.put("verified", dev.jkit.core.Store.verified(i.home()));
-        node.put("signedBy", dev.jkit.core.Store.signedBy(i.home()));
+        node.put("verified", Store.verified(i.home()));
+        node.put("signedBy", Store.signedBy(i.home()));
         ArrayNode global = node.putArray("global");
         ArrayNode shell = node.putArray("activeInShell");
         for (Tool t : Tool.values()) {
@@ -133,7 +143,7 @@ final class JsonOut {
                 global.add(t.id());
             }
             String state = ctx.env.get(ShellEnv.stateVariable(t));
-            if (state != null && Resolve.same(dev.jkit.core.Fs.path(state), i.home())) {
+            if (state != null && Resolve.same(Fs.path(state), i.home())) {
                 shell.add(t.id());
             }
         }
@@ -148,15 +158,15 @@ final class JsonOut {
     }
 
     /** A top-level document as a map, {@code schemaVersion} first; {@link #write} turns it into JSON. */
-    static java.util.Map<String, Object> document() {
-        java.util.Map<String, Object> doc = new java.util.LinkedHashMap<>();
+    static Map<String, Object> document() {
+        Map<String, Object> doc = new LinkedHashMap<>();
         doc.put("schemaVersion", SCHEMA_VERSION);
         return doc;
     }
 
     /** A JSON object as a map with fields in the order given: key, value, key, value, … */
-    static java.util.Map<String, Object> fields(Object... keysAndValues) {
-        java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+    static Map<String, Object> fields(Object... keysAndValues) {
+        Map<String, Object> map = new LinkedHashMap<>();
         for (int i = 0; i < keysAndValues.length; i += 2) {
             map.put((String) keysAndValues[i], keysAndValues[i + 1]);
         }
@@ -168,17 +178,17 @@ final class JsonOut {
         return pretty(toNode(value));
     }
 
-    private static com.fasterxml.jackson.databind.JsonNode toNode(Object value) {
+    private static JsonNode toNode(Object value) {
         var f = MAPPER.getNodeFactory();
         return switch (value) {
             case null -> f.nullNode();
-            case com.fasterxml.jackson.databind.JsonNode n -> n;
-            case java.util.Map<?, ?> map -> {
+            case JsonNode n -> n;
+            case Map<?, ?> map -> {
                 ObjectNode node = f.objectNode();
                 map.forEach((k, v) -> node.set(String.valueOf(k), toNode(v)));
                 yield node;
             }
-            case java.util.Collection<?> list -> {
+            case Collection<?> list -> {
                 ArrayNode node = f.arrayNode();
                 list.forEach(v -> node.add(toNode(v)));
                 yield node;

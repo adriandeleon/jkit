@@ -3,20 +3,24 @@ package dev.jkit.sources;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
+import dev.jkit.model.Suggest;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Locale;
-import java.util.TreeMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
-import dev.jkit.model.Suggest;
+import java.util.stream.Stream;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
 public final class FoojaySource {
@@ -81,7 +85,7 @@ public final class FoojaySource {
         String status = pre ? "release_status=ga&release_status=ea" : "release_status=ga";
         List<Pkg> all = packages(platform,
                 "jdk_version=" + major + "&distribution="
-                        + java.net.URLEncoder.encode(vendor.foojayName(), java.nio.charset.StandardCharsets.UTF_8)
+                        + URLEncoder.encode(vendor.foojayName(), StandardCharsets.UTF_8)
                         + "&" + status, fx);
         all.sort(Comparator.comparing(Pkg::version).reversed());
         return all;
@@ -118,7 +122,7 @@ public final class FoojaySource {
     }
 
     /** The JDK vendors jkit has signing keys for (Signatures in jkit-core). */
-    static final java.util.Set<String> SIGNING_VENDORS = java.util.Set.of("temurin", "microsoft", "corretto");
+    static final Set<String> SIGNING_VENDORS = Set.of("temurin", "microsoft", "corretto");
 
     /**
      * The first Temurin release of each feature version with a {@code .sig} on GitHub: Adoptium
@@ -162,7 +166,7 @@ public final class FoojaySource {
     public Vendor requireKnown(Vendor vendor, String typed, String source) throws IOException {
         JsonNode root = Json.fetch(http, base.resolve(
                 "distributions?include_versions=false&include_synonyms=true"));
-        Map<String, String> bySynonym = new java.util.HashMap<>();
+        Map<String, String> bySynonym = new HashMap<>();
         TreeSet<String> names = new TreeSet<>();
         for (JsonNode d : root.path("result")) {
             String param = Json.text(d, "api_parameter");
@@ -262,7 +266,7 @@ public final class FoojaySource {
             if (checksum == null && !checksumUri.isEmpty() && !http.offline()) {
                 URI uri = Http.sent(checksumUri, "a checksum", base);
                 // a file named for its algorithm (.sha256) must hold that kind; checksum_type alone is a hint
-                String named = java.util.stream.Stream.of("sha512", "sha384", "sha256")
+                String named = Stream.of("sha512", "sha384", "sha256")
                         .filter(a -> uri.getPath() != null && uri.getPath().endsWith("." + a)).findFirst().orElse(null);
                 checksum = named != null
                         ? Checksum.parseStrict(http.getFresh(uri), pkg.fileName(), named)
@@ -378,7 +382,7 @@ public final class FoojaySource {
             if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))
                     || !Json.text(n, "id").matches("[A-Za-z0-9_-]{1,128}")
                     || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+%-]{0,199}")
-                    || !java.util.Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
+                    || !Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
                 continue; // not text jkit can use as a folder name
             }
             Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),

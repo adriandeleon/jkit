@@ -2,6 +2,7 @@ package dev.jkit.cli;
 
 import dev.jkit.sources.Http;
 import java.io.PrintStream;
+import java.util.function.LongSupplier;
 
 /**
  * Download progress on stderr: on a terminal, one line that updates in place; otherwise (CI, a
@@ -13,7 +14,7 @@ final class ProgressBar implements Http.Progress {
 
     private final PrintStream err;
     private final boolean terminal;
-    private final java.util.function.LongSupplier clock;
+    private final LongSupplier clock;
     private int lastPercent = -1;
     private int lastQuarter;
     private long lastLine;
@@ -24,7 +25,7 @@ final class ProgressBar implements Http.Progress {
         this(err, System.console() != null, System::nanoTime);
     }
 
-    ProgressBar(PrintStream err, boolean terminal, java.util.function.LongSupplier clock) {
+    ProgressBar(PrintStream err, boolean terminal, LongSupplier clock) {
         this.err = err;
         this.terminal = terminal;
         this.clock = clock;

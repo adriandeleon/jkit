@@ -5,8 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,6 +18,7 @@ import java.util.HexFormat;
 import java.util.List;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
 import org.bouncycastle.bcpg.HashAlgorithmTags;
+import org.bouncycastle.bcpg.sig.KeyFlags;
 import org.bouncycastle.crypto.generators.RSAKeyPairGenerator;
 import org.bouncycastle.crypto.params.RSAKeyGenerationParameters;
 import org.bouncycastle.openpgp.PGPKeyPair;
@@ -98,12 +100,12 @@ class SignaturesTest {
                 List.of(new PGPPublicKeyRing(List.of(vendor.getPublicKey()))));
         byte[] sums = "abc  jkit-9.9.9-linux-x64.tar.gz\n".getBytes(StandardCharsets.UTF_8);
         byte[] sig = sign(vendor, sums, HashAlgorithmTags.SHA256, true);
-        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums), sig, jkit, ring).outcome())
+        assertThat(Signatures.verify(() -> new ByteArrayInputStream(sums), sig, jkit, ring).outcome())
                 .isEqualTo(Signatures.Outcome.GOOD);
         byte[] other = "def  jkit-9.9.9-linux-x64.tar.gz\n".getBytes(StandardCharsets.UTF_8);
-        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(other), sig, jkit, ring).outcome())
+        assertThat(Signatures.verify(() -> new ByteArrayInputStream(other), sig, jkit, ring).outcome())
                 .isEqualTo(Signatures.Outcome.BAD);
-        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums),
+        assertThat(Signatures.verify(() -> new ByteArrayInputStream(sums),
                 sign(stranger, sums, HashAlgorithmTags.SHA256, true), jkit, ring).outcome())
                 .isEqualTo(Signatures.Outcome.UNKNOWN_KEY);
     }
@@ -115,13 +117,13 @@ class SignaturesTest {
                 List.of("A8009E6BC1CE7D1F3FE14F791064202FA98AB817"));
         byte[] sums;
         byte[] sig;
-        try (java.io.InputStream a = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS");
-             java.io.InputStream b = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS.asc")) {
+        try (InputStream a = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS");
+             InputStream b = SignaturesTest.class.getResourceAsStream("release-SHA256SUMS.asc")) {
             sums = a.readAllBytes();
             sig = b.readAllBytes();
         }
         PGPPublicKeyRingCollection ring = Signatures.ring(key);
-        assertThat(Signatures.verify(() -> new java.io.ByteArrayInputStream(sums), sig, key, ring).outcome())
+        assertThat(Signatures.verify(() -> new ByteArrayInputStream(sums), sig, key, ring).outcome())
                 .isEqualTo(Signatures.Outcome.GOOD);
     }
 
@@ -157,7 +159,7 @@ class SignaturesTest {
                 new BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1), null, null,
                 new BcPGPContentSignerBuilder(PGPPublicKey.RSA_GENERAL, HashAlgorithmTags.SHA256), null);
         PGPSignatureSubpacketGenerator signing = new PGPSignatureSubpacketGenerator();
-        signing.setKeyFlags(false, org.bouncycastle.bcpg.sig.KeyFlags.SIGN_DATA);
+        signing.setKeyFlags(false, KeyFlags.SIGN_DATA);
         gen.addSubKey(subkey, signing.generate(), null);
         return gen.generatePublicKeyRing();
     }

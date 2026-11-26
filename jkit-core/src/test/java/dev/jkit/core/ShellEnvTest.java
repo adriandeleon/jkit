@@ -6,6 +6,7 @@ import dev.jkit.model.Tool;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -128,7 +129,7 @@ class ShellEnvTest {
 
     @Test
     void quotesForEachShell() {
-        Map<String, String> changes = new java.util.LinkedHashMap<>();
+        Map<String, String> changes = new LinkedHashMap<>();
         changes.put("JAVA_HOME", "/it's here");
         changes.put("OLD", null);
         assertThat(ShellEnv.format(changes, "bash")).isEqualTo("export JAVA_HOME='/it'\\''s here'\nunset OLD\n");

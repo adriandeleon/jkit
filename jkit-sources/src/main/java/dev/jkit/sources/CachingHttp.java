@@ -1,16 +1,24 @@
 package dev.jkit.sources;
 
+import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Caches {@link #get} responses as files for a fixed time (the version index). Downloads are
@@ -90,7 +98,7 @@ public final class CachingHttp implements Http {
     @Override
     public String getFresh(URI uri) throws IOException {
         if (offline) {
-            throw new dev.jkit.model.JkitException("--offline, but " + uri.getHost() + " has to be asked for a checksum",
+            throw new JkitException("--offline, but " + uri.getHost() + " has to be asked for a checksum",
                     "run the command without --offline");
         }
         return delegate.get(uri);
@@ -113,7 +121,7 @@ public final class CachingHttp implements Http {
             } catch (IOException e) {
                 anyCached = false;
             }
-            throw new dev.jkit.model.JkitException(anyCached
+            throw new JkitException(anyCached
                     ? "--offline, but this lookup on " + uri.getHost() + " isn't cached (the cache only holds "
                             + "what earlier commands asked for)"
                     : "--offline, but there is no cached version list from " + uri.getHost() + " yet",
@@ -133,16 +141,16 @@ public final class CachingHttp implements Http {
         if (looksLikeHtml(body)) {
             // a captive portal or proxy error page: don't keep it for a day
             return staleOr(file, uri, "got a web page instead of data from " + uri.getHost(),
-                    new dev.jkit.model.JkitException("got a web page instead of data from " + uri.getHost()
+                    new JkitException("got a web page instead of data from " + uri.getHost()
                             + " (a captive portal or proxy login?)", "sign in to the network in a browser, then try again"));
         }
-        dev.jkit.model.Perms.mkdirs(dir);
+        Perms.mkdirs(dir);
         boolean created = !Files.exists(file);
         Path tmp = Files.createTempFile(dir, "index-", ".tmp");
         try {
             Files.writeString(tmp, body);
-            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(tmp);
         }
@@ -158,11 +166,11 @@ public final class CachingHttp implements Http {
      */
     private void prune(Path keep) {
         record Entry(Path file, Instant time, long size) { }
-        java.util.List<Entry> entries = new java.util.ArrayList<>();
+        List<Entry> entries = new ArrayList<>();
         try (var files = Files.list(dir)) {
             for (Path f : (Iterable<Path>) files::iterator) {
                 if (f.getFileName().toString().endsWith(".cache") && !f.equals(keep)
-                        && Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        && Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS)) {
                     entries.add(new Entry(f, Files.getLastModifiedTime(f).toInstant(), Files.size(f)));
                 }
             }
@@ -170,7 +178,7 @@ public final class CachingHttp implements Http {
             for (Entry e : entries) {
                 total += e.size();
             }
-            entries.sort(java.util.Comparator.comparing(Entry::time));
+            entries.sort(Comparator.comparing(Entry::time));
             Instant old = clock.instant().minus(MAX_AGE);
             for (Entry e : entries) {
                 if (total <= MAX_BYTES && e.time().isAfter(old)) {
@@ -189,7 +197,7 @@ public final class CachingHttp implements Http {
     /** The sources answer JSON or XML; HTML means something in between answered instead. */
     static boolean looksLikeHtml(String body) {
         String start = body.stripLeading();
-        start = start.substring(0, Math.min(start.length(), 64)).toLowerCase(java.util.Locale.ROOT);
+        start = start.substring(0, Math.min(start.length(), 64)).toLowerCase(Locale.ROOT);
         return start.startsWith("<!doctype html") || start.startsWith("<html");
     }
 
@@ -207,7 +215,7 @@ public final class CachingHttp implements Http {
 
     private void requireOnline() {
         if (offline) {
-            throw new dev.jkit.model.JkitException("--offline, so nothing can be downloaded",
+            throw new JkitException("--offline, so nothing can be downloaded",
                     "run the command without --offline");
         }
     }

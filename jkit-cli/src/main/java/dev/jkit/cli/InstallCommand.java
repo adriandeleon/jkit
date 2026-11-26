@@ -1,12 +1,22 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Installed;
 import dev.jkit.core.Installer;
+import dev.jkit.core.Signatures;
+import dev.jkit.core.Store;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
+import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -62,7 +72,7 @@ final class InstallCommand implements Callable<Integer> {
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
         if (ctx.http().offline()) {
-            throw new dev.jkit.model.JkitException("--offline, so " + artifact.label() + " can't be downloaded",
+            throw new JkitException("--offline, so " + artifact.label() + " can't be downloaded",
                     "run the command without --offline");
         }
         String signer = signer(artifact);
@@ -74,7 +84,7 @@ final class InstallCommand implements Callable<Integer> {
                     + "'s signature instead");
         } else if (artifact.checksum() == null) {
             if (!allowUnverified) {
-                throw new dev.jkit.model.JkitException(artifact.label() + " from " + artifact.url().getHost()
+                throw new JkitException(artifact.label() + " from " + artifact.url().getHost()
                         + " has no published checksum, so jkit can't check the download; nothing installed",
                         "install it anyway: " + retry, "or pick another version or vendor");
             }
@@ -87,8 +97,8 @@ final class InstallCommand implements Callable<Integer> {
         ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
         try {
             return ctx.installer().install(artifact, new ProgressBar(ctx.err), signatureRequired);
-        } catch (dev.jkit.core.Installer.SignatureRequired e) {
-            throw new dev.jkit.model.JkitException(e.getMessage(), "install it anyway: " + retry,
+        } catch (Installer.SignatureRequired e) {
+            throw new JkitException(e.getMessage(), "install it anyway: " + retry,
                     "or pick another version or vendor");
         }
     }
@@ -96,11 +106,11 @@ final class InstallCommand implements Callable<Integer> {
     /** Whose signature checks {@code artifact} (and can stand in for a missing checksum), or null. */
     static String signer(Artifact artifact) {
         return artifact.signature() == null ? null
-                : dev.jkit.core.Signatures.owner(artifact.tool(), artifact.vendor());
+                : Signatures.owner(artifact.tool(), artifact.vendor());
     }
 
     private static boolean isStrong(String algorithm) {
-        String a = algorithm == null ? "" : algorithm.toLowerCase(java.util.Locale.ROOT).replace("-", "");
+        String a = algorithm == null ? "" : algorithm.toLowerCase(Locale.ROOT).replace("-", "");
         return a.equals("sha256") || a.equals("sha384") || a.equals("sha512");
     }
 
@@ -110,10 +120,10 @@ final class InstallCommand implements Callable<Integer> {
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
         spec = Resolve.lts(ctx, spec, true, vendor, fx);
         // an exact pre-release (maven@4.0.0-rc-7) asks for pre-releases by itself, as pin and sync do
-        boolean wantPre = pre || spec.version() != null && dev.jkit.model.Version.looksLikeVersion(spec.version())
-                && dev.jkit.model.Version.parse(spec.version()).isPreRelease();
+        boolean wantPre = pre || spec.version() != null && Version.looksLikeVersion(spec.version())
+                && Version.parse(spec.version()).isPreRelease();
         Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
-        java.io.PrintStream say = json.json ? ctx.err : ctx.out;
+        PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
             Changes changes = new Changes(ctx).disk();
@@ -141,9 +151,9 @@ final class InstallCommand implements Callable<Integer> {
         if (result.fresh() && first && !noDefault) {
             // checked and set under the link lock: another jkit may set a default or remove this meanwhile
             try (AutoCloseable lock = ctx.store.linkLock()) {
-                if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                        && Files.isRegularFile(result.installed().home().resolve(dev.jkit.core.Store.MARKER),
-                                java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, LinkOption.NOFOLLOW_LINKS)
+                        && Files.isRegularFile(result.installed().home().resolve(Store.MARKER),
+                                LinkOption.NOFOLLOW_LINKS)) {
                     ctx.os.pointLink(globalLink, result.installed().home());
                     madeDefault = true;
                 }
@@ -183,7 +193,7 @@ final class InstallCommand implements Callable<Integer> {
     /** What an install changed on disk: the home if new, leftovers it cleared, the install folder, cached lists. */
     static Changes installed(Context ctx, Installer.Result result) {
         Changes changes = new Changes(ctx).disk();
-        for (java.nio.file.Path leftover : result.removedLeftovers()) {
+        for (Path leftover : result.removedLeftovers()) {
             changes.folder(leftover, false);
         }
         if (result.fresh()) {
@@ -194,14 +204,14 @@ final class InstallCommand implements Callable<Integer> {
     }
 
     /** {@code {schemaVersion, status: installed|already-installed, verified, signedBy, installed: {…}, changes: […]}}. */
-    private void printJson(Context ctx, String status, Boolean verified, String signedBy, dev.jkit.model.Version version,
+    private void printJson(Context ctx, String status, Boolean verified, String signedBy, Version version,
                            Vendor vendor, boolean fxBuild, Changes changes) throws Exception {
-        java.util.Map<String, Object> doc = JsonOut.document();
+        Map<String, Object> doc = JsonOut.document();
         doc.put("status", status);
         doc.put("verified", verified);
         doc.put("signedBy", signedBy);
-        for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
-            if (i.version().equals(version) && java.util.Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
+        for (Installed i : ctx.store.list(spec.tool().storeTool())) {
+            if (i.version().equals(version) && Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
                 doc.put("installed", JsonOut.installed(ctx, i));
             }
         }

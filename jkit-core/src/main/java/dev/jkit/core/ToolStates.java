@@ -6,6 +6,7 @@ import dev.jkit.model.PinnedTool;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -189,7 +190,7 @@ public final class ToolStates {
         }
         String version = p.getProperty("JAVA_VERSION");
         version = version == null ? null : version.replace("\"", "").trim();
-        return dev.jkit.model.Version.isSafeText(version) ? version : null;
+        return Version.isSafeText(version) ? version : null;
     }
 
     private static Installed installAt(Store store, Tool tool, Path path) throws IOException {

@@ -5,19 +5,27 @@ import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -183,13 +191,13 @@ final class PruneCommand implements Callable<Integer> {
     /** The folder as text ending in a separator, so 21.0.5+11-temurin doesn't match 21.0.5+11-temurin-fx. */
     private static String folderText(Path folder, boolean windows) {
         String text = folder.toString();
-        text = text.endsWith(java.io.File.separator) ? text : text + java.io.File.separator;
-        return windows ? text.toLowerCase(java.util.Locale.ROOT) : text;
+        text = text.endsWith(File.separator) ? text : text + File.separator;
+        return windows ? text.toLowerCase(Locale.ROOT) : text;
     }
 
     /** Whether {@code word} (a command, or an argument such as a classpath) names a file in one of {@code folders}. */
     private static boolean names(String word, List<String> folders, boolean windows) {
-        String w = windows ? word.toLowerCase(java.util.Locale.ROOT).replace('/', '\\') : word;
+        String w = windows ? word.toLowerCase(Locale.ROOT).replace('/', '\\') : word;
         return folders.stream().anyMatch(w::contains);
     }
 
@@ -205,7 +213,7 @@ final class PruneCommand implements Callable<Integer> {
             // decide again under the lock: a jkit use --global or an install since the scan may
             // have made one of these builds the one in use
             ToolStates.Result here = StatusCommand.read(ctx, cwd);
-            java.util.Set<Path> still = new java.util.HashSet<>();
+            Set<Path> still = new HashSet<>();
             for (Superseded s : superseded(ctx, here)) {
                 still.add(s.install().home());
             }
@@ -222,7 +230,7 @@ final class PruneCommand implements Callable<Integer> {
                 try {
                     removedBuilds.addAll(RemoveCommand.remove(ctx, s.install(), here, say).json());
                     freed += s.bytes();
-                } catch (dev.jkit.model.JkitException | IOException e) {
+                } catch (JkitException | IOException e) {
                     report.note("warning: couldn't remove " + s.install().tool() + " " + s.install().label() + " ("
                             + e.getMessage() + ")" + (ctx.platform.isWindows()
                                     ? "; something may have it open (IDE or Gradle daemon?)" : ""));
@@ -318,9 +326,9 @@ final class PruneCommand implements Callable<Integer> {
         return found;
     }
 
-    private static void collect(Path dir, java.util.function.Predicate<String> match, List<Path> into)
+    private static void collect(Path dir, Predicate<String> match, List<Path> into)
             throws IOException {
-        if (!Files.isDirectory(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
         try (Stream<Path> children = Files.list(dir)) {
@@ -332,13 +340,13 @@ final class PruneCommand implements Callable<Integer> {
     static List<Path> oldCache(Context ctx, Instant now) throws IOException {
         List<Path> old = new ArrayList<>();
         Path index = ctx.home.index();
-        if (!Files.isDirectory(index, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.isDirectory(index, LinkOption.NOFOLLOW_LINKS)) {
             return old;
         }
         try (Stream<Path> files = Files.list(index)) {
             for (Path f : files.sorted().toList()) {
                 if (f.getFileName().toString().endsWith(".cache") && Files.isRegularFile(f,
-                        java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        LinkOption.NOFOLLOW_LINKS)
                         && Files.getLastModifiedTime(f).toInstant().plus(CACHE_KEEP).isBefore(now)) {
                     old.add(f);
                 }
@@ -350,7 +358,7 @@ final class PruneCommand implements Callable<Integer> {
     /** Bytes under {@code path}, not following links; 0 for what can't be read. */
     static long size(Path path) {
         try (Stream<Path> all = Files.walk(path)) {
-            return all.filter(p -> Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            return all.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
                     .mapToLong(p -> {
                         try {
                             return Files.size(p);
@@ -358,7 +366,7 @@ final class PruneCommand implements Callable<Integer> {
                             return 0;
                         }
                     }).sum();
-        } catch (IOException | java.io.UncheckedIOException e) {
+        } catch (IOException | UncheckedIOException e) {
             return 0;
         }
     }
@@ -368,8 +376,8 @@ final class PruneCommand implements Callable<Integer> {
             return (bytes + 1023) / 1024 + " KB";
         }
         double mb = bytes / (1024.0 * 1024.0);
-        return mb < 1024 ? String.format(java.util.Locale.ROOT, "%.0f MB", mb)
-                : String.format(java.util.Locale.ROOT, "%.1f GB", mb / 1024);
+        return mb < 1024 ? String.format(Locale.ROOT, "%.0f MB", mb)
+                : String.format(Locale.ROOT, "%.1f GB", mb / 1024);
     }
 
     private Map<String, Object> document(List<Object> buildRows, List<Object> keptRows, List<Path> leftovers,

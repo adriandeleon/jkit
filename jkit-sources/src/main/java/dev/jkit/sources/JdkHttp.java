@@ -13,8 +13,10 @@ import java.net.ProxySelector;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,11 +25,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * {@link Http} on the JDK's HttpClient. HttpClient ignores HTTPS_PROXY and NO_PROXY, so the proxy
@@ -408,9 +412,9 @@ public final class JdkHttp implements Http, AutoCloseable {
             HttpResponse<InputStream> response;
             try {
                 response = client.send(request(uri, timeout), HttpResponse.BodyHandlers.ofInputStream());
-            } catch (java.net.http.HttpTimeoutException e) {
+            } catch (HttpTimeoutException e) {
                 // the server took the connection and never answered: asking again would only wait again
-                throw new NetworkException(uri, e, !(e instanceof java.net.http.HttpConnectTimeoutException));
+                throw new NetworkException(uri, e, !(e instanceof HttpConnectTimeoutException));
             } catch (IOException e) {
                 throw new NetworkException(uri, e);
             } catch (InterruptedException e) {
@@ -419,7 +423,7 @@ public final class JdkHttp implements Http, AutoCloseable {
             }
             try (InputStream in = response.body()) {
                 int status = response.statusCode();
-                java.util.Optional<String> location = response.headers().firstValue("location");
+                Optional<String> location = response.headers().firstValue("location");
                 if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
                         && location.isPresent()) {
                     URI next;
@@ -479,13 +483,13 @@ public final class JdkHttp implements Http, AutoCloseable {
         AtomicLong received = new AtomicLong();
         AtomicLong windowStart = new AtomicLong(started);
         AtomicLong windowBytes = new AtomicLong();
-        java.util.concurrent.atomic.AtomicReference<String> stalled = new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicReference<String> stalled = new AtomicReference<>();
         // past a deadline or too slow on average: trying again would only multiply the time limit
-        java.util.concurrent.atomic.AtomicBoolean final_ = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicBoolean final_ = new AtomicBoolean();
         // judged once, at slowAfter: too slow then, and the download starts again on a new connection
-        java.util.concurrent.atomic.AtomicBoolean judged = new java.util.concurrent.atomic.AtomicBoolean(
+        AtomicBoolean judged = new AtomicBoolean(
                 text || !mayRestart || total <= 0);
-        java.util.concurrent.atomic.AtomicBoolean slow = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicBoolean slow = new AtomicBoolean();
         ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "jkit-http-watchdog");
             t.setDaemon(true);

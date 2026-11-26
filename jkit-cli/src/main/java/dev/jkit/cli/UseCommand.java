@@ -9,10 +9,10 @@ import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import java.io.PrintStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -37,7 +37,7 @@ final class UseCommand implements Callable<Integer> {
     @Option(names = "--fx", description = "Use a JavaFX build. Without it, plain builds win when both are installed.")
     boolean fx;
 
-    @picocli.CommandLine.Mixin
+    @CommandLine.Mixin
     JsonOut.Flag json = new JsonOut.Flag();
 
     @Override
@@ -108,7 +108,7 @@ final class UseCommand implements Callable<Integer> {
         if (!json.json) {
             return;
         }
-        java.util.Map<String, Object> doc = JsonOut.document();
+        Map<String, Object> doc = JsonOut.document();
         doc.put("scope", scope);
         doc.put("tool", spec.tool().id());
         doc.put("installed", JsonOut.installed(ctx, chosen));

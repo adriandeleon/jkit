@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,7 @@ class DoctorTest {
     }
 
     private static String path(Path... entries) {
-        return String.join(File.pathSeparator, java.util.Arrays.stream(entries).map(Path::toString).toList());
+        return String.join(File.pathSeparator, Arrays.stream(entries).map(Path::toString).toList());
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {

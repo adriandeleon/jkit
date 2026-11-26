@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.Objects;
 
 /**
  * Windows: directory junctions, which need no admin rights or Developer Mode. Java has no API to
@@ -88,8 +89,8 @@ final class WindowsOs implements OsServices {
      */
     private static void mklink(Path link, Path target) throws IOException {
         // the full path: a bare "cmd" is looked up in the current folder first on Windows
-        String systemRoot = java.util.Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
-        String cmd = java.nio.file.Path.of(systemRoot, "System32", "cmd.exe").toString();
+        String systemRoot = Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
+        String cmd = Path.of(systemRoot, "System32", "cmd.exe").toString();
         ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/s", "/c",
                 "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
         pb.environment().put("JKIT_LINK", link.toString());

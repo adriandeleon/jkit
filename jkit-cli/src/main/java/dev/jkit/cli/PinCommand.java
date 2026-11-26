@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
@@ -54,8 +55,8 @@ final class PinCommand implements Callable<Integer> {
     @Mixin
     Options options;
 
-    @picocli.CommandLine.Spec
-    picocli.CommandLine.Model.CommandSpec commandSpec;
+    @CommandLine.Spec
+    CommandLine.Model.CommandSpec commandSpec;
 
     /** {@code jdk@latest}: pin "latest" (the newest), not the version active here like a bare {@code jdk}. */
     boolean latest;

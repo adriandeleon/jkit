@@ -9,14 +9,20 @@ import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
+import dev.jkit.sources.HttpStatusException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class InstallerTest {
@@ -66,7 +72,7 @@ class InstallerTest {
                 if (!uri.getPath().endsWith(".sig") && !uri.getPath().endsWith(".asc")) {
                     Files.copy(file, target);
                 } else if (signature == null) {
-                    throw new dev.jkit.sources.HttpStatusException(404, uri);
+                    throw new HttpStatusException(404, uri);
                 } else {
                     Files.write(target, signature);
                 }
@@ -146,9 +152,9 @@ class InstallerTest {
     /** A Maven-shaped zip: apache-maven-{@code version}/bin/mvn. */
     private static Path mavenZip(Path dir, String version) throws IOException {
         Path zip = dir.resolve("apache-maven-" + version + "-bin.zip");
-        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
-            out.putNextEntry(new java.util.zip.ZipEntry("apache-maven-" + version + "/bin/mvn"));
-            out.write("#!/bin/sh\necho fake maven\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry("apache-maven-" + version + "/bin/mvn"));
+            out.write("#!/bin/sh\necho fake maven\n".getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
         }
         return zip;
@@ -181,9 +187,9 @@ class InstallerTest {
     @Test
     void anSbtSignatureThatCantBeFetchedInstallsWithAWarning() throws Exception {
         Path zip = tmp.resolve("sbt-1.10.7.zip");
-        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
-            out.putNextEntry(new java.util.zip.ZipEntry("sbt/bin/sbt"));
-            out.write("#!/bin/sh\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry("sbt/bin/sbt"));
+            out.write("#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
         }
         JkitHome home = new JkitHome(tmp.resolve("home"));
@@ -360,12 +366,12 @@ class InstallerTest {
     /** An sbt install whose launcher names {@code version}, as sbt-launch.jar's sbt.boot.properties does. */
     private Path sbtHome(String version) throws IOException {
         Path bin = Files.createDirectories(tmp.resolve("sbt-" + version + "/bin"));
-        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+        try (ZipOutputStream out = new ZipOutputStream(
                 Files.newOutputStream(bin.resolve("sbt-launch.jar")))) {
-            out.putNextEntry(new java.util.zip.ZipEntry("sbt/sbt.boot.properties"));
+            out.putNextEntry(new ZipEntry("sbt/sbt.boot.properties"));
             out.write(("[scala]\n  version: ${sbt.scala.version-auto}\n\n[app]\n  org: ${sbt.organization-org.scala-sbt}\n"
                     + "  name: sbt\n  version: ${sbt.version-read(sbt.version)[" + version + "]}\n")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    .getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
         }
         return bin.getParent();
@@ -472,7 +478,7 @@ class InstallerTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aLinkThatClimbsOutOfContentsHomeIsRefused() throws Exception {
         // inside the archive's top folder, so Archives allows it, but outside the part jkit installs
         Path home = Files.createDirectories(tmp.resolve("jdk/Contents/Home"));
@@ -486,7 +492,7 @@ class InstallerTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void theInstallRecordIsNeverWrittenOrReadThroughALink() throws Exception {
         Path dir = Files.createDirectories(tmp.resolve("tools/jdk/21-temurin"));
         Path decoy = Files.writeString(tmp.resolve("decoy.properties"), "version=99\nverified=true\n");

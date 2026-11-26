@@ -1,12 +1,27 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Config;
 import dev.jkit.core.ConfigWriter;
+import dev.jkit.core.Fs;
+import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellRc;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
+import dev.jkit.model.ShellQuote;
+import java.io.File;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import picocli.CommandLine;
 import picocli.CommandLine.ArgGroup;
@@ -52,7 +67,7 @@ final class HookCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         // lenient: a typo in config.toml must not leave every new shell without the hook
-        Context ctx = Context.lenient(dev.jkit.model.Envs.system(), System.out);
+        Context ctx = Context.lenient(Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError);
         }
@@ -85,12 +100,12 @@ final class HookCommand implements Callable<Integer> {
 
     static Path userHome(Context ctx) {
         // an empty or relative HOME would put the rc file in the current folder
-        Path home = dev.jkit.core.Fs.path(ctx.env.get("HOME"));
+        Path home = Fs.path(ctx.env.get("HOME"));
         if (home == null || !home.isAbsolute()) {
-            home = dev.jkit.core.Fs.path(System.getProperty("user.home"));
+            home = Fs.path(System.getProperty("user.home"));
         }
         if (home == null || !home.isAbsolute()) {
-            throw new dev.jkit.model.JkitException("can't tell your home folder, so not which startup file to change",
+            throw new JkitException("can't tell your home folder, so not which startup file to change",
                     "set HOME to an absolute path");
         }
         return home.normalize();
@@ -125,7 +140,7 @@ final class HookCommand implements Callable<Integer> {
     static int install(Context ctx, String shell, Path userHome, boolean autoSwitch) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         boolean exists = Files.exists(file);
-        java.nio.charset.Charset charset = charsetOf(file);
+        Charset charset = charsetOf(file);
         String text = exists ? Files.readString(file, charset) : "";
         String shown = Changes.tilde(file.toString());
         int manual = ShellRc.manualLine(text);
@@ -140,7 +155,7 @@ final class HookCommand implements Callable<Integer> {
             createParent(ctx, file, report);
             String written = ShellRc.add(text, shell, self, ctx.home.root(), !exists).text();
             // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
-            dev.jkit.core.AtomicFile.write(file, written, charset, true);
+            AtomicFile.write(file, written, charset, true);
             report.file(file, !exists);
             added = true;
             ctx.out.println("added the jkit hook to " + shown + ":");
@@ -157,7 +172,7 @@ final class HookCommand implements Callable<Integer> {
             }
         }
         boolean switched = autoSwitch && turnOnAutoSwitch(ctx, report);
-        String jkit = self == null ? "jkit" : dev.jkit.model.ShellQuote.quote(shell, self);
+        String jkit = self == null ? "jkit" : ShellQuote.quote(shell, self);
         String reload = shell.equals("fish") ? jkit + " hook fish | source" : "eval \"$(" + jkit + " hook " + shell + ")\"";
         if (added) {
             report.note("new " + shell + " shells load it; for this one: " + reload);
@@ -171,18 +186,18 @@ final class HookCommand implements Callable<Integer> {
         return 0;
     }
 
-    static void createParent(Context ctx, Path file, Changes report) throws java.io.IOException {
+    static void createParent(Context ctx, Path file, Changes report) throws IOException {
         Path dir = file.toAbsolutePath().getParent();
         if (!Files.isDirectory(dir)) {
             // every folder that is new, outermost first: fish's ~/.config, ~/.config/fish and conf.d
-            List<Path> missing = new java.util.ArrayList<>();
+            List<Path> missing = new ArrayList<>();
             for (Path d = dir; d != null && !Files.exists(d); d = d.getParent()) {
                 missing.addFirst(d);
             }
             if (dir.equals(ctx.home.root())) {
                 ctx.home.create();
             } else {
-                dev.jkit.model.Perms.mkdirs(dir); // 755 whatever the umask: other users mustn't edit startup files
+                Perms.mkdirs(dir); // 755 whatever the umask: other users mustn't edit startup files
             }
             for (Path d : missing) {
                 report.folder(d, true);
@@ -195,13 +210,13 @@ final class HookCommand implements Callable<Integer> {
         Path config = ctx.home.config();
         String shown = Changes.tilde(config.toString());
         boolean exists = Files.exists(config);
-        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? dev.jkit.core.ProjectFile.text(config) : "",
+        ConfigWriter.Edit edit = ConfigWriter.set(config, exists ? ProjectFile.text(config) : "",
                 "shell", "auto_switch", "true");
         if (!edit.changed()) {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
-            dev.jkit.core.AtomicFile.write(config, edit.text(), java.nio.charset.StandardCharsets.UTF_8, true);
+            AtomicFile.write(config, edit.text(), StandardCharsets.UTF_8, true);
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
                     + shown);
@@ -232,15 +247,15 @@ final class HookCommand implements Callable<Integer> {
      * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent):
      * read and written back in the same charset, so every byte jkit doesn't change stays as it was.
      */
-    static java.nio.charset.Charset charsetOf(Path file) throws java.io.IOException {
+    static Charset charsetOf(Path file) throws IOException {
         if (!Files.isRegularFile(file)) {
-            return java.nio.charset.StandardCharsets.UTF_8;
+            return StandardCharsets.UTF_8;
         }
         try {
-            java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file)));
-            return java.nio.charset.StandardCharsets.UTF_8;
-        } catch (java.nio.charset.CharacterCodingException e) {
-            return java.nio.charset.StandardCharsets.ISO_8859_1;
+            StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(file)));
+            return StandardCharsets.UTF_8;
+        } catch (CharacterCodingException e) {
+            return StandardCharsets.ISO_8859_1;
         }
     }
 
@@ -248,7 +263,7 @@ final class HookCommand implements Callable<Integer> {
     static int uninstall(Context ctx, String shell, Path userHome) throws Exception {
         Path file = ShellRc.file(shell, ctx.env, userHome);
         String shown = Changes.tilde(file.toString());
-        java.nio.charset.Charset charset = charsetOf(file);
+        Charset charset = charsetOf(file);
         String text = Files.exists(file) ? Files.readString(file, charset) : "";
         ShellRc.Edit edit = ShellRc.remove(text);
         int manual = ShellRc.manualLine(edit.text());
@@ -267,7 +282,7 @@ final class HookCommand implements Callable<Integer> {
             Files.delete(file);
             report.fileDeleted(file);
         } else {
-            dev.jkit.core.AtomicFile.write(file, edit.text(), charset, true);
+            AtomicFile.write(file, edit.text(), charset, true);
             report.file(file, false);
             if (Files.isSymbolicLink(file)) {
                 report.note(shown + " is a link: the change went to " + Changes.tilde(file.toRealPath().toString()));
@@ -293,29 +308,29 @@ final class HookCommand implements Callable<Integer> {
             return null;
         }
         try {
-            java.util.Optional<String> command = ProcessHandle.current().info().command();
+            Optional<String> command = ProcessHandle.current().info().command();
             if (command.isEmpty()) {
                 return null;
             }
             Path real = Path.of(command.get()).toRealPath();
             String file = real.getFileName().toString();
             Path tools = ctx.home.root().toAbsolutePath().normalize();
-            for (String dir : ctx.env.getOrDefault("PATH", "").split(java.io.File.pathSeparator)) {
+            for (String dir : ctx.env.getOrDefault("PATH", "").split(File.pathSeparator)) {
                 try {
                     Path entry = Path.of(dir);
                     if (!entry.isAbsolute() || entry.normalize().startsWith(tools)) {
                         continue;
                     }
                     Path candidate = entry.resolve(file);
-                    if (java.nio.file.Files.exists(candidate) && java.nio.file.Files.isSameFile(candidate, real)) {
+                    if (Files.exists(candidate) && Files.isSameFile(candidate, real)) {
                         return candidate.toString();
                     }
-                } catch (java.nio.file.InvalidPathException | java.io.IOException e) {
+                } catch (InvalidPathException | IOException e) {
                     // not usable: the next entry
                 }
             }
             return real.toString();
-        } catch (java.io.IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) {
             return null;
         }
     }

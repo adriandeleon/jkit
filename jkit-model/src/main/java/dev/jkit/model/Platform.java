@@ -1,5 +1,7 @@
 package dev.jkit.model;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 
 /** The platforms jkit supports, with foojay's names for them; Linux comes with glibc or musl (Alpine). */
@@ -49,12 +51,12 @@ public enum Platform {
      */
     private static boolean isMusl(String arch) {
         String a = arch.equals("x64") ? "x86_64" : "aarch64";
-        if (!java.nio.file.Files.exists(java.nio.file.Path.of("/lib/ld-musl-" + a + ".so.1"))) {
+        if (!Files.exists(Path.of("/lib/ld-musl-" + a + ".so.1"))) {
             return false;
         }
-        boolean glibcLoader = java.nio.file.Files.exists(java.nio.file.Path.of(
+        boolean glibcLoader = Files.exists(Path.of(
                 arch.equals("x64") ? "/lib64/ld-linux-x86-64.so.2" : "/lib/ld-linux-aarch64.so.1"));
-        return !glibcLoader || java.nio.file.Files.exists(java.nio.file.Path.of("/etc/alpine-release"));
+        return !glibcLoader || Files.exists(Path.of("/etc/alpine-release"));
     }
 
     /** The musl variant of a Linux platform. */

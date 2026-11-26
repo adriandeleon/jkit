@@ -5,6 +5,7 @@ import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
@@ -13,11 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
@@ -69,7 +72,7 @@ final class EnvCommand implements Callable<Integer> {
     static String defaultShell(Map<String, String> env) {
         String parent = ProcessHandle.current().parent()
                 .flatMap(p -> p.info().command())
-                .map(c -> Path.of(c).getFileName().toString().toLowerCase(java.util.Locale.ROOT))
+                .map(c -> Path.of(c).getFileName().toString().toLowerCase(Locale.ROOT))
                 .map(c -> c.endsWith(".exe") ? c.substring(0, c.length() - 4) : c)
                 .orElse("");
         if (parent.startsWith("-")) {
@@ -89,10 +92,10 @@ final class EnvCommand implements Callable<Integer> {
         Context ctx = Context.readOnly();
         if (install || uninstall) {
             if (install && uninstall) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "--install or --uninstall, not both");
+                throw new JkitException(CommandLine.ExitCode.USAGE, "--install or --uninstall, not both");
             }
             if (shell != null || dir != null || noProject || global) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE,
+                throw new JkitException(CommandLine.ExitCode.USAGE,
                         "--" + (install ? "install" : "uninstall") + " goes alone: it sets the global versions, "
                                 + "for every program, not one shell's or one project's");
             }
@@ -103,7 +106,7 @@ final class EnvCommand implements Callable<Integer> {
             if (!json.json) {
                 ctx.out.println(failLine("bash"));
             }
-            throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
+            throw new JkitException(CommandLine.ExitCode.USAGE, "unknown shell '" + syntax + "'", "shells: " + String.join(", ", SHELLS));
         }
         Path cwd = Path.of("").toAbsolutePath();
         Result result;
@@ -140,19 +143,19 @@ final class EnvCommand implements Callable<Integer> {
      * install is an error (exit 3) so a CI step never runs with half an environment.
      */
     static Result compute(Context ctx, Path dir, boolean ignoreProject) throws Exception {
-        return compute(ctx, dir, ignoreProject, java.util.Set.of(), "jkit env --no-project");
+        return compute(ctx, dir, ignoreProject, Set.of(), "jkit env --no-project");
     }
 
     /**
      * As above, but a missing pin for a tool in {@code chosen} is no error: the caller sets that tool
      * itself. {@code ignoreCommand} is the hint for skipping the project file.
      */
-    static Result compute(Context ctx, Path dir, boolean ignoreProject, java.util.Set<Tool> chosen,
+    static Result compute(Context ctx, Path dir, boolean ignoreProject, Set<Tool> chosen,
             String ignoreCommand) throws Exception {
         if (!Files.isDirectory(dir)) {
             throw new JkitException(dir + " is not a folder");
         }
-        Map<String, String> env = dev.jkit.model.Envs.copy(ctx.env);
+        Map<String, String> env = Envs.copy(ctx.env);
         if (ignoreProject) {
             env.put(ProjectFile.OVERRIDE, "");
         }

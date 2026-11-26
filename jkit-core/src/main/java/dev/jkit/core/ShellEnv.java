@@ -1,12 +1,14 @@
 package dev.jkit.core;
 
+import dev.jkit.model.Envs;
+import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,7 +84,7 @@ public final class ShellEnv {
      */
     public static Map<String, String> reset(Map<String, String> env, JkitHome home, Tool tool,
                                             boolean projectJdkIsGraalVm) {
-        Map<String, String> after = dev.jkit.model.Envs.copy(env);
+        Map<String, String> after = Envs.copy(env);
         after.remove(stateVariable(tool));
         Map<Tool, String> active = active(after);
         String project = blankToNull(env.get(projectVariable(tool)));
@@ -132,7 +134,7 @@ public final class ShellEnv {
         if (recordKey && (projectKey != null || env.containsKey(PROJECT))) {
             out.put(PROJECT, projectKey);
         }
-        Map<String, String> after = dev.jkit.model.Envs.copy(env);
+        Map<String, String> after = Envs.copy(env);
         for (Tool t : Tool.values()) {
             boolean shellChoice = blankToNull(env.get(stateVariable(t))) != null;
             if (homes.containsKey(t)) {
@@ -287,7 +289,7 @@ public final class ShellEnv {
     static boolean underTools(String entry, JkitHome home) {
         try {
             return Path.of(entry).toAbsolutePath().normalize().startsWith(home.toolsRoot());
-        } catch (java.nio.file.InvalidPathException e) {
+        } catch (InvalidPathException e) {
             return false;
         }
     }
@@ -310,6 +312,6 @@ public final class ShellEnv {
     }
 
     private static String quote(String shell, String value) {
-        return dev.jkit.model.ShellQuote.quote(shell, value);
+        return ShellQuote.quote(shell, value);
     }
 }

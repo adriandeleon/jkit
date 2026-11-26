@@ -6,6 +6,8 @@ import dev.jkit.model.Tool;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
+import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -93,10 +95,10 @@ class ChangesTest {
         Path jkit = home.resolve("fresh");
         Map<String, String> env = new HashMap<>(Map.of("JKIT_HOME", jkit.toString()));
         Context ctx = Context.forEnv(env);
-        java.nio.file.Files.createDirectories(jkit); // the command made the home
+        Files.createDirectories(jkit); // the command made the home
         Path install = jkit.resolve("tools/jdk/21.0.9+10-temurin");
-        ctx.cacheWrites.add(new Context.CacheWrite(java.net.URI.create("https://api.foojay.io/a"), jkit.resolve("index/a.cache"), true));
-        ctx.cacheWrites.add(new Context.CacheWrite(java.net.URI.create("https://api.foojay.io/b"), jkit.resolve("index/b.cache"), false));
+        ctx.cacheWrites.add(new Context.CacheWrite(URI.create("https://api.foojay.io/a"), jkit.resolve("index/a.cache"), true));
+        ctx.cacheWrites.add(new Context.CacheWrite(URI.create("https://api.foojay.io/b"), jkit.resolve("index/b.cache"), false));
 
         Changes changes = new Changes(ctx).disk().folder(install, true);
 

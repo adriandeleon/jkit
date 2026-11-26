@@ -1,17 +1,24 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Config;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import dev.jkit.model.Visible;
 import java.io.PrintStream;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
@@ -31,7 +38,7 @@ final class HookEnvCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         try {
-            Map<String, String> env = dev.jkit.model.Envs.system();
+            Map<String, String> env = Envs.system();
             Path cwd = Path.of("").toAbsolutePath();
             // this runs on every cd: the usual answer, nothing to do, comes before jkit's home,
             // config and store are read
@@ -42,7 +49,7 @@ final class HookEnvCommand implements Callable<Integer> {
             String name = shell != null ? shell : ctx.env.getOrDefault("JKIT_SHELL", "bash");
             ctx.out.print(run(ctx, cwd, name, ctx.err));
         } catch (Exception | Error e) {
-            System.err.println("jkit: couldn't check for a project file here: " + dev.jkit.model.Visible.of(e.getMessage()));
+            System.err.println("jkit: couldn't check for a project file here: " + Visible.of(e.getMessage()));
         }
         return 0;
     }
@@ -54,8 +61,8 @@ final class HookEnvCommand implements Callable<Integer> {
      * or it is the project already applied, unchanged.
      */
     static boolean nothingToDo(Map<String, String> env, List<Path> files) {
-        String auto = env.get(dev.jkit.core.Config.AUTO_SWITCH_ENV);
-        if (auto != null && !auto.isBlank() && Boolean.FALSE.equals(dev.jkit.core.Config.parseSwitch(auto))) {
+        String auto = env.get(Config.AUTO_SWITCH_ENV);
+        if (auto != null && !auto.isBlank() && Boolean.FALSE.equals(Config.parseSwitch(auto))) {
             return true;
         }
         String key = files.isEmpty() ? null : ProjectFile.key(files);
@@ -82,7 +89,7 @@ final class HookEnvCommand implements Callable<Integer> {
             plan = ProjectShell.plan(ctx, cwd);
         } catch (JkitException e) {
             // a broken project file: say so once (until it changes), and leave the versions alone
-            err.println("jkit: " + dev.jkit.model.Visible.of(e.getMessage()) + "; this shell's versions are unchanged");
+            err.println("jkit: " + Visible.of(e.getMessage()) + "; this shell's versions are unchanged");
             Map<String, String> remember = new LinkedHashMap<>();
             remember.put(ShellEnv.PROJECT, key);
             new Changes(ctx).env(remember).print(err); // remembered so the error shows once, and said
@@ -120,7 +127,7 @@ final class HookEnvCommand implements Callable<Integer> {
 
     private static boolean changesMoreThanTheKey(Map<String, String> env, Map<String, String> changes) {
         for (Map.Entry<String, String> e : changes.entrySet()) {
-            if (!e.getKey().equals(ShellEnv.PROJECT) && !java.util.Objects.equals(env.get(e.getKey()), e.getValue())) {
+            if (!e.getKey().equals(ShellEnv.PROJECT) && !Objects.equals(env.get(e.getKey()), e.getValue())) {
                 return true;
             }
         }
@@ -185,13 +192,13 @@ final class HookEnvCommand implements Callable<Integer> {
             return null;
         }
         // path:mtime;path:mtime... - a path may hold ; or :, so the first file ends at :<digits>; or the end
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(.+?):-?\\d+(;|" + ProjectShell.MISSING
+        Matcher m = Pattern.compile("^(.+?):-?\\d+(;|" + ProjectShell.MISSING
                 + "|$)").matcher(applied);
         String first = m.find() ? m.group(1) : applied;
         try {
             Path file = Path.of(first);
             return file.getParent() == null ? null : file.getParent().toString();
-        } catch (java.nio.file.InvalidPathException e) {
+        } catch (InvalidPathException e) {
             return null;
         }
     }

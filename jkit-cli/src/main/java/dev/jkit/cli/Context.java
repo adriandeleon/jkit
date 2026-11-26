@@ -4,6 +4,8 @@ import dev.jkit.core.Config;
 import dev.jkit.core.Installer;
 import dev.jkit.core.JkitHome;
 import dev.jkit.core.Store;
+import dev.jkit.model.Envs;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
 import dev.jkit.platform.OsServices;
 import dev.jkit.sources.CachingHttp;
@@ -13,10 +15,17 @@ import dev.jkit.sources.Http;
 import dev.jkit.sources.JdkHttp;
 import dev.jkit.sources.MavenSource;
 import dev.jkit.sources.SbtSource;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Everything a command needs, built once from the environment. */
@@ -41,11 +50,11 @@ final class Context {
     boolean homeReported;
     /** Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}. */
     // search looks builds up on several threads, each of which can write to the cache
-    final java.util.List<CacheWrite> cacheWrites = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+    final List<CacheWrite> cacheWrites = Collections.synchronizedList(new ArrayList<>());
 
     /** One cached version list written: {@code created} false when it replaced an older copy. */
     /** A file the cache wrote ({@code source} is where it came from), or deleted ({@code source} null). */
-    record CacheWrite(URI source, java.nio.file.Path file, boolean created) { }
+    record CacheWrite(URI source, Path file, boolean created) { }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
         this(env, refresh, offline, out, false);
@@ -55,14 +64,14 @@ final class Context {
         this.env = env;
         this.out = out;
         this.home = JkitHome.fromEnv(env);
-        this.homeExisted = java.nio.file.Files.exists(home.root());
+        this.homeExisted = Files.exists(home.root());
         this.platform = Platform.current();
         Config loaded;
         String error = null;
         home.requireSafe(); // never lenient: a home others can write to puts their programs on PATH
         try {
             loaded = Config.load(home, env);
-        } catch (dev.jkit.model.JkitException e) {
+        } catch (JkitException e) {
             if (!lenient) {
                 throw e;
             }
@@ -82,20 +91,20 @@ final class Context {
         if (http == null) {
             try {
                 home.create(); // before the cache makes it with the default permissions
-            } catch (java.io.IOException e) {
-                throw new dev.jkit.model.JkitException("cannot create " + home.root() + ": " + e.getMessage());
+            } catch (IOException e) {
+                throw new JkitException("cannot create " + home.root() + ": " + e.getMessage());
             }
             http = new CachingHttp(new JdkHttp(env, userAgent(), Duration.ofSeconds(60)), home.index(),
                     Duration.ofHours(24), Clock.systemUTC(), refresh,
                     offline || offlineByEnv(env),
                     new CachingHttp.Listener() {
                         @Override
-                        public void stored(URI uri, java.nio.file.Path file, boolean created) {
+                        public void stored(URI uri, Path file, boolean created) {
                             cacheWrites.add(new CacheWrite(uri, file, created));
                         }
 
                         @Override
-                        public void removed(java.nio.file.Path file) {
+                        public void removed(Path file) {
                             cacheWrites.add(new CacheWrite(null, file, false));
                         }
 
@@ -110,7 +119,7 @@ final class Context {
 
     /** JKIT_NETWORK_OFFLINE=true, 1 or yes, like the other on/off variables. */
     static boolean offlineByEnv(Map<String, String> env) {
-        String v = env.getOrDefault("JKIT_NETWORK_OFFLINE", "").trim().toLowerCase(java.util.Locale.ROOT);
+        String v = env.getOrDefault("JKIT_NETWORK_OFFLINE", "").trim().toLowerCase(Locale.ROOT);
         return v.equals("true") || v.equals("1") || v.equals("yes") || v.equals("on");
     }
 
@@ -119,7 +128,7 @@ final class Context {
     }
 
     static Context create(boolean refresh, boolean offline) {
-        return new Context(dev.jkit.model.Envs.system(), refresh, offline, System.out);
+        return new Context(Envs.system(), refresh, offline, System.out);
     }
 
     /**
@@ -135,7 +144,7 @@ final class Context {
      * failure, so they can still say what is going on. Never online.
      */
     static Context readOnly() {
-        Context ctx = lenient(dev.jkit.model.Envs.system(), System.out);
+        Context ctx = lenient(Envs.system(), System.out);
         if (ctx.configError != null) {
             ctx.err.println("warning: " + ctx.configError + "; using the built-in defaults");
         }
@@ -175,18 +184,18 @@ final class Context {
      * nothing is fetched or written. Null when there is no cache yet.
      */
     FoojaySource cachedFoojay() {
-        if (!java.nio.file.Files.isDirectory(home.index())) {
+        if (!Files.isDirectory(home.index())) {
             return null;
         }
         Http none = new Http() {
             @Override
-            public String get(URI uri) throws java.io.IOException {
-                throw new java.io.IOException("not cached");
+            public String get(URI uri) throws IOException {
+                throw new IOException("not cached");
             }
 
             @Override
-            public void download(URI uri, java.nio.file.Path target, Progress progress) throws java.io.IOException {
-                throw new java.io.IOException("offline");
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                throw new IOException("offline");
             }
         };
         return new FoojaySource(new CachingHttp(none, home.index(), Duration.ofHours(24), Clock.systemUTC(), false, true),
@@ -221,10 +230,10 @@ final class Context {
         try {
             uri = URI.create(value.endsWith("/") ? value : value + "/");
         } catch (IllegalArgumentException e) {
-            throw new dev.jkit.model.JkitException(variable + " is not a URL: " + value);
+            throw new JkitException(variable + " is not a URL: " + value);
         }
         if (!Http.isSecure(uri)) {
-            throw new dev.jkit.model.JkitException(variable + " must be an https URL (or http to localhost), not " + value,
+            throw new JkitException(variable + " must be an https URL (or http to localhost), not " + value,
                     "unset it to use the default source");
         }
         return uri;

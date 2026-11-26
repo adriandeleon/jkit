@@ -3,18 +3,23 @@ package dev.jkit.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.jkit.model.JkitException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class ArchivesTest {
@@ -48,7 +53,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
+    @DisabledOnOs(OS.WINDOWS) // Unix modes, symlinks
     void tarGzKeepsPermissionsAndSymlinks() throws IOException {
         Path out = tmp.resolve("out");
         Archives.extract(jdkTarGz(tmp, "jdk-21"), out, "tar.gz");
@@ -62,7 +67,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes, symlinks
+    @DisabledOnOs(OS.WINDOWS) // Unix modes, symlinks
     void zipKeepsUnixModes() throws IOException {
         Path archive = tmp.resolve("maven.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -79,7 +84,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    @DisabledOnOs(OS.WINDOWS) // Unix modes
     void filesAreNeverWritableByEveryone() throws IOException {
         Path archive = tmp.resolve("loose.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -96,7 +101,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    @DisabledOnOs(OS.WINDOWS) // Unix modes
     void filesAndFoldersAreNeverWritableByTheGroup() throws IOException {
         Path archive = tmp.resolve("group.tar.gz");
         try (OutputStream raw = Files.newOutputStream(archive);
@@ -111,9 +116,9 @@ class ArchivesTest {
         Path out = tmp.resolve("out");
         Archives.extract(archive, out, "tar.gz");
         assertThat(Files.getPosixFilePermissions(out.resolve("jdk/bin/java")))
-                .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+                .isEqualTo(PosixFilePermissions.fromString("rwxr-xr-x"));
         assertThat(Files.getPosixFilePermissions(out.resolve("jdk/lib/modules")))
-                .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+                .isEqualTo(PosixFilePermissions.fromString("rw-r--r--"));
         for (Path dir : new Path[] {out.resolve("jdk"), out.resolve("jdk/lib")}) {
             assertThat(Files.getPosixFilePermissions(dir))
                     .doesNotContain(PosixFilePermission.GROUP_WRITE, PosixFilePermission.OTHERS_WRITE);
@@ -121,7 +126,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // a NUL is the one byte Linux refuses
+    @DisabledOnOs(OS.WINDOWS) // a NUL is the one byte Linux refuses
     void anEntryNameThisSystemCantHoldIsUnsafeNotACrash() throws IOException {
         Path archive = tmp.resolve("nul.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -130,7 +135,7 @@ class ArchivesTest {
             zip.closeArchiveEntry();
         }
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
-                .isInstanceOf(dev.jkit.model.JkitException.class)
+                .isInstanceOf(JkitException.class)
                 .hasMessageContaining("unsafe to unpack (an entry name this system can't use: jdk/bin/ja\\x00va)");
 
         Path linked = tmp.resolve("link.zip");
@@ -142,7 +147,7 @@ class ArchivesTest {
             zip.closeArchiveEntry();
         }
         assertThatThrownBy(() -> Archives.extract(linked, tmp.resolve("out2"), "zip"))
-                .isInstanceOf(dev.jkit.model.JkitException.class)
+                .isInstanceOf(JkitException.class)
                 .hasMessageContaining("an entry name this system can't use: jdk/bin/javac");
     }
 
@@ -156,7 +161,7 @@ class ArchivesTest {
         byte[] sz = String.format("%011o\0", size).getBytes(StandardCharsets.US_ASCII);
         System.arraycopy(sz, 0, h, 124, sz.length);
         h[156] = (byte) type;
-        java.util.Arrays.fill(h, 148, 156, (byte) ' ');
+        Arrays.fill(h, 148, 156, (byte) ' ');
         long sum = 0;
         for (byte b : h) {
             sum += b & 0xff;
@@ -175,7 +180,7 @@ class ArchivesTest {
             out.write(new byte[4096]);
         }
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("claims");
+                .isInstanceOf(JkitException.class).hasMessageContaining("claims");
     }
 
     private Path tarOf(String name, byte[]... blocks) throws IOException {
@@ -207,7 +212,7 @@ class ArchivesTest {
         // Solaris X headers and sparse files: commons-compress would read them, the scan won't guess
         Path solaris = tarOf("x.tar.gz", header("h", 'X', 10), new byte[10]);
         assertThatThrownBy(() -> Archives.extract(solaris, tmp.resolve("o1"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("type 'X'");
+                .isInstanceOf(JkitException.class).hasMessageContaining("type 'X'");
         byte[] sparse = pax("GNU.sparse.major=1");
         Path gnu = tarOf("s.tar.gz", header("h", 'x', sparse.length), sparse, header("f", '0', 0));
         assertThatThrownBy(() -> Archives.extract(gnu, tmp.resolve("o2"), "tar.gz"))
@@ -225,7 +230,7 @@ class ArchivesTest {
         byte[] hidden = header("././@LongLink", 'L', 1L << 30);
         Path typed = tarOf("d5.tar.gz", header("d/", '5', 512), hidden);
         assertThatThrownBy(() -> Archives.extract(typed, tmp.resolve("o1"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("folder entry");
+                .isInstanceOf(JkitException.class).hasMessageContaining("folder entry");
         Path slash = tarOf("d0.tar.gz", header("d/", '0', 512), hidden);
         assertThatThrownBy(() -> Archives.extract(slash, tmp.resolve("o2"), "tar.gz"))
                 .hasMessageContaining("folder entry");
@@ -251,7 +256,7 @@ class ArchivesTest {
         Path twoX = tarOf("xx.tar.gz", header("h", 'x', small.length), small, header("h", 'x', big.length), big,
                 header("f", '0', 0), new byte[512]);
         assertThatThrownBy(() -> Archives.extract(twoX, tmp.resolve("o1"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("two 'x' headers");
+                .isInstanceOf(JkitException.class).hasMessageContaining("two 'x' headers");
         // a long name and a PAX path: which wins depends on their order
         byte[] name = "d/\0".getBytes(StandardCharsets.US_ASCII);
         byte[] path = pax("path=f", "size=512");
@@ -297,7 +302,7 @@ class ArchivesTest {
         }
         Files.write(archive, bytes);
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip", 10))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
+                .isInstanceOf(JkitException.class).hasMessageContaining("more than 10 entries");
     }
 
     @Test
@@ -315,21 +320,21 @@ class ArchivesTest {
         int seen = 0;
         for (int i = 0; i + 46 < bytes.length; i++) {
             if (bytes[i] == 0x50 && bytes[i + 1] == 0x4b && bytes[i + 2] == 1 && bytes[i + 3] == 2 && ++seen == 2) {
-                java.util.Arrays.fill(bytes, i + 42, i + 46, (byte) 0);
+                Arrays.fill(bytes, i + 42, i + 46, (byte) 0);
                 break;
             }
         }
         Files.write(archive, bytes);
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("share or overlap a local header");
+                .isInstanceOf(JkitException.class).hasMessageContaining("share or overlap a local header");
     }
 
     @Test
     void aNegativeBase256SizeIsRefused() throws IOException {
         // commons-compress reads 0xff... as a negative size; the scan must not read it as a huge one
         byte[] h = header("f", '0', 0);
-        java.util.Arrays.fill(h, 124, 136, (byte) 0xff);
-        java.util.Arrays.fill(h, 148, 156, (byte) ' ');
+        Arrays.fill(h, 124, 136, (byte) 0xff);
+        Arrays.fill(h, 148, 156, (byte) ' ');
         long sum = 0;
         for (byte b : h) {
             sum += b & 0xff;
@@ -337,7 +342,7 @@ class ArchivesTest {
         System.arraycopy(String.format("%06o\0 ", sum).getBytes(StandardCharsets.US_ASCII), 0, h, 148, 8);
         Path archive = tarOf("neg.tar.gz", h);
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "tar.gz"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("negative size");
+                .isInstanceOf(JkitException.class).hasMessageContaining("negative size");
     }
 
     @Test
@@ -350,7 +355,7 @@ class ArchivesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    @DisabledOnOs(OS.WINDOWS) // Unix modes
     void aZipSymlinkTargetIsNeverReadWhole() throws IOException {
         Path archive = tmp.resolve("link.zip");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
@@ -361,16 +366,16 @@ class ArchivesTest {
             zip.closeArchiveEntry();
         }
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symlink entry");
+                .isInstanceOf(JkitException.class).hasMessageContaining("symlink entry");
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // symlinks
+    @DisabledOnOs(OS.WINDOWS) // symlinks
     void aMacHomeThatIsALinkIsRefused() throws IOException {
         Path out = Files.createDirectories(tmp.resolve("out/jdk-21/Contents"));
         Files.createSymbolicLink(out.resolve("Home"), Path.of(".."));
         assertThatThrownBy(() -> Installer.locateHome(tmp.resolve("out")))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("symbolic link");
+                .isInstanceOf(JkitException.class).hasMessageContaining("symbolic link");
     }
 
     @Test
@@ -383,7 +388,7 @@ class ArchivesTest {
             }
         }
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip", 10))
-                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
+                .isInstanceOf(JkitException.class).hasMessageContaining("more than 10 entries");
     }
 
     @Test

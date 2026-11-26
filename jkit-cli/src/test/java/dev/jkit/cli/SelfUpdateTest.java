@@ -1,9 +1,12 @@
 package dev.jkit.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.sun.net.httpserver.HttpServer;
+import dev.jkit.core.Signatures;
+import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -86,8 +89,8 @@ class SelfUpdateTest {
         cmd.check = check;
         cmd.json.json = asJson;
         cmd.sumsCheck = (data, sig) -> new String(sig, StandardCharsets.UTF_8).equals("good")
-                ? new dev.jkit.core.Signatures.Result(dev.jkit.core.Signatures.Outcome.GOOD, "jkit", "jkit")
-                : new dev.jkit.core.Signatures.Result(dev.jkit.core.Signatures.Outcome.UNKNOWN_KEY, null, "made with key X");
+                ? new Signatures.Result(Signatures.Outcome.GOOD, "jkit", "jkit")
+                : new Signatures.Result(Signatures.Outcome.UNKNOWN_KEY, null, "made with key X");
         cmd.run(Context.forEnvOnline(env, new PrintStream(out, true, StandardCharsets.UTF_8)), binary, current);
         return out.toString(StandardCharsets.UTF_8);
     }
@@ -141,10 +144,10 @@ class SelfUpdateTest {
     void anUnsignedReleaseIsNotInstalledAndSaysWhy() throws Exception {
         signature = null;
         Path binary = binary("bin");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
+        assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
                 .hasMessageContaining("jkit 9.9.9 has no signed SHA256SUMS (no SHA256SUMS.asc on its release page)")
                 .hasMessageContaining("nothing was changed")
-                .satisfies(e -> assertThat(((dev.jkit.model.JkitException) e).hints())
+                .satisfies(e -> assertThat(((JkitException) e).hints())
                         .noneMatch(h -> h.contains("try again later")));
         assertThat(Files.readString(binary)).isEqualTo("old");
     }
@@ -153,7 +156,7 @@ class SelfUpdateTest {
     void refusesSumsNotSignedByJkitsKey() throws Exception {
         Path binary = binary("bin");
         signature = "forged";
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
+        assertThatThrownBy(() -> run(binary, "0.3.0", false, false))
                 .hasMessageContaining("the SHA256SUMS of jkit 9.9.9 isn't signed by jkit's release key")
                 .hasMessageContaining("nothing was changed");
         assertThat(Files.readString(binary)).isEqualTo("old");

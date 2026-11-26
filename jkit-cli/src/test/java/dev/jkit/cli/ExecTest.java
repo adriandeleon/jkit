@@ -2,11 +2,15 @@ package dev.jkit.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.jkit.core.ShellEnv;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import dev.jkit.model.ToolSpec;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -64,7 +68,7 @@ class ExecTest {
     void aWordThatIsNoToolOrVendorIsAUsageError() {
         // "graalvm" right after a JDK is Oracle GraalVM, the vendor, as in jkit use jdk@21 graalvm
         assertThat(ExecCommand.choices(List.of("jdk@21", "graalvm")))
-                .containsExactly(new ExecCommand.Choice(dev.jkit.model.ToolSpec.parse("jdk@21"), "graalvm"));
+                .containsExactly(new ExecCommand.Choice(ToolSpec.parse("jdk@21"), "graalvm"));
         assertThatThrownBy(() -> ExecCommand.choices(List.of("mvn", "test")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("vendor for maven");
         assertThatThrownBy(() -> ExecCommand.choices(List.of("./build.sh")))
@@ -131,7 +135,7 @@ class ExecTest {
         // Windows names it "Path"; System.getenv() is case-sensitive, so jkit reads it through Envs
         env.remove("PATH");
         env.put("Path", "/usr/bin");
-        env = dev.jkit.model.Envs.of(env, true);
+        env = Envs.of(env, true);
         ExecCommand.Plan plan = plan("jdk@21");
         assertThat(plan.variables().get("PATH")).endsWith(File.pathSeparator + "/usr/bin");
         Map<String, String> child = ExecCommand.childEnv(env, plan);
@@ -184,7 +188,7 @@ class ExecTest {
      */
     private String endedBy(String script) throws Exception {
         Path perl = Path.of("/usr/bin/perl");
-        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(perl), "no perl to tell how a process ended");
+        assumeTrue(Files.isExecutable(perl), "no perl to tell how a process ended");
         String jvm = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         ProcessBuilder pb = new ProcessBuilder(perl.toString(), "-e", "system(@ARGV); print(($? & 127) . ' ' . ($? >> 8))",
                 jvm, "-cp", System.getProperty("java.class.path"), "dev.jkit.cli.Main", "exec", "--no-project", "--",
@@ -192,7 +196,7 @@ class ExecTest {
         pb.environment().put("JKIT_HOME", home.toString());
         pb.environment().put("HOME", tmp.resolve("user").toString());
         Process p = pb.start();
-        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         p.waitFor();
         return out;
     }
