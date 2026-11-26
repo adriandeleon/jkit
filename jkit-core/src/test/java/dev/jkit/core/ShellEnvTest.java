@@ -179,6 +179,18 @@ class ShellEnvTest {
     }
 
     @Test
+    void aJavaHomeWithATrailingSlashIsNotPutOnPathTwice(@TempDir Path tmp) throws Exception {
+        Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
+        // the PATH entry as an older hook wrote it, with a doubled separator
+        String written = mine + File.separator + File.separator + "bin";
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path(written, "/usr/bin"),
+                "JAVA_HOME", mine + File.separator));
+        apply(env, ShellEnv.use(env, home, Tool.JDK, jdk17, false));
+        Map<String, String> reset = ShellEnv.reset(env, home, Tool.JDK);
+        assertThat(reset.get("PATH")).isEqualTo(path(written, "/usr/bin"));
+    }
+
+    @Test
     void backToTheGlobalLinkPutsTheGlobalBinBack(@TempDir Path tmp) throws Exception {
         JkitHome own = new JkitHome(tmp.resolve(".jkit"));
         Files.createDirectories(own.global(Tool.JDK).getParent());
