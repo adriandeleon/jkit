@@ -146,6 +146,30 @@ class SourcesTest {
     }
 
     @Test
+    void correttosCatchAllLatestEntriesAreSkipped() throws IOException {
+        // foojay's "8" entry links corretto.aws/downloads/latest/..., whatever build is newest that day
+        String builds = "{\"result\":[" + String.join(",",
+                pkg("amazon-corretto-8-x64-linux-jdk", "corretto", 8, "8", "glibc", ""),
+                pkg("r", "corretto", 8, "8.0.472+8", "glibc", "")
+                        .replace("r.tar.gz", "amazon-corretto-8.472.08.1-linux-x64.tar.gz")) + "]}";
+        String info = info("https://corretto.aws/downloads/resources/8.472.08.1/amazon-corretto-8.472.08.1-linux-x64.tar.gz", "");
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=8", builds,
+                "ids/r", info)), FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.builds(8, Vendor.of("corretto"), Platform.LINUX_X64, false, false))
+                .extracting(p -> p.version().raw()).containsExactly("8.0.472+8");
+        assertThat(foojay.resolve(Tool.JDK, "8", Vendor.of("corretto"), Platform.LINUX_X64, false, false)
+                .version().raw()).isEqualTo("8.0.472+8");
+        // and a /latest/ link under another name is no direct download
+        String latest = info("https://corretto.aws/downloads/latest/amazon-corretto-8-x64-linux-jdk.tar.gz", "");
+        Pkg b = new Pkg("b", Vendor.of("corretto"), 8, Version.parse("8.0.472+8"), "b.tar.gz", "tar.gz", "lts", true);
+        assertThat(new FoojaySource(fake(Map.of("ids/b", latest)), FoojaySource.DEFAULT_BASE).availability(b)
+                .downloadable()).isFalse();
+        // other vendors' names are theirs
+        assertThat(FoojaySource.latestCorretto(new Pkg("z", Vendor.of("zulu"), 8, Version.parse("8"),
+                "amazon-corretto-8-x.tar.gz", "tar.gz", "lts", true))).isFalse();
+    }
+
+    @Test
     void onlyBuildsOfTheVendorAndMajorAskedForAreCandidates() throws IOException {
         // asked for Temurin 21, a hostile or broken list answers with builds that would skip the
         // signature check: one it calls Zulu, and Temurin builds from before Adoptium signed

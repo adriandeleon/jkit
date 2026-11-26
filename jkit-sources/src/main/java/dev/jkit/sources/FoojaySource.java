@@ -222,6 +222,9 @@ public final class FoojaySource {
         }
         URI download = Http.sent(url, "a download", base);
         String vendor = pkg.vendor().foojayName();
+        if (vendor.equals("corretto") && download.getRawPath() != null && download.getRawPath().contains("/latest/")) {
+            return null; // what packages() skips, should a list name it otherwise
+        }
         if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
                 && !onVendorHost(vendor, download)) {
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
@@ -450,6 +453,18 @@ public final class FoojaySource {
         return new JkitException(vendor + " has no build matching " + what + " for " + platform);
     }
 
+    /**
+     * foojay lists, next to each Corretto release, a catch-all entry per major whose link is
+     * corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz: whatever Amazon's
+     * newest build is that day, under a bare version ("8", "11", "21"). Not a build jkit can name,
+     * pin or tell apart from the real one with the same number. The list carries no links, but
+     * these, and only these, are named for their major alone ({@code amazon-corretto-21-...}),
+     * where a release is named for its version ({@code amazon-corretto-21.0.9.10.1-...}).
+     */
+    static boolean latestCorretto(Pkg pkg) {
+        return pkg.vendor().foojayName().equals("corretto") && pkg.fileName().matches("amazon-corretto-[0-9]+-.*");
+    }
+
     private List<Pkg> packages(Platform platform, String extra, boolean fx) throws IOException {
         String query = "packages?operating_system=" + platform.os()
                 + "&architecture=" + platform.arch()
@@ -479,7 +494,7 @@ public final class FoojaySource {
                     n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
                     Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"),
                     !n.path("directly_downloadable").isBoolean() || n.path("directly_downloadable").asBoolean());
-            if (pkg.vendor().isRetired()) {
+            if (pkg.vendor().isRetired() || latestCorretto(pkg)) {
                 continue;
             }
             String key = pkg.vendor().foojayName() + "|" + pkg.version().raw();
