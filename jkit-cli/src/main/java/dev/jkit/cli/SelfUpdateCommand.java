@@ -123,13 +123,20 @@ final class SelfUpdateCommand implements Callable<Integer> {
      */
     private static List<Path> update(Context ctx, URI base, SelfUpdate.Release latest, Path binary, Changes report)
             throws Exception {
-        // under the install lock: an install clears tmp/install-* folders that no one holds
+        Path work;
+        // Created under the install lock, as an install creates its own: an install clears
+        // tmp/install-* folders no running jkit holds, and this one is held from the moment it
+        // exists. The download and the test run of the new binary then go without the lock, so
+        // installs elsewhere don't wait for them.
         try (AutoCloseable lock = ctx.store.lock()) {
             Perms.mkdirs(ctx.home.tmp());
-            Path work = Files.createTempDirectory(ctx.home.tmp(), "install-self-");
-            WorkDirs.add(work);
-            try {
-                Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
+            work = WorkDirs.create(ctx.home.tmp(), "install-self-");
+        }
+        try {
+            Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
+            // Under the lock again, briefly: two self-updates at once must not interleave their
+            // renames of the binary and the DLLs beside it.
+            try (AutoCloseable lock = ctx.store.lock()) {
                 List<Path> olds = new ArrayList<>();
                 if (ctx.platform.isWindows()) {
                     for (String name : SelfUpdate.runtimeToReplace(fresh, binary)) {
@@ -158,14 +165,13 @@ final class SelfUpdateCommand implements Callable<Integer> {
                     olds.add(0, old);
                 }
                 return olds;
-            } finally {
-                try {
-                    Fs.deleteRecursively(work);
-                } catch (IOException e) {
-                    // a leftover in tmp/ is cleaned up by the next install or jkit prune
-                } finally {
-                    WorkDirs.remove(work);
-                }
+            }
+        } finally {
+            WorkDirs.remove(work); // releases its lock first, since Windows can't delete an open file
+            try {
+                Fs.deleteRecursively(work);
+            } catch (IOException e) {
+                // a leftover in tmp/ is cleaned up by the next install or jkit prune
             }
         }
     }
