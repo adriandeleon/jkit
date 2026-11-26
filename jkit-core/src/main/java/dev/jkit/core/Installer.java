@@ -150,7 +150,7 @@ public final class Installer {
                 // Another jkit is downloading this very build: wait for it rather than download it
                 // a second time, then look again. If that install fails, this one downloads.
                 if (!waited) {
-                    waiting.accept("another jkit is installing " + artifact.label() + "; waiting for it to finish…");
+                    waiting.accept("another jkit is installing " + artifact.label() + "; waiting for it to finish… (Ctrl-C to stop)");
                     waited = true;
                 }
                 pause();
@@ -246,11 +246,14 @@ public final class Installer {
 
     /**
      * Whether a running jkit (another one, or another thread of this one) is downloading into a
-     * work folder named {@code prefix...}: the same build. Only called with the lock held.
+     * work folder named {@code prefix<digits>}, the name {@link WorkDirs#create} gives it: the same
+     * build. Exactly that, not any name starting with it: 21.0.9+10-zulu- also starts
+     * 21.0.9+10-zulu-fx-..., and Maven 4.0.0's 4.0.0-rc-4's. Only called with the lock held.
      */
-    private static boolean downloading(Path tmp, String prefix) {
+    static boolean downloading(Path tmp, String prefix) {
+        Pattern name = Pattern.compile(Pattern.quote(prefix) + "[0-9]+");
         try (Stream<Path> children = Files.list(tmp)) {
-            return children.anyMatch(c -> c.getFileName().toString().startsWith(prefix)
+            return children.anyMatch(c -> name.matcher(c.getFileName().toString()).matches()
                     && WorkDirs.use(c) == WorkDirs.Use.IN_USE);
         } catch (IOException e) {
             return false;
