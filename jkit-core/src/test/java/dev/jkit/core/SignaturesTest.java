@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.sources.FoojaySource;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -363,6 +364,17 @@ class SignaturesTest {
         Signatures.Result bad = Signatures.verify(other, sign(subkey, DATA, HashAlgorithmTags.SHA256, false), key, ring);
         assertThat(bad.outcome()).isEqualTo(Signatures.Outcome.BAD);
         assertThat(bad.detail()).isEqualTo("Apache Maven's key " + fingerprint(vendor).substring(24) + " made it");
+    }
+
+    @Test
+    void theVendorsWithKeysAreTheOnesFoojaySourceTreatsAsSigning() {
+        // FoojaySource pins these vendors' downloads to their servers and fetches their .sig
+        Set<String> withKeys = new HashSet<>();
+        Signatures.KEYS.stream().filter(k -> k.vendor() != null).forEach(k -> withKeys.add(k.vendor()));
+        assertThat(withKeys).isEqualTo(FoojaySource.SIGNING_VENDORS);
+        assertThat(Signatures.RETIRED.keySet()).isEqualTo(FoojaySource.RETIRED_KEY_HOSTS.keySet());
+        assertThatThrownBy(() -> Signatures.Key.vendor("zulu", "Azul", "azul.asc", "AB"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

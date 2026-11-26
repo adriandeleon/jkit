@@ -336,6 +336,22 @@ class SourcesTest {
     }
 
     @Test
+    void everySigningVendorHasItsSignedBuildsAndServerKnown() {
+        // a vendor added to SIGNING_VENDORS without the rules below would fail closed or open
+        for (String vendor : FoojaySource.SIGNING_VENDORS) {
+            assertThat(FoojaySource.vendorSigns(Vendor.fromFoojay(vendor), Version.parse("21.0.9"))).as(vendor).isTrue();
+            assertThat(FoojaySource.vendorHost(vendor)).as(vendor).isNotBlank();
+        }
+        assertThat(FoojaySource.SIGNING_VENDORS).containsAll(FoojaySource.RETIRED_KEY_HOSTS.keySet());
+        assertThat(FoojaySource.onVendorHost("temurin", URI.create(
+                "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.9%2B10/x.tar.gz"), "x.tar.gz")).isTrue();
+        assertThat(FoojaySource.onVendorHost("microsoft", URI.create("https://aka.ms/download-jdk/x.tar.gz"),
+                "x.tar.gz")).isTrue();
+        assertThat(FoojaySource.onVendorHost("corretto", URI.create(
+                "https://corretto.aws/downloads/resources/21.0.9.10.1/x.tar.gz"), "x.tar.gz")).isTrue();
+    }
+
+    @Test
     void muslPlatformResolvesMuslBuilds() throws IOException {
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/c", INFO.replace("b.tar.gz", "c.tar.gz"))),
                 FoojaySource.DEFAULT_BASE);

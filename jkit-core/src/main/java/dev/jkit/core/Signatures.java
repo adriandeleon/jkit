@@ -3,6 +3,7 @@ package dev.jkit.core;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
+import dev.jkit.sources.FoojaySource;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,6 +59,10 @@ public final class Signatures {
             if ((vendor != null && tool != null) || fingerprints.isEmpty()) {
                 throw new IllegalArgumentException("a key is for one vendor, one tool, or jkit");
             }
+            // FoojaySource decides where a signing vendor's builds may come from and which have a .sig
+            if (vendor != null && !FoojaySource.SIGNING_VENDORS.contains(vendor)) {
+                throw new IllegalArgumentException(vendor + " isn't in FoojaySource.SIGNING_VENDORS");
+            }
             fingerprints = List.copyOf(fingerprints);
         }
 
@@ -110,7 +115,7 @@ public final class Signatures {
      * told apart from one by a key jkit doesn't know yet. Amazon signed each of its 2019 Corretto
      * releases (8u222, 8u232, 11.0.4, 11.0.5; foojay still lists them) with a key of its own: SHA-1
      * signatures, by RSA keys that expired in 2024. jkit has none of them, and a newer jkit won't
-     * either.
+     * either. Its vendors are FoojaySource.RETIRED_KEY_HOSTS's.
      */
     static final Map<String, Set<String>> RETIRED = Map.of("corretto", Set.of(
             "BD93DF06B540D62A", "E9B1F93E1A158134", // 8.222.10.1 to .3, 8.222.10.4

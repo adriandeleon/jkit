@@ -68,8 +68,8 @@ public final class FoojaySource {
          * still serves from its old CloudFront host.
          */
         public boolean retiredKey() {
-            return pkg != null && signature != null && pkg.vendor().foojayName().equals("corretto")
-                    && CORRETTO_2019_HOST.equalsIgnoreCase(signature.getHost());
+            String host = pkg == null ? null : RETIRED_KEY_HOSTS.get(pkg.vendor().foojayName());
+            return host != null && signature != null && host.equalsIgnoreCase(signature.getHost());
         }
     }
 
@@ -158,8 +158,19 @@ public final class FoojaySource {
         }
     }
 
-    /** The JDK vendors jkit has signing keys for (Signatures in jkit-core). */
-    static final Set<String> SIGNING_VENDORS = Set.of("temurin", "microsoft", "corretto");
+    /**
+     * The JDK vendors jkit has signing keys for. The one list: Signatures in jkit-core refuses a
+     * vendor key for any other, and the tests check that it has a key for each of these, and that
+     * {@link #vendorSigns}, {@link #onVendorHost} and {@link #vendorHost} know each of them.
+     */
+    public static final Set<String> SIGNING_VENDORS = Set.of("temurin", "microsoft", "corretto");
+
+    /**
+     * The vendors among {@link #SIGNING_VENDORS} that signed some builds with keys they have since
+     * retired, and the host that serves exactly those builds. Signatures' retired key IDs are for
+     * the same vendors.
+     */
+    public static final Map<String, String> RETIRED_KEY_HOSTS = Map.of("corretto", CORRETTO_2019_HOST);
 
     /**
      * The first Temurin release of each feature version with a {@code .sig} on GitHub: Adoptium
@@ -224,11 +235,12 @@ public final class FoojaySource {
     }
 
     /** Where {@link #onVendorHost} expects the vendor's downloads, for a message. */
-    private static String vendorHost(String vendor) {
+    static String vendorHost(String vendor) {
         return switch (vendor) {
             case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/releases/)";
             case "microsoft" -> "aka.ms/download-jdk/";
-            default -> "corretto.aws/downloads/resources/";
+            case "corretto" -> "corretto.aws/downloads/resources/";
+            default -> throw new IllegalArgumentException("no download host known for " + vendor);
         };
     }
 
