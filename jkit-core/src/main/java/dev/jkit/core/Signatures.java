@@ -13,6 +13,7 @@ import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.bouncycastle.bcpg.HashAlgorithmTags;
 import org.bouncycastle.openpgp.PGPCompressedData;
@@ -74,7 +75,8 @@ public final class Signatures {
      * <li>Microsoft: the public key linked from the Microsoft Build of OpenJDK download page.
      * <li>Amazon: the key linked from the "Signature Verification" section of the Corretto
      *     downloads page (the same key as apt.corretto.aws/corretto.key). It signs every Corretto
-     *     line, 8 to the newest.
+     *     build from January 2020 on (8u242, 11.0.6), in every line from 8 to the newest; the 2019
+     *     builds before those are signed with {@link #RETIRED} keys.
      * <li>Apache Maven: Maven's KEYS file (downloads.apache.org/maven/KEYS). Each release is signed
      *     by whichever release manager cut it; these are the four who signed 3.9.0 and later
      *     (Tamas Cservenak's two keys, Slawomir Jaranowski, Guillaume Nodet with his signing
@@ -93,6 +95,18 @@ public final class Signatures {
                     "84789D24DF77A32433CE1F079EB80E92EB2135B1",  // Slawomir Jaranowski
                     "EA23DB1360D9029481E7F2EFECDFEA3CB4493B94"), // Guillaume Nodet
             Key.tool(Tool.SBT, "sbt", "sbt.asc", "2EE0EA64E40A89B84B2DF73499E82A75642AC823"));
+
+    /**
+     * Keys a publisher has stopped using, by long key ID, so that a signature made with one is
+     * told apart from one by a key jkit doesn't know yet. Amazon signed each of its 2019 Corretto
+     * releases (8u222, 8u232, 11.0.4, 11.0.5; foojay still lists them) with a key of its own: SHA-1
+     * signatures, by RSA keys that expired in 2024. jkit has none of them, and a newer jkit won't
+     * either.
+     */
+    static final Map<String, Set<String>> RETIRED = Map.of("corretto", Set.of(
+            "BD93DF06B540D62A", "E9B1F93E1A158134", // 8.222.10.1 to .3, 8.222.10.4
+            "9CB3BC6FF6C9FC19", "1D03C279C44F4D36", // 8.232.09.1, 8.232.09.2
+            "5A812B5B67F4FCB4", "12EABAC5209DDBC0", "FF41EA72B3E42D5D")); // 11.0.4.11.1, 11.0.5.10.1, 11.0.5.10.2
 
     /** The primary fingerprint of jkit's release key; release.yml checks the signing key against it too. */
     public static final String JKIT_FINGERPRINT = "A9444E8F5048FEBCB942E110FC89EBE68C4539E6";
@@ -117,6 +131,8 @@ public final class Signatures {
         BAD,
         /** Not by a key jkit has for this publisher (it may have a new key): checksum only. */
         UNKNOWN_KEY,
+        /** By one of the publisher's {@link #RETIRED} keys, which jkit doesn't have: checksum only. */
+        RETIRED_KEY,
         /** Not a signature jkit can check (damaged, or a weak hash): checksum only. */
         UNREADABLE
     }
@@ -185,10 +201,16 @@ public final class Signatures {
             return new Result(Outcome.UNREADABLE, null, "not an OpenPGP signature");
         }
         String others = null;
+        String retired = null;
         for (PGPSignature sig : signatures) {
             PGPPublicKey signer = ring.getPublicKey(sig.getKeyID());
             if (signer == null) {
-                others = "made with key " + keyId(sig.getKeyID()) + ", not " + key.described();
+                String id = keyId(sig.getKeyID());
+                if (key.vendor() != null && RETIRED.getOrDefault(key.vendor(), Set.of()).contains(id)) {
+                    retired = "it is signed with " + key.owner() + "'s retired key " + id
+                            + ", one of the keys of its 2019 releases, which expired in 2024";
+                }
+                others = "made with key " + id + ", not " + key.described();
                 continue;
             }
             // the signing key may be a subkey (sbt, Maven): name the primary key it belongs to
@@ -220,7 +242,8 @@ public final class Signatures {
                 return new Result(Outcome.UNREADABLE, null, "it can't be checked (" + e.getMessage() + ")");
             }
         }
-        return new Result(Outcome.UNKNOWN_KEY, null, others);
+        return retired != null ? new Result(Outcome.RETIRED_KEY, null, retired)
+                : new Result(Outcome.UNKNOWN_KEY, null, others);
     }
 
     private static PGPSignatureList signatures(byte[] signature) throws IOException {

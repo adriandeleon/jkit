@@ -5,6 +5,7 @@ import dev.jkit.core.Installed;
 import dev.jkit.core.Store;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
@@ -113,9 +114,14 @@ final class DoctorInstallChecks {
             }
         }
         Path tmp = r.ctx.home.tmp();
-        if (Files.isDirectory(tmp) && hasEntries(tmp)) {
+        List<Path> left = leftIn(tmp);
+        if (!left.isEmpty()) {
             any = true;
-            r.warn(human(size(tmp)) + " left in " + r.tilde(tmp) + " by interrupted downloads",
+            long bytes = 0;
+            for (Path p : left) {
+                bytes += size(p);
+            }
+            r.warn(human(bytes) + " left in " + r.tilde(tmp) + " by interrupted downloads",
                     "when no jkit install is running: " + r.removeAll(r.arg(tmp) + File.separator + "*")); // the * outside any quotes
         }
         if (!any) {
@@ -257,9 +263,13 @@ final class DoctorInstallChecks {
         }
     }
 
-    private static boolean hasEntries(Path dir) throws IOException {
-        try (Stream<Path> children = Files.list(dir)) {
-            return children.findAny().isPresent();
+    /** What is in tmp/, but the folders installs running right now are downloading into. */
+    private static List<Path> leftIn(Path tmp) throws IOException {
+        if (!Files.isDirectory(tmp)) {
+            return List.of();
+        }
+        try (Stream<Path> children = Files.list(tmp)) {
+            return children.filter(p -> !WorkDirs.inUse(p)).toList();
         }
     }
 

@@ -36,6 +36,12 @@ import java.util.zip.ZipFile;
 /**
  * Download, check checksum, unpack into tmp/, check the tool's executable, then move into
  * tools/ in one rename. An interrupted install leaves nothing in tools/.
+ * <p>
+ * The install lock is held only to look at tools/ and to change it: to see whether the build is
+ * already installed and clear what interrupted installs left in tmp/, and again for the move.
+ * The download and checks in between run in a work folder of this process's own ({@link
+ * WorkDirs#create}), so two installs of different tools, in two terminals or CI jobs, download
+ * side by side, and remove, prune or self-update don't wait for a download.
  */
 public final class Installer {
 
@@ -81,7 +87,7 @@ public final class Installer {
      *                          alone: jkit's commands require one whenever the publisher signs its
      *                          downloads, unless --allow-unverified
      */
-    @SuppressWarnings("try") // the lock is held for the whole block
+    @SuppressWarnings("try") // the lock is held for the block, unused inside it
     public Result install(Artifact artifact, Http.Progress progress, boolean signatureRequired) throws IOException {
         Http.requireSecure(artifact.url());
         Tool storeTool = artifact.tool().storeTool();
@@ -94,90 +100,109 @@ public final class Installer {
         }
         Installed installed = new Installed(storeTool, artifact.version(), artifact.vendor(), dest, artifact.fx());
         home.create();
-        try (FileChannel channel = FileChannel.open(home.lockFile(),
-                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
-             FileLock ignored = lock(channel)) {
-            if (Files.isDirectory(dest)) {
-                if (!Files.isRegularFile(dest.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
-                    throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
-                            "move or delete that folder, then install again");
-                }
-                return new Result(installed, false, Store.verified(dest), List.of());
+        List<Path> removed;
+        Path work;
+        try (Held held = lock()) {
+            Result existing = existing(installed, List.of());
+            if (existing != null) {
+                return existing;
             }
             Perms.mkdirs(home.tmp());
-            List<Path> removed = removeLeftovers(home.tmp());
-            Path work = Files.createTempDirectory(home.tmp(), "install-");
-            WorkDirs.add(work); // Ctrl-C deletes it (jkit's signal handler)
-            IOException failure = null;
+            removed = removeLeftovers(home.tmp());
+            // made under the lock, so no other jkit takes it for a leftover before it is held
+            work = WorkDirs.create(home.tmp(), "install-"); // Ctrl-C deletes it too (jkit's signal handler)
+        }
+        IOException failure = null;
+        try {
+            Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
+            http.download(artifact.url(), archive, progress);
+            boolean verified = false;
+            if (artifact.checksum() != null && artifact.checksumAlgorithm() != null) {
+                // md5 and sha1 still catch a broken download, but don't count as verified
+                Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
+                verified = Checksums.strong(artifact.checksumAlgorithm());
+            }
+            List<String> notes = new ArrayList<>();
+            boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
+            if (signatureRequired && !signable) {
+                throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
+                        + " check; nothing was installed");
+            }
+            String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
+            if (artifact.signature() == null && artifact.checksum() != null
+                    && Signatures.covers(artifact.tool(), artifact.vendor())) {
+                // Temurin before mid-2022, Maven before 3.9.0: said, so the user knows what was checked
+                notes.add("note: no signature jkit can check is published for " + artifact.label()
+                        + "; only its checksum was checked");
+            }
+            // a good signature by a built-in key is a stronger check than any checksum; one that
+            // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
+            // whoever can replace the download can usually replace its checksum too
+            verified = signedBy != null || (verified && !signable);
+            Path out = work.resolve("out");
             try {
-                Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
-                http.download(artifact.url(), archive, progress);
-                boolean verified = false;
-                if (artifact.checksum() != null && artifact.checksumAlgorithm() != null) {
-                    // md5 and sha1 still catch a broken download, but don't count as verified
-                    Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
-                    verified = Checksums.strong(artifact.checksumAlgorithm());
+                Archives.extract(archive, out, artifact.archiveType());
+            } catch (IOException e) {
+                // truncated or corrupt (EOF, "not a ZIP archive"): the download, not this disk
+                if (e instanceof FileSystemException) {
+                    throw e;
                 }
-                List<String> notes = new ArrayList<>();
-                boolean signable = artifact.signature() != null && Signatures.covers(artifact.tool(), artifact.vendor());
-                if (signatureRequired && !signable) {
-                    throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
-                            + " check; nothing was installed");
+                throw new JkitException("the downloaded archive for " + artifact.label() + " is damaged ("
+                        + Visible.of(String.valueOf(e.getMessage())) + "); nothing was installed",
+                        "try again; if it keeps happening, the source has a broken file: pick another version");
+            }
+            Path toolHome = locateHome(out);
+            requireLinksInside(toolHome);
+            requireExecutable(storeTool, toolHome, artifact.label());
+            if (signedBy != null) {
+                // a signature covers the file, not its name: any build the publisher signed would
+                // pass, an older one included, and the checksum next to it may come from the same
+                // server as the download. The unpacked tool must be the version asked for
+                requireSignedVersion(storeTool, toolHome, artifact);
+            }
+            Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
+            try (Held held = lock()) {
+                // another jkit may have installed the same build meanwhile: theirs stays, ours goes
+                Result existing = existing(installed, removed);
+                if (existing != null) {
+                    return existing;
                 }
-                String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
-                if (artifact.signature() == null && artifact.checksum() != null
-                        && Signatures.covers(artifact.tool(), artifact.vendor())) {
-                    // Temurin before mid-2022, Maven before 3.9.0: said, so the user knows what was checked
-                    notes.add("note: no signature jkit can check is published for " + artifact.label()
-                            + "; only its checksum was checked");
-                }
-                // a good signature by a built-in key is a stronger check than any checksum; one that
-                // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
-                // whoever can replace the download can usually replace its checksum too
-                verified = signedBy != null || (verified && !signable);
-                Path out = work.resolve("out");
-                try {
-                    Archives.extract(archive, out, artifact.archiveType());
-                } catch (IOException e) {
-                    // truncated or corrupt (EOF, "not a ZIP archive"): the download, not this disk
-                    if (e instanceof FileSystemException) {
-                        throw e;
-                    }
-                    throw new JkitException("the downloaded archive for " + artifact.label() + " is damaged ("
-                            + Visible.of(String.valueOf(e.getMessage())) + "); nothing was installed",
-                            "try again; if it keeps happening, the source has a broken file: pick another version");
-                }
-                Path toolHome = locateHome(out);
-                requireLinksInside(toolHome);
-                requireExecutable(storeTool, toolHome, artifact.label());
-                if (signedBy != null) {
-                    // a signature covers the file, not its name: any build the publisher signed would
-                    // pass, an older one included, and the checksum next to it may come from the same
-                    // server as the download. The unpacked tool must be the version asked for
-                    requireSignedVersion(storeTool, toolHome, artifact);
-                }
-                Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
                 Perms.mkdirs(dest.getParent());
                 moveIntoPlace(toolHome, dest);
-                return new Result(installed, true, verified, removed, signedBy, List.copyOf(notes));
-            } catch (IOException | RuntimeException e) {
-                if (e instanceof IOException io) {
-                    failure = io;
+            }
+            return new Result(installed, true, verified, removed, signedBy, List.copyOf(notes));
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof IOException io) {
+                failure = io;
+            }
+            throw e;
+        } finally {
+            WorkDirs.remove(work); // its lock first: Windows deletes no open file
+            try {
+                Fs.deleteRecursively(work);
+            } catch (IOException e) {
+                if (failure != null) {
+                    failure.addSuppressed(e);
                 }
-                throw e;
-            } finally {
-                try {
-                    Fs.deleteRecursively(work);
-                } catch (IOException e) {
-                    if (failure != null) {
-                        failure.addSuppressed(e);
-                    }
-                    // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
-                } finally {
-                    WorkDirs.remove(work);
-                }
+                // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
             }
         }
+    }
+
+    /**
+     * The build already installed, as a result that says so, or null when it isn't. Only called
+     * with the lock held.
+     */
+    private static Result existing(Installed installed, List<Path> removed) {
+        Path dest = installed.home();
+        if (!Files.isDirectory(dest)) {
+            return null;
+        }
+        if (!Files.isRegularFile(dest.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
+            throw new JkitException(dest + " exists but isn't a jkit install (no " + Store.MARKER + ")",
+                    "move or delete that folder, then install again");
+        }
+        return new Result(installed, false, Store.verified(dest), removed);
     }
 
     /**
@@ -220,8 +245,10 @@ public final class Installer {
                             + "pick another build or vendor");
             default -> {
                 String why = "couldn't check the signature of " + label + ": " + result.detail();
+                // a key jkit doesn't know may be the publisher's new one; a retired one stays unknown
                 String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
-                        ? " (a newer jkit may know a new key: jkit self-update)" : "";
+                        ? " (a newer jkit may know a new key: jkit self-update)"
+                        : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
                 if (required) {
                     throw new SignatureRequired(why + newer + refused);
                 }
@@ -231,14 +258,17 @@ public final class Installer {
         }
     }
 
-    /** Folders an interrupted install (Ctrl-C skips finally blocks) left; only called with the lock held. */
+    /**
+     * Folders an interrupted install (Ctrl-C skips finally blocks) left, not those another jkit is
+     * downloading into right now ({@link WorkDirs#inUse}); only called with the lock held.
+     */
     private static List<Path> removeLeftovers(Path tmp) {
         List<Path> removed = new ArrayList<>();
         try (Stream<Path> children = Files.list(tmp)) {
             for (Path child : children.toList()) {
                 String name = child.getFileName().toString();
-                // remove also works under the lock, so a remove- folder here is a leftover too
-                if (name.startsWith("install-") || name.startsWith("remove-")) {
+                // remove and self-update work under the lock, so their folders here are leftovers too
+                if ((name.startsWith("install-") || name.startsWith("remove-")) && !WorkDirs.inUse(child)) {
                     try {
                         Fs.deleteRecursively(child);
                         removed.add(child);
@@ -326,13 +356,7 @@ public final class Installer {
                 Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
                 return;
             } catch (AtomicMoveNotSupportedException e) {
-                // tools/ is on another disk than tmp/ (a link to it): copy next to the destination,
-                // then rename there, so the install still appears in one step
-                Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
-                Fs.deleteRecursively(partial);
-                Fs.copyTree(from, partial);
-                Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
-                Fs.deleteRecursively(from);
+                copyAcross(from, to, Fs::copyTree);
                 return;
             } catch (AccessDeniedException e) {
                 if (!windows || attempt >= 10) {
@@ -348,14 +372,63 @@ public final class Installer {
         }
     }
 
-    /** The store lock; says so on stderr when another jkit holds it, instead of hanging silently. */
-    private static FileLock lock(FileChannel channel) throws IOException {
-        FileLock lock = channel.tryLock();
-        if (lock != null) {
-            return lock;
+    /** How {@link #copyAcross} copies a folder: {@link Fs#copyTree}, or a test's stand-in. */
+    @FunctionalInterface
+    interface Copy {
+        void copy(Path from, Path to) throws IOException;
+    }
+
+    /**
+     * tools/ is on another disk than tmp/ (a link to it): copy next to the destination, then
+     * rename there, so the install still appears in one step. The copy, {@code .<name>.partial},
+     * is deleted if it fails, and by Ctrl-C (WorkDirs) while it runs.
+     */
+    static void copyAcross(Path from, Path to, Copy copy) throws IOException {
+        Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
+        Fs.deleteRecursively(partial);
+        WorkDirs.add(partial);
+        try {
+            copy.copy(from, partial);
+            Files.move(partial, to, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException | RuntimeException e) {
+            try {
+                Fs.deleteRecursively(partial);
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed); // jkit prune and doctor find what is left
+            }
+            throw e;
+        } finally {
+            WorkDirs.remove(partial);
         }
-        System.err.println("waiting for another jkit to finish installing…");
-        return channel.lock();
+        Fs.deleteRecursively(from);
+    }
+
+    /** The store lock, held until closed. */
+    private interface Held extends AutoCloseable {
+        @Override
+        void close() throws IOException;
+    }
+
+    /** Takes the store lock; says so on stderr when another jkit holds it, instead of hanging silently. */
+    private Held lock() throws IOException {
+        FileChannel channel = FileChannel.open(home.lockFile(),
+                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
+        try {
+            FileLock lock = channel.tryLock();
+            if (lock == null) {
+                System.err.println("waiting for another jkit to finish installing…");
+                lock = channel.lock();
+            }
+            FileLock held = lock;
+            return () -> {
+                try (channel) {
+                    held.release();
+                }
+            };
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
     }
 
     /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */

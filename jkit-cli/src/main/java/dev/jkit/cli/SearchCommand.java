@@ -299,7 +299,7 @@ final class SearchCommand implements Callable<Integer> {
         if (!a.downloadable()) {
             return Verdict.NO_DOWNLOAD;
         }
-        boolean signed = a.signature() != null
+        boolean signed = a.signature() != null && !a.retiredKey()
                 && Signatures.owner(spec.tool(), a.pkg().vendor()) != null;
         return a.checksum() || signed ? Verdict.OK : Verdict.UNVERIFIED;
     }
