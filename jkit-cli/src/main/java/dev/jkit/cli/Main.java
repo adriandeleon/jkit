@@ -18,7 +18,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
-import sun.misc.SignalHandler;
 
 @Command(name = "jkit",
         mixinStandardHelpOptions = true,
@@ -159,7 +158,7 @@ public final class Main implements Runnable {
                 }
                 System.exit(128 + signalNumber(name));
             }, name);
-            if (!saved.isEmpty() && saved.getFirst().previous() == SignalHandler.SIG_IGN) {
+            if (Signals.wasIgnored(saved)) {
                 Signals.restore(saved);
             }
         }

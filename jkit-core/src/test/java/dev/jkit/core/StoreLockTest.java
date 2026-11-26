@@ -35,7 +35,7 @@ class StoreLockTest {
         assertThat(probe(home.lockFile())).isEqualTo("held");
         // another thread of this jkit waits its turn, and says so
         CompletableFuture<Void> other = CompletableFuture.runAsync(() -> {
-            try (Store.Lock lock = store.lock()) {
+            try (var _ = store.lock()) {
                 // got it
             } catch (Exception e) {
                 throw new IllegalStateException(e);

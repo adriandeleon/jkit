@@ -64,6 +64,11 @@ final class Signals {
         return saved;
     }
 
+    /** Whether the first signal {@link #handle} took over had been ignored before (nohup, a background job). */
+    static boolean wasIgnored(List<Saved> saved) {
+        return !saved.isEmpty() && saved.getFirst().previous() == SignalHandler.SIG_IGN;
+    }
+
     /**
      * The signal a child's exit code says ended it (128 + its number, on Unix): HUP, INT or TERM;
      * null for any other code, and on Windows, where exit codes don't mean signals.

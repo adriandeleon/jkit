@@ -113,7 +113,7 @@ final class RemoveCommand implements Callable<Integer> {
         for (Installed i : matches) {
             removed.add(JsonOut.installed(ctx, i));
             // not while an install of it runs (lock), nor while a link is pointed at it (linkLock)
-            try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
+            try (var _ = ctx.store.lock(); var _ = ctx.store.linkLock()) {
                 changes.addAll(remove(ctx, i, here, json.json ? ctx.err : ctx.out).json());
             } catch (PartialFailure e) {
                 changes.addAll(e.changes()); // this one's folder is gone, though a link step failed

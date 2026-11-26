@@ -305,7 +305,7 @@ final class UpgradeCommand implements Callable<Integer> {
             Path link = ctx.home.global(t);
             // read and moved under the link lock: a jkit use --global in between must not be undone
             boolean moved = false;
-            try (AutoCloseable lock = ctx.store.linkLock()) {
+            try (var _ = ctx.store.linkLock()) {
                 Path target = ctx.os.readLink(link);
                 if (target != null && Fs.same(target, previous.home())
                         && Files.isRegularFile(newHome.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {

@@ -224,7 +224,7 @@ final class PruneCommand implements Callable<Integer> {
         long freed = 0;
         List<Object> removedBuilds = new ArrayList<>();
         // the same locks as jkit remove: not while an install runs, nor while a link moves
-        try (AutoCloseable lock = ctx.store.lock(); AutoCloseable links = ctx.store.linkLock()) {
+        try (var _ = ctx.store.lock(); var _ = ctx.store.linkLock()) {
             // decide again under the lock: a jkit use --global or an install since the scan may
             // have made one of these builds the one in use
             ToolStates.Result here = StatusCommand.read(ctx, cwd);
