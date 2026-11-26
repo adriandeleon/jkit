@@ -95,6 +95,57 @@ class ArchivesTest {
                 .contains(PosixFilePermission.OWNER_EXECUTE).doesNotContain(PosixFilePermission.OTHERS_WRITE);
     }
 
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // Unix modes
+    void filesAndFoldersAreNeverWritableByTheGroup() throws IOException {
+        Path archive = tmp.resolve("group.tar.gz");
+        try (OutputStream raw = Files.newOutputStream(archive);
+             TarArchiveOutputStream tar = new TarArchiveOutputStream(new GzipCompressorOutputStream(raw))) {
+            TarArchiveEntry dir = new TarArchiveEntry("jdk/lib/");
+            dir.setMode(040775);
+            tar.putArchiveEntry(dir);
+            tar.closeArchiveEntry();
+            file(tar, "jdk/bin/java", "#!/bin/sh\n", 0775);
+            file(tar, "jdk/lib/modules", "data", 0664);
+        }
+        Path out = tmp.resolve("out");
+        Archives.extract(archive, out, "tar.gz");
+        assertThat(Files.getPosixFilePermissions(out.resolve("jdk/bin/java")))
+                .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        assertThat(Files.getPosixFilePermissions(out.resolve("jdk/lib/modules")))
+                .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+        for (Path dir : new Path[] {out.resolve("jdk"), out.resolve("jdk/lib")}) {
+            assertThat(Files.getPosixFilePermissions(dir))
+                    .doesNotContain(PosixFilePermission.GROUP_WRITE, PosixFilePermission.OTHERS_WRITE);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS) // a NUL is the one byte Linux refuses
+    void anEntryNameThisSystemCantHoldIsUnsafeNotACrash() throws IOException {
+        Path archive = tmp.resolve("nul.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(archive)) {
+            zip.putArchiveEntry(new ZipArchiveEntry("jdk/bin/ja\0va"));
+            zip.write("x".getBytes(StandardCharsets.UTF_8));
+            zip.closeArchiveEntry();
+        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
+                .isInstanceOf(dev.jkit.model.JkitException.class)
+                .hasMessageContaining("unsafe to unpack (an entry name this system can't use: jdk/bin/ja\\x00va)");
+
+        Path linked = tmp.resolve("link.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(linked)) {
+            ZipArchiveEntry link = new ZipArchiveEntry("jdk/bin/javac");
+            link.setUnixMode(0120777);
+            zip.putArchiveEntry(link);
+            zip.write("ja\0va".getBytes(StandardCharsets.UTF_8));
+            zip.closeArchiveEntry();
+        }
+        assertThatThrownBy(() -> Archives.extract(linked, tmp.resolve("out2"), "zip"))
+                .isInstanceOf(dev.jkit.model.JkitException.class)
+                .hasMessageContaining("an entry name this system can't use: jdk/bin/javac");
+    }
+
     /** A raw tar header block with a valid checksum. */
     private static byte[] header(String name, char type, long size) {
         byte[] h = new byte[512];
@@ -245,13 +296,8 @@ class ArchivesTest {
             }
         }
         Files.write(archive, bytes);
-        Archives.entryLimit = 10;
-        try {
-            assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
-                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
-        } finally {
-            Archives.entryLimit = Archives.MAX_ENTRIES;
-        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip", 10))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
     }
 
     @Test
@@ -336,13 +382,8 @@ class ArchivesTest {
                 zip.closeArchiveEntry();
             }
         }
-        Archives.entryLimit = 10;
-        try {
-            assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip"))
-                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
-        } finally {
-            Archives.entryLimit = Archives.MAX_ENTRIES;
-        }
+        assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip", 10))
+                .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("more than 10 entries");
     }
 
     @Test

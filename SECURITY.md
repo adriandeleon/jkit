@@ -109,7 +109,8 @@ speed isn't tried again), and an archive to 3 GB and 50,000 entries unpacked. Ar
 are checked before they are unpacked: only ordinary files, folders, links, GNU long names and
 PAX headers are accepted (no sparse files, devices or other entry types), names stay under
 4,096 bytes, and symlink entries are read only that far. Archive entries can't escape their
-folder, and files are never left writable by every user; jkit's own files and folders, and the
+folder, and what they unpack is never left writable by anyone but you (not by your group either,
+whatever the archive or the umask says); jkit's own files and folders, and the
 startup files `hook --install` creates, get explicit permissions whatever the umask.
 
 ## The jkit home
