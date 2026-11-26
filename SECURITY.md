@@ -140,6 +140,16 @@ owned by you or by root, or that is world-writable, or that sits in such a direc
 status`, `jkit sync` and `jkit doctor` say when they ignored one. `jkit pin` and `jkit unpin`
 refuse to write through a project file that is a symbolic link. Project files over 256 KiB are
 refused. `JKIT_PROJECT_FILE` set to an absolute path is your own choice and is used as is.
+On Windows there are no POSIX owners or permissions to check, so these ownership and
+world-writable checks don't apply there: a project file in a shared folder or on a network share
+is read like your own.
+
+A project file you do own, such as one in a repository you cloned, chooses what `jkit sync`
+installs: any vendor and version jkit knows, including old releases with known vulnerabilities
+and builds whose only published checksum is SHA-1 (installed marked unverified). It can't choose
+a download URL, a mirror or any other setting, and `cd` with auto-switch only switches between
+builds already installed; it never downloads. Read a cloned repository's project file before you
+run `jkit sync` in it, as you would its build script.
 
 ## Untrusted network data
 
