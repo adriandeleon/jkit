@@ -167,6 +167,18 @@ class PinSyncTest {
     }
 
     @Test
+    void pinSuggestsAutoSwitchOnlyInShellsThatHaveIt() throws Exception {
+        env.put("JKIT_ENV_FILE", envFile.toString());
+        env.put("JKIT_SHELL", "bash");
+        pin("jdk@21", null, false, false);
+        assertThat(output()).contains("to switch to a project's versions on cd: add auto_switch = true");
+        out.reset();
+        env.put("JKIT_SHELL", "pwsh"); // PowerShell's hook can't switch on cd yet
+        pin("jdk@21", null, false, false);
+        assertThat(output()).contains("set    JAVA_HOME=").doesNotContain("auto_switch");
+    }
+
+    @Test
     void unpinRemovesTheLineAndTheShellsProjectState() throws Exception {
         Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\nmaven = \"3.9\"\n");
         env.put("JKIT_ENV_FILE", envFile.toString());

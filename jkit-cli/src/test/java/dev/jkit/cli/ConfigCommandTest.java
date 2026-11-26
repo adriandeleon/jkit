@@ -68,11 +68,23 @@ class ConfigCommandTest {
 
     @Test
     void setCreatesTheFileAndSaysSo() throws Exception {
+        env.put("JKIT_SHELL", "bash");
         set("shell.auto_switch", "on");
         assertThat(Files.readString(home.resolve("config.toml"))).isEqualTo("[shell]\nauto_switch = true\n");
         assertThat(output()).contains("set shell.auto_switch = true").contains("config.toml")
                 .contains("new shells switch");
         assertThat(get("shell.auto_switch")).isEqualTo("true");
+    }
+
+    @Test
+    void autoSwitchInPowerShellSaysItChangesNothingThere() throws Exception {
+        env.put("JKIT_SHELL", "pwsh");
+        set("shell.auto_switch", "true");
+        assertThat(output()).contains("set shell.auto_switch = true")
+                .contains("PowerShell doesn't switch on cd yet").contains("jkit sync")
+                .doesNotContain("new shells switch");
+        set("shell.auto_switch", "false");
+        assertThat(output()).contains("PowerShell doesn't switch on cd yet").doesNotContain("still does");
     }
 
     @Test

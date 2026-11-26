@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`jkit exec … -- <command>` works in PowerShell with the hook loaded.** PowerShell drops a bare
   `--` from a function's arguments, so jkit saw `jkit exec jdk@21 java -version` and failed with
   `Unknown option: '-version'`. The hook puts the `--` back.
+- **jkit no longer offers PowerShell a switch on `cd` it doesn't have.** In PowerShell, `jkit pin`
+  and `jkit sync` suggested turning on `shell.auto_switch`, and `jkit config set shell.auto_switch
+  true` said new shells would switch on `cd`; PowerShell's hook can't yet, and warned about it in
+  every new shell. The suggestion is gone there, and `config set` says it changes nothing in
+  PowerShell and that `jkit sync` applies a project's versions.
 - **The Windows zip starts without the Visual C++ Redistributable.** It now ships Microsoft's
   `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` next to `jkit.exe`. `jkit self-update` replaces
   DLLs already there, and never adds them to a folder without them.

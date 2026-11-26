@@ -81,7 +81,7 @@ matters:
   installed with Homebrew, apt, dnf or winget is left to that tool. On Windows, the Visual C++
   runtime DLLs next to `jkit.exe` are replaced from the same checked archive; a folder without
   them doesn't get them.
-- The Windows `.zip` carries Microsoft's `vcruntime140.dll` and `vcruntime140_1.dll`, which Windows
+- From the release after 0.4.0, the Windows `.zip` carries Microsoft's `vcruntime140.dll` and `vcruntime140_1.dll`, which Windows
   loads before any system-wide copy. The release workflow takes them from the build machine's
   Visual Studio and checks they are signed by Microsoft. Windows Update doesn't patch a copy next to
   a program, so a fix to them reaches you with the next jkit release and `jkit self-update`; with
