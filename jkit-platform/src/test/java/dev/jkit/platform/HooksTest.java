@@ -85,10 +85,42 @@ class HooksTest {
         assertThat(Files.readAllLines(log)).containsExactly("hook-env bash", "hook-env bash");
     }
 
+    /** zsh, where installed: hook-env runs on cd in the shell itself, not in a $( ) subshell. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void zshAutoSwitchSkipsSubshells() throws Exception {
+        Path zsh = java.util.stream.Stream.of("/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh")
+                .map(Path::of).filter(Files::isExecutable).findFirst().orElse(null);
+        org.junit.jupiter.api.Assumptions.assumeTrue(zsh != null, "zsh isn't installed");
+        Path root = tmp.resolve("home/.jkit");
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path log = tmp.resolve("calls.log");
+        Path fake = bin.resolve("jkit");
+        Files.writeString(fake, "#!/bin/sh\necho \"$* ${PWD##*/}\" >> '" + log + "'\nexit 0\n");
+        fake.toFile().setExecutable(true);
+        Path a = Files.createDirectories(tmp.resolve("a"));
+        Path b = Files.createDirectories(tmp.resolve("b"));
+        Path script = tmp.resolve("hook.zsh");
+        Files.writeString(script, Hooks.posix("zsh", root) + Hooks.autoSwitch("zsh")
+                + "cd '" + a + "'\nx=$(cd '" + b + "'; pwd)\n( cd '" + b + "' )\n");
+        ProcessBuilder pb = new ProcessBuilder(zsh.toString(), "-f", script.toString()).directory(tmp.toFile())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("PATH", bin + ":" + pb.environment().get("PATH"));
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(p.exitValue()).as(out).isZero();
+        // once as the hook loads, once for the cd; neither subshell's cd
+        assertThat(Files.readAllLines(log)).containsExactly("hook-env zsh " + tmp.getFileName(), "hook-env zsh a");
+    }
+
     @Test
     void autoSwitchHooksForZshAndFishAndNoneForPowerShell() {
         assertThat(Hooks.autoSwitch("zsh")).contains("add-zsh-hook chpwd __jkit_hook_env")
-                .contains("__jkit_run hook-env zsh");
+                .contains("__jkit_run hook-env zsh")
+                // not in a prompt theme's $( ) subshell, where what it prints lands in the prompt
+                .contains("[[ $ZSH_SUBSHELL -eq 0 ]] || return 0");
         assertThat(Hooks.autoSwitch("fish")).contains("--on-variable PWD").contains("__jkit_run hook-env fish | source");
         assertThat(Hooks.autoSwitch("pwsh")).isNull();
     }
