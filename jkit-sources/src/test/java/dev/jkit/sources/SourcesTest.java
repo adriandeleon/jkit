@@ -54,7 +54,7 @@ class SourcesTest {
             pkg("d", "temurin", 21, "21.0.14+1", "glibc", "\"crac\"")) + "]}";
 
     private static final String INFO = """
-            {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"abc123",
+            {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"abc123",
             "checksum_type":"sha256","checksum_uri":""}]}""";
 
     @Test
@@ -63,11 +63,11 @@ class SourcesTest {
                 FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
         assertThat(a.version().raw()).isEqualTo("21.0.13+9");
-        assertThat(a.url()).hasToString("https://example.invalid/b.tar.gz");
+        assertThat(a.url()).hasToString("https://github.com/adoptium/t/b.tar.gz");
         assertThat(a.checksumAlgorithm()).isEqualTo("sha256");
         assertThat(a.checksum()).isEqualTo("abc123");
         // none listed, but Temurin signs every 21 build: jkit takes the .sig next to the download
-        assertThat(a.signature()).hasToString("https://example.invalid/b.tar.gz.sig");
+        assertThat(a.signature()).hasToString("https://github.com/adoptium/t/b.tar.gz.sig");
     }
 
     /** What install finds for one build of {@code vendor} whose foojay answer is {@code info}. */
@@ -97,13 +97,97 @@ class SourcesTest {
                     .signature()).hasToString(microsoft + ".sig");
             assertThat(one("corretto", "21.0.13.1+2", info(corretto, "")).signature()).hasToString(corretto + ".sig");
         }
-        // a foojay that points the download elsewhere gets the signature looked for there too, where
-        // nobody but the vendor can make a good one; and one that lists another link, or a plain
-        // http one, doesn't change where jkit looks
-        assertThat(one("temurin", "21.0.13+9", info("https://example.invalid/b.tar.gz?x=1", "")).signature())
-                .hasToString("https://example.invalid/b.tar.gz.sig?x=1");
+        // the signature is looked for next to the download, on the vendor's server; a foojay that
+        // lists another link, or a plain http one, doesn't change where jkit looks
         assertThat(one("temurin", "21.0.13+9", info(temurin, "http://example.invalid/b.sig")).signature())
                 .hasToString(temurin + ".sig");
+        // a link with no file name to add .sig to, or one that names it in a query, has no
+        // signature jkit can find: refused, rather than installed on foojay's checksum
+        for (String odd : new String[] {"https://github.com/adoptium/t/b.tar.gz?x=1", "https://github.com/adoptium/t/",
+                "https://aka.ms/download-jdk/?file=microsoft-jdk-21.0.13.1-linux-x64.tar.gz"}) {
+            String vendor = odd.contains("aka.ms") ? "microsoft" : "temurin";
+            assertThatThrownBy(() -> one(vendor, vendor.equals("temurin") ? "21.0.13+9" : "21.0.13.1", info(odd, "")))
+                    .as(odd).isInstanceOf(JkitException.class)
+                    .hasMessageContaining("where jkit can't find its signature; refusing it");
+        }
+        assertThat(FoojaySource.nextTo(URI.create("https://aka.ms"))).isNull();
+        assertThat(FoojaySource.nextTo(URI.create("https://aka.ms/a/b.zip"))).hasToString("https://aka.ms/a/b.zip.sig");
+    }
+
+    @Test
+    void aSigningVendorsDownloadMustBeOnThatVendorsServer() throws IOException {
+        // every build foojay lists for them is there; a foojay that points one elsewhere is refused,
+        // so a Temurin build from before Adoptium signed still comes from Adoptium
+        for (String elsewhere : new String[] {"https://example.invalid/b.tar.gz",
+                "https://github.com/someone/temurin21-binaries/b.tar.gz", "https://github.com/adoptium/../x/b.tar.gz",
+                "https://github.com/adoptium/%2e%2e/x/b.tar.gz", "https://github.com:8443/adoptium/t/b.tar.gz",
+                "https://x@github.com/adoptium/t/b.tar.gz", "https://github.com.example.invalid/adoptium/t/b.tar.gz"}) {
+            assertThatThrownBy(() -> one("temurin", "17.0.3+7", info(elsewhere, "")))
+                    .as(elsewhere).isInstanceOf(JkitException.class)
+                    .hasMessageContaining("not Adoptium's GitHub releases (github.com/adoptium/); refusing it");
+        }
+        assertThatThrownBy(() -> one("microsoft", "21.0.13.1", info("https://example.invalid/m.tar.gz", "")))
+                .isInstanceOf(JkitException.class).hasMessageContaining("at example.invalid, not aka.ms");
+        assertThatThrownBy(() -> one("corretto", "21.0.13.1+2", info("https://corretto.aws.example.invalid/c.tar.gz", "")))
+                .isInstanceOf(JkitException.class).hasMessageContaining("not corretto.aws");
+        String cloudfront = "https://d3pxv6yz143wms.cloudfront.net/8.232.09.1/amazon-corretto-8.232.09.1-linux-x64.tar.gz";
+        assertThat(one("corretto", "8.0.232+9", info(cloudfront, "")).url()).hasToString(cloudfront);
+        // search asks too, and says the same
+        Pkg b = new Pkg("b", Vendor.of("temurin"), 21, Version.parse("21.0.13+9"), "b.tar.gz", "tar.gz", "lts", true);
+        assertThatThrownBy(() -> new FoojaySource(fake(Map.of("ids/b", info("https://example.invalid/b.tar.gz", ""))),
+                FoojaySource.DEFAULT_BASE).availability(b)).hasMessageContaining("refusing it");
+        // other vendors' downloads are wherever they host them; a mirror on this machine serves its own
+        assertThat(one("zulu", "21.0.13", info("https://example.invalid/z.tar.gz", "")).url().getHost())
+                .isEqualTo("example.invalid");
+        String builds = "{\"result\":[" + pkg("b", "temurin", 21, "21.0.13+9", "glibc", "") + "]}";
+        assertThat(new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info("http://127.0.0.1:9/b.tar.gz", ""))),
+                URI.create("http://127.0.0.1:9/disco/")).resolve(Tool.JDK, "21", Vendor.of("temurin"),
+                Platform.LINUX_X64, false, false).url()).hasToString("http://127.0.0.1:9/b.tar.gz");
+    }
+
+    @Test
+    void correttosCatchAllLatestEntriesAreSkipped() throws IOException {
+        // foojay's "8" entry links corretto.aws/downloads/latest/..., whatever build is newest that day
+        String builds = "{\"result\":[" + String.join(",",
+                pkg("amazon-corretto-8-x64-linux-jdk", "corretto", 8, "8", "glibc", ""),
+                pkg("r", "corretto", 8, "8.0.472+8", "glibc", "")
+                        .replace("r.tar.gz", "amazon-corretto-8.472.08.1-linux-x64.tar.gz")) + "]}";
+        String info = info("https://corretto.aws/downloads/resources/8.472.08.1/amazon-corretto-8.472.08.1-linux-x64.tar.gz", "");
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=8", builds,
+                "ids/r", info)), FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.builds(8, Vendor.of("corretto"), Platform.LINUX_X64, false, false))
+                .extracting(p -> p.version().raw()).containsExactly("8.0.472+8");
+        assertThat(foojay.resolve(Tool.JDK, "8", Vendor.of("corretto"), Platform.LINUX_X64, false, false)
+                .version().raw()).isEqualTo("8.0.472+8");
+        // and a /latest/ link under another name is no direct download
+        String latest = info("https://corretto.aws/downloads/latest/amazon-corretto-8-x64-linux-jdk.tar.gz", "");
+        Pkg b = new Pkg("b", Vendor.of("corretto"), 8, Version.parse("8.0.472+8"), "b.tar.gz", "tar.gz", "lts", true);
+        assertThat(new FoojaySource(fake(Map.of("ids/b", latest)), FoojaySource.DEFAULT_BASE).availability(b)
+                .downloadable()).isFalse();
+        // other vendors' names are theirs
+        assertThat(FoojaySource.latestCorretto(new Pkg("z", Vendor.of("zulu"), 8, Version.parse("8"),
+                "amazon-corretto-8-x.tar.gz", "tar.gz", "lts", true))).isFalse();
+    }
+
+    @Test
+    void onlyBuildsOfTheVendorAndMajorAskedForAreCandidates() throws IOException {
+        // asked for Temurin 21, a hostile or broken list answers with builds that would skip the
+        // signature check: one it calls Zulu, and Temurin builds from before Adoptium signed
+        String builds = "{\"result\":[" + String.join(",",
+                pkg("z", "zulu", 21, "21.0.99", "glibc", ""),
+                pkg("o", "temurin", 21, "17.0.3+7", "glibc", ""),
+                pkg("p", "temurin", 17, "17.0.3+7", "glibc", ""),
+                pkg("b", "temurin", 21, "21.0.13+9", "glibc", "")) + "]}";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", builds, "ids/b", INFO)), FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.builds(21, Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .extracting(Pkg::id).containsExactly("b");
+        assertThat(foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false).vendor())
+                .isEqualTo(Vendor.of("temurin"));
+        // nothing that is: no build, rather than one of those
+        String only = "{\"result\":[" + pkg("z", "zulu", 21, "21.0.99", "glibc", "") + "]}";
+        assertThatThrownBy(() -> new FoojaySource(fake(Map.of("jdk_version=21", only)), FoojaySource.DEFAULT_BASE)
+                .resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(JkitException.class).hasMessageContaining("temurin has no build matching jdk@21");
     }
 
     @Test
@@ -237,8 +321,8 @@ class SourcesTest {
         String sha512 = "c".repeat(128);
         String md5 = "d".repeat(32);
         String jetbrains = """
-                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
-                "checksum_type":"sha256","checksum_uri":"https://example.invalid/b.tar.gz.checksum"}]}""";
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
+                "checksum_type":"sha256","checksum_uri":"https://github.com/adoptium/t/b.tar.gz.checksum"}]}""";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", jetbrains,
                 "b.tar.gz.checksum", sha512 + " *b.tar.gz\n")), FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
@@ -285,7 +369,7 @@ class SourcesTest {
     @Test
     void checksumOverPlainHttpIsRefused() {
         String info = """
-                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
                 "checksum_type":"sha256","checksum_uri":"http://example.invalid/b.sha256"}]}""";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", info,
                 "b.sha256", "f".repeat(64))), FoojaySource.DEFAULT_BASE);
@@ -297,7 +381,7 @@ class SourcesTest {
     @Test
     void skipsBuildsWithoutDirectDownload() throws IOException {
         String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
-        String older = "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/a.tar.gz\",\"checksum\":\"\"}]}";
+        String older = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/t/a.tar.gz\",\"checksum\":\"\"}]}";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", none, "ids/a", older)),
                 FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
@@ -342,22 +426,23 @@ class SourcesTest {
         assertThat(a.checksum()).isTrue();
         // a checksum file counts too, unread: install fetches it
         String file = """
-                {"result":[{"direct_download_uri":"https://example.invalid/b.tar.gz","checksum":"",
-                "checksum_uri":"https://example.invalid/b.tar.gz.sha256.txt"}]}""";
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
+                "checksum_uri":"https://github.com/adoptium/t/b.tar.gz.sha256.txt"}]}""";
         assertThat(new FoojaySource(fake(Map.of("ids/b", file)), FoojaySource.DEFAULT_BASE).availability(b).checksum())
                 .isTrue();
         // no checksum at all
-        String bare = "{\"result\":[{\"direct_download_uri\":\"https://example.invalid/b.tar.gz\",\"checksum\":\"\"}]}";
+        String bare = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/t/b.tar.gz\",\"checksum\":\"\"}]}";
         a = new FoojaySource(fake(Map.of("ids/b", bare)), FoojaySource.DEFAULT_BASE).availability(b);
         assertThat(a.downloadable()).isTrue();
         assertThat(a.checksum()).isFalse();
         // but Temurin signs every 21 build: install checks that instead
-        assertThat(a.signature()).hasToString("https://example.invalid/b.tar.gz.sig");
+        assertThat(a.signature()).hasToString("https://github.com/adoptium/t/b.tar.gz.sig");
         // a Corretto download has its .sig
         String corretto = """
                 {"result":[{"direct_download_uri":"https://corretto.aws/downloads/resources/21.0.13.9.1/b.tar.gz",
                 "checksum":""}]}""";
-        assertThat(new FoojaySource(fake(Map.of("ids/b", corretto)), FoojaySource.DEFAULT_BASE).availability(b)
+        Pkg c = new Pkg("b", Vendor.of("corretto"), 21, Version.parse("21.0.13.9.1"), "b.tar.gz", "tar.gz", "lts", true);
+        assertThat(new FoojaySource(fake(Map.of("ids/b", corretto)), FoojaySource.DEFAULT_BASE).availability(c)
                 .signature()).hasToString("https://corretto.aws/downloads/resources/21.0.13.9.1/b.tar.gz.sig");
         // no link
         assertThat(new FoojaySource(fake(Map.of("ids/b", "{\"result\":[{\"direct_download_uri\":\"\"}]}")),

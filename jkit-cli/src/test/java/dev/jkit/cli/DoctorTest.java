@@ -112,6 +112,19 @@ class DoctorTest {
     }
 
     @Test
+    void temporaryFilesAnInterruptedWriteLeftAreReported() throws Exception {
+        assertThat(of(run(), "temp-files")).isEmpty();
+        Path rcLeft = Files.writeString(tmp.resolve("user/.bashrc.8121361834962231183.jkit-tmp"), "half");
+        Path configLeft = Files.writeString(home.resolve(".config.toml.42.jkit-tmp"), "half");
+        Path tomlLeft = Files.writeString(project.resolve(".jkit.toml.7.jkit-tmp"), "half");
+        Files.writeString(tmp.resolve("user/notes.jkit-tmp"), "not jkit's naming");
+        assertThat(of(run(), "temp-files")).extracting(Finding::message).containsExactly(
+                "a temporary file an interrupted jkit write left: " + Changes.tilde(rcLeft.toString()),
+                "a temporary file an interrupted jkit write left: " + Changes.tilde(configLeft.toString()),
+                "a temporary file an interrupted jkit write left: " + Changes.tilde(tomlLeft.toString()));
+    }
+
+    @Test
     void missingHookSaysWhatToAddForTheUsersShell() {
         env.remove("JKIT_SHELL");
         env.put("SHELL", "/usr/bin/zsh");

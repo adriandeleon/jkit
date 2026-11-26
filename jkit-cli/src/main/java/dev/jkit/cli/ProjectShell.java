@@ -1,6 +1,5 @@
 package dev.jkit.cli;
 
-import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
@@ -61,7 +60,7 @@ final class ProjectShell {
      * one put there since {@link #target} checked is replaced, and what it points at left alone.
      */
     static void write(Path file, String text) throws IOException {
-        AtomicFile.write(file, text, StandardCharsets.UTF_8, false);
+        ProjectFile.write(file, text, false);
     }
 
     private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {

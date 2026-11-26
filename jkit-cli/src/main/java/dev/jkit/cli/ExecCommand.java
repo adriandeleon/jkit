@@ -43,8 +43,8 @@ import picocli.CommandLine.Parameters;
                 "Ctrl-C goes to the command itself (jkit ignores SIGINT while it waits).",
                 "To stop it from another process, send jkit SIGTERM: it passes it on, waits,",
                 "and exits with the command's code (a second SIGTERM kills the command).",
-                "A command ended by SIGINT, SIGTERM or SIGHUP ends jkit with the same signal,",
-                "so a script calling jkit exec stops on Ctrl-C as it would without jkit."})
+                "After a Ctrl-C that ends the command, jkit ends from SIGINT too, so a",
+                "script calling jkit exec stops as it would without jkit (a shell shows 130)."})
 final class ExecCommand implements Callable<Integer> {
 
     @Parameters(paramLabel = "[<tool>[@version] [vendor]]... -- <command> [args]",
@@ -251,9 +251,15 @@ final class ExecCommand implements Callable<Integer> {
                 }
             }
         }
-        // ended by a signal: so is jkit, or a bash script running jkit exec would carry on after Ctrl-C
-        // (bash stops only when the command it waited for died from SIGINT, not when it exited 130)
-        Signals.raiseFor(code);
+        // Ctrl-C ended it: so it ends jkit, or a bash script running jkit exec would carry on (bash
+        // stops only when the command it waited for died from SIGINT, not when it exited 130)
+        boolean windows = File.separatorChar == '\\';
+        if ("INT".equals(Signals.endedBy(code, windows)) && !Signals.gotInt()) {
+            Thread.sleep(50); // the same Ctrl-C may still be on its way to jkit's handler
+        }
+        if (Signals.ctrlC(code, Signals.gotInt(), windows)) {
+            Signals.raiseInt(parent);
+        }
         return code;
     }
 }

@@ -34,6 +34,10 @@ class SearchTest {
                 .isEqualTo(SearchCommand.Verdict.UNVERIFIED);
         assertThat(verdict(new Availability(pkg("dragonwell"), false, sig)))
                 .isEqualTo(SearchCommand.Verdict.UNVERIFIED);
+        // Amazon's 2019 builds, on its old CloudFront host: signed with keys it has retired
+        URI retired = URI.create("https://d3pxv6yz143wms.cloudfront.net/8.232.09.1/jdk.tar.gz.sig");
+        assertThat(verdict(new Availability(pkg("corretto"), false, retired)))
+                .isEqualTo(SearchCommand.Verdict.UNVERIFIED);
         // no direct download
         assertThat(verdict(new Availability(null, false, null))).isEqualTo(SearchCommand.Verdict.NO_DOWNLOAD);
     }

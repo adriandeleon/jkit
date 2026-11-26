@@ -150,6 +150,27 @@ class PinSyncTest {
     }
 
     @Test
+    void pinAndUnpinKeepTheFilesByteOrderMarkAndCharset() throws Exception {
+        Path toml = project.resolve("jkit.toml");
+        for (String charset : new String[] {"UTF-8", "UTF-16LE", "UTF-16BE"}) {
+            Files.write(toml, ("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\n").getBytes(charset));
+            pin("jdk@21", null, false, false);
+            assertThat(Files.readAllBytes(toml)).as(charset)
+                    .isEqualTo(("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\njdk = \"21\"\r\n").getBytes(charset));
+            UnpinCommand unpin = new UnpinCommand();
+            unpin.tool = Tool.JDK;
+            unpin.run(ctx(), project);
+            assertThat(Files.readAllBytes(toml)).as(charset)
+                    .isEqualTo(("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\n").getBytes(charset));
+        }
+        // not UTF-8: Latin-1, every byte kept
+        byte[] latin1 = "# café\n[tools]\n".getBytes(StandardCharsets.ISO_8859_1);
+        Files.write(toml, latin1);
+        pin("jdk@21", null, false, false);
+        assertThat(Files.readAllBytes(toml)).startsWith(latin1);
+    }
+
+    @Test
     void pinRefusesFilesItOnlyReads() throws Exception {
         Files.writeString(project.resolve(".sdkmanrc"), "java=17.0.13-zulu\n");
         assertThatThrownBy(() -> pin("jdk@21", null, false, false))
@@ -217,6 +238,25 @@ class PinSyncTest {
                 .contains("this shell chose its own maven with jkit use");
         assertThat(Files.readString(envFile)).contains("export JAVA_HOME='" + temurin21 + "'")
                 .contains("export JKIT_PROJECT_MAVEN='" + maven + "'").doesNotContain("MAVEN_HOME");
+    }
+
+    @Test
+    void resetWithoutAJkitChoiceLeavesTheUsersJavaHomeAlone() throws Exception {
+        env.put("JKIT_ENV_FILE", envFile.toString());
+        env.put("JAVA_HOME", "/opt/my-jdk");
+        ResetCommand reset = new ResetCommand();
+        reset.tool = Tool.JDK;
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(envFile).doesNotExist();
+        assertThat(output()).contains("nothing to reset: this shell has no jdk from jkit use or a project")
+                .contains("JAVA_HOME stays as you set it: /opt/my-jdk");
+
+        // with a jkit use on top, the user's comes back
+        env.put("JKIT_SHELL_JDK", temurin21.toString());
+        env.put("JKIT_USER_JDK", "/opt/my-jdk");
+        env.put("JAVA_HOME", temurin21.toString());
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(Files.readString(envFile)).contains("export JAVA_HOME='/opt/my-jdk'").contains("unset JKIT_USER_JDK");
     }
 
     @Test

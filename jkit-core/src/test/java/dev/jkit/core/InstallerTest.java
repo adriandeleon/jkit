@@ -10,14 +10,17 @@ import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
 import dev.jkit.sources.HttpStatusException;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
@@ -230,6 +233,29 @@ class InstallerTest {
                 .hasMessageContaining("Amazon's key A122542AB04F24E3 made it");
         assertThat(new Store(home).list(Tool.JDK)).isEmpty();
         assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void aCorrettoBuildSignedWithARetiredKeyIsRefusedWithoutSendingYouToSelfUpdate() throws Exception {
+        // Amazon's real signature of its 11.0.4.11.1 Linux build, made with that release's own key
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] retired;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("corretto-11.0.4.11.1.sig")) {
+            retired = in.readAllBytes();
+        }
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, retired))
+                .install(corretto(), Http.Progress.NONE, true))
+                .isInstanceOf(Installer.SignatureRequired.class)
+                .hasMessageContaining("signed with Amazon's retired key 5A812B5B67F4FCB4")
+                .hasMessageContaining("(pick a newer build)")
+                .hasMessageNotContaining("self-update")
+                .hasMessageEndingWith("and it has no published checksum; nothing was installed");
+        // a key jkit doesn't know at all may be a new one
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, realTemurinSignature()))
+                .install(corretto(), Http.Progress.NONE, true))
+                .hasMessageContaining("a newer jkit may know a new key: jkit self-update");
+        assertThat(new Store(home).list(Tool.JDK)).isEmpty();
     }
 
     @Test
@@ -511,5 +537,120 @@ class InstallerTest {
         Path dir = Files.createDirectories(tmp.resolve("tools/jdk/21-temurin"));
         Files.writeString(dir.resolve(Store.MARKER), "verified=true\n" + "#".repeat((int) Store.MAX_MARKER));
         assertThat(Store.verified(dir)).isFalse();
+    }
+
+    /** Serves {@code file} for every download, after running {@code during} (what another jkit does meanwhile). */
+    private static Http servingWhile(Path file, IoAction during) {
+        return new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                during.run();
+                Files.copy(file, target);
+            }
+        };
+    }
+
+    @FunctionalInterface
+    private interface IoAction {
+        void run() throws IOException;
+    }
+
+    @Test
+    void aCopyToAnotherDiskIsDeletedByCtrlCOrWhenItFails() throws Exception {
+        Path from = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9").resolveSibling("unpacked");
+        Files.createDirectories(from.resolve("bin"));
+        Path to = Files.createDirectories(tmp.resolve("tools")).resolve("21.0.13+9-temurin");
+        Path partial = to.resolveSibling(".21.0.13+9-temurin.partial");
+        // Ctrl-C halfway through the copy: jkit's signal handler deletes what is in WorkDirs
+        assertThatThrownBy(() -> Installer.copyAcross(from, to, (a, b) -> {
+            Fs.copyTree(a, b);
+            assertThat(WorkDirs.deleteAll()).contains(b);
+            throw new IOException("interrupted");
+        })).hasMessage("interrupted");
+        assertThat(partial).doesNotExist();
+        // a copy that fails is deleted too, and isn't left for the signal handler
+        assertThatThrownBy(() -> Installer.copyAcross(from, to, (a, b) -> {
+            Fs.copyTree(a, b);
+            throw new IOException("disk full");
+        })).hasMessage("disk full");
+        assertThat(partial).doesNotExist();
+        assertThat(WorkDirs.deleteAll()).doesNotContain(partial);
+        // one that works ends as the install, in one rename
+        Installer.copyAcross(from, to, Fs::copyTree);
+        assertThat(to.resolve("bin")).isDirectory();
+        assertThat(partial).doesNotExist();
+        assertThat(from).doesNotExist();
+    }
+
+    @Test
+    void theInstallLockIsNotHeldDuringTheDownload() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Store store = new Store(home);
+        // remove, prune or another install takes the lock while this one downloads: in one JVM, a
+        // lock still held would throw OverlappingFileLockException here rather than wait
+        Installer.Result result = new Installer(home, servingWhile(archive, () -> {
+            try (AutoCloseable lock = store.lock()) {
+                assertThat(lock).isNotNull();
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        })).install(artifact(sha256(archive)), Http.Progress.NONE);
+        assertThat(result.fresh()).isTrue();
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    void anInstallThatAnotherJkitFinishedFirstKeepsTheirsAndSaysItIsInstalled() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Path dest = home.tools(Tool.JDK).resolve("21.0.13+9-temurin");
+        Installed theirs = new Installed(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("temurin"), dest, false);
+        Installer.Result result = new Installer(home, servingWhile(archive, () -> {
+            Files.createDirectories(dest.resolve("bin"));
+            Store.writeMarker(dest, theirs, "https://example.invalid/theirs.tar.gz", true);
+        })).install(artifact(sha256(archive)), Http.Progress.NONE);
+        assertThat(result.fresh()).isFalse();
+        assertThat(result.verified()).isTrue();
+        assertThat(dest.resolve(Store.MARKER)).content().contains("theirs.tar.gz");
+        assertThat(dest.resolve("bin/java")).doesNotExist(); // ours was discarded, not moved over theirs
+        assertThat(home.tmp()).isEmptyDirectory();
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS) // a folder with a file open in it can't be deleted there anyway
+    void anotherJkitsDownloadFolderIsNoLeftover() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Path leftover = Files.createDirectories(home.tmp().resolve("install-1/out"));
+        // another jkit, downloading: a JVM of its own holds its work folder
+        String jvm = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        Process other = new ProcessBuilder(jvm, "-cp", System.getProperty("java.class.path"),
+                WorkDirsTest.Holder.class.getName(), home.tmp().toString())
+                .redirectError(ProcessBuilder.Redirect.INHERIT).start();
+        try {
+            Path theirs = Path.of(new BufferedReader(new InputStreamReader(other.getInputStream(),
+                    StandardCharsets.UTF_8)).readLine());
+            assertThat(WorkDirs.inUse(theirs)).isTrue();
+            Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)),
+                    Http.Progress.NONE);
+            assertThat(result.removedLeftovers()).containsExactly(leftover.getParent());
+            assertThat(theirs).isDirectory();
+            // it ends without cleaning up, as when killed: its folder is a leftover now
+            other.getOutputStream().close();
+            assertThat(other.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(theirs).isDirectory();
+            assertThat(WorkDirs.inUse(theirs)).isFalse();
+            Fs.deleteRecursively(result.installed().home());
+            assertThat(new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE)
+                    .removedLeftovers()).containsExactly(theirs);
+        } finally {
+            other.destroyForcibly();
+        }
     }
 }

@@ -213,7 +213,8 @@ Exit code 1 when any check has level `fail`, 0 otherwise; the document is printe
 - `level` is `ok`, `info`, `warn` or `fail`; `fix` is null when there is nothing to do.
 - A check can report several lines (one per broken link, say). The ids are stable:
   `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `user-env`, `store`,
-  `project`, `index`, `java-runs`, and `network` (only with `--network`).
+  `temp-files` (only when there are some), `project`, `index`, `java-runs`, and `network` (only
+  with `--network`).
 - Messages and fixes are for people and may change; filter on `id` and `level`.
 
 ## `jkit search <tool>[@version] [vendor] --json`

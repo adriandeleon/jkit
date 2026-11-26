@@ -1,6 +1,5 @@
 package dev.jkit.cli;
 
-import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Config;
 import dev.jkit.core.Config.Setting;
 import dev.jkit.core.ConfigWriter;
@@ -11,7 +10,6 @@ import dev.jkit.model.Suggest;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -272,7 +270,7 @@ final class ConfigCommand implements Callable<Integer> {
         }
         HookCommand.createParent(ctx, config, report);
         // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
-        AtomicFile.write(config, edit.text(), StandardCharsets.UTF_8, true);
+        ProjectFile.write(config, edit.text(), true);
         report.file(config, !exists);
         return true;
     }

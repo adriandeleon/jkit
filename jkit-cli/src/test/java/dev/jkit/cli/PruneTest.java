@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.Tool;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -74,7 +75,10 @@ class PruneTest {
         install(Tool.GRADLE, "8.14.3", "");
         Path oldMaven = install(Tool.MAVEN, "3.9.9", "");
         install(Tool.MAVEN, "3.9.11", "");
-        Process daemon = new ProcessBuilder("/bin/sh", "-c", "sleep 30; exit 0", old.resolve("lib/gradle-daemon.jar").toString())
+        // `read` is built into sh, so no child (a forked `sleep` still carries the jar in its
+        // arguments until it execs) outlives the shell when the test stops it; it waits on the
+        // stdin pipe this test holds open
+        Process daemon = new ProcessBuilder("/bin/sh", "-c", "read x", old.resolve("lib/gradle-daemon.jar").toString())
                 .start();
         try {
             prune(true);
@@ -186,6 +190,20 @@ class PruneTest {
         assertThat(oldList).doesNotExist();
         assertThat(recent).exists(); // still serves --offline
         assertThat(keepTmp).exists();
+    }
+
+    @Test
+    void theFolderARunningInstallDownloadsIntoIsNoLeftover() throws Exception {
+        // installs download outside the install lock, in a folder they hold
+        Path running = WorkDirs.create(Files.createDirectories(home.resolve("tmp")), "install-");
+        try {
+            prune(true);
+            assertThat(output()).doesNotContain("install-").contains("nothing to prune");
+            prune(false);
+            assertThat(running).isDirectory();
+        } finally {
+            WorkDirs.remove(running);
+        }
     }
 
     @Test

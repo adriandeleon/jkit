@@ -76,6 +76,26 @@ class HookInstallTest {
     }
 
     @Test
+    void aBlockWithoutItsEndMarkerIsLeftAloneWithOneClearMessage() throws Exception {
+        String text = "export A=1\n" + ShellRc.START + "\neval \"$(jkit hook bash)\"\n";
+        Path rc = Files.writeString(user.resolve(".bashrc"), text);
+        for (boolean install : new boolean[] {true, false}) {
+            assertThatThrownBy(() -> {
+                if (install) {
+                    HookCommand.install(ctx(), "bash", user);
+                } else {
+                    HookCommand.uninstall(ctx(), "bash", user);
+                }
+            }).isInstanceOf(JkitException.class)
+                    .hasMessageEndingWith("line 2 of " + Changes.tilde(rc.toString()) + " starts jkit's block ("
+                            + ShellRc.START + ") but no " + ShellRc.END + " line ends it; nothing changed")
+                    .satisfies(e -> assertThat(((JkitException) e).hints().getFirst())
+                            .endsWith("then run jkit hook bash " + (install ? "--install" : "--uninstall") + " again"));
+            assertThat(Files.readString(rc)).isEqualTo(text);
+        }
+    }
+
+    @Test
     void installAppendsToBashrcAndSaysWhatChanged() throws Exception {
         Path rc = user.resolve(".bashrc");
         Files.writeString(rc, "export EDITOR=vim\n");

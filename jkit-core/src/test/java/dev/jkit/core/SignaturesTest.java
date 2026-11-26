@@ -260,5 +260,13 @@ class SignaturesTest {
         Signatures.Result cross = Signatures.verify(file, resource("corretto-21.0.13.1.2.sig"), Tool.JDK,
                 Vendor.of("temurin"));
         assertThat(cross.outcome()).isEqualTo(Signatures.Outcome.UNKNOWN_KEY);
+        // Amazon's 2019 builds are signed with keys it has retired: told apart from an unknown key
+        Signatures.Result retired = Signatures.verify(file, resource("corretto-11.0.4.11.1.sig"), Tool.JDK,
+                Vendor.of("corretto"));
+        assertThat(retired.outcome()).isEqualTo(Signatures.Outcome.RETIRED_KEY);
+        assertThat(retired.detail()).startsWith("it is signed with Amazon's retired key 5A812B5B67F4FCB4");
+        // only for Amazon's builds
+        assertThat(Signatures.verify(file, resource("corretto-11.0.4.11.1.sig"), Tool.JDK, Vendor.of("temurin"))
+                .outcome()).isEqualTo(Signatures.Outcome.UNKNOWN_KEY);
     }
 }

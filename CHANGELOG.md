@@ -32,24 +32,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apt and dnf users trust one key. After `sudo rpm --import https://vitrina-project.dev/vitrina.asc`,
   `rpm -K` and `dnf` check an `.rpm`; `debsig-verify` checks a `.deb`. Installing without the key
   imported works as before.
-- `CONTRIBUTING.md` and issue and pull request templates. The README says why you might pick jkit
-  over SDKMAN, mise or asdf (and what it doesn't do), and which hosts jkit contacts, and when: no
-  telemetry, no background update checks.
+- **`jkit doctor` reports leftover `*.jkit-tmp` files** from an interrupted write of a startup
+  file, `config.toml` or `jkit.toml` (check `temp-files`), with the command that removes them.
 
 ### Changed
 
+- **macOS builds need macOS 14 (Sonoma) or newer**, down from 15; the Homebrew formula says so too.
 - **Temurin and Microsoft JDKs are always checked against the vendor's OpenPGP signature**, the
   `.sig` the vendor publishes next to the download, whether or not foojay lists one. Some current
   Temurin builds (21.0.13+9, 25.0.5+8) installed on foojay's checksum alone. Temurin builds from
   before Adoptium started signing (before 8u342, 11.0.16, 17.0.4, 18.0.2) install on their
   checksum, and jkit says only the checksum was checked.
+- **foojay can't steer a JDK around its signature check.** jkit takes only builds of the vendor and
+  major release you asked for, and downloads Temurin, Microsoft and Corretto builds only from the
+  vendor's own server (Adoptium's GitHub releases, aka.ms, corretto.aws); a build listed anywhere
+  else is refused. [SECURITY.md](SECURITY.md) says what that does and doesn't guarantee.
+- **Installs don't wait on each other's downloads.** The install lock is held only to look at and
+  change `tools/`, so parallel installs (two terminals, CI jobs sharing a home) download side by
+  side, and `remove`, `prune` and `self-update` don't wait for a download. `prune` and `doctor`
+  leave alone the folder a running install downloads into.
 - **A signed build must be the version asked for.** After a good signature, jkit checks every part
   of a JDK's version, and now Maven's (`lib/maven-core-<version>.jar`) and sbt's too, so a build the
   publisher signed for another version is refused.
 - **`jkit install jdk@lts <vendor>`** (and `pin`, and `search` with a vendor) picks that vendor's
   newest LTS release, not the newest LTS of any vendor.
-- **`~/.bashrc`, `~/.zshrc`, fish's file, `config.toml` and `jkit.toml` are written atomically**,
-  keeping their permissions; a symlinked startup file stays a symlink.
+- **`~/.bashrc`, `~/.zshrc`, fish's file, `config.toml` and `jkit.toml` are written atomically**
+  and synced to disk, keeping their permissions, owner and encoding (UTF-8 with or without a BOM,
+  UTF-16, Latin-1); a symlinked startup file stays a symlink, and a read-only file is refused. On
+  Windows, a file another program has open is retried, then written in place.
+- **PATH follows a `*_HOME` you set yourself.** When the hook loads, and when you leave a project
+  or run `jkit reset`, that home's `bin` comes first instead of jkit's global one, so `java` is
+  `$JAVA_HOME/bin/java`.
 - **`export JKIT_AUTO_SWITCH=0` stops switching on `cd` in a shell that's already open**, and the
   `cd` hook does less work when nothing changes.
 - Unpacked JDKs, Maven, Gradle and sbt are no longer group-writable.
@@ -59,9 +72,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Building jkit on a JDK older than 25, or a Maven older than the wrapper's, stops at once with a
   clear message.
 - **Ctrl-C stops an install or self-update cleanly.** Ctrl-C, SIGTERM or SIGHUP during a download
-  deletes the partial file, says so, and then ends jkit by that signal (Windows: exit 130), so a
-  shell script running jkit stops too. A SIGINT the shell set to be ignored (a background job)
-  stays ignored.
+  deletes the partial file and says so. Ctrl-C then ends jkit by SIGINT, so a shell script running
+  jkit stops too (exit 130 on Windows, or as a container's PID 1); SIGTERM and SIGHUP exit 143 and
+  129. A SIGINT the shell set to be ignored (a background job) stays ignored.
+- GitHub releases list the version's changelog entry and how to install it, instead of a list of
+  pull requests.
 - **Slow downloads start again.** A download that, 30 seconds in, would take more than 10 more
   minutes reconnects once, so a slow CDN edge no longer holds an install for a quarter of an hour.
 - **Progress in CI logs.** Without a terminal, download progress is a line at each quarter and at
@@ -79,9 +94,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `JAVA_HOME` (or other `*_HOME`) you set yourself is no longer lost** when a project or
   `jkit use` overrides it: jkit keeps it in `JKIT_USER_<TOOL>`, says so, and gives it back when
   you leave the project or run `jkit reset`.
-- **`jkit exec`: Ctrl-C stops the shell script it runs in.** A command ended by SIGINT, SIGTERM or
-  SIGHUP now ends jkit by the same signal, and a Ctrl-C right as the command starts no longer
+- **`jkit exec`: Ctrl-C stops the shell script it runs in.** After a real Ctrl-C, jkit ends by
+  SIGINT like its command; a command that only exits 129, 130 or 143 passes that code on, and
+  SIGTERM or SIGHUP give 143 or 129, as documented. A Ctrl-C right as the command starts no longer
   leaves it running.
+- **`jkit reset <tool>` leaves a `JAVA_HOME` you set yourself alone** when jkit hadn't chosen that
+  tool, and says there was nothing to reset.
+- **`jkit hook --install` and `--uninstall` find jkit's block when it's indented** or has trailing
+  spaces; with its end marker missing, both say so and change nothing.
+- **Corretto builds from 2019** (8u222, 8u232, 11.0.4, 11.0.5), signed with Amazon's since-retired
+  keys, are refused with a message that says so and suggests a newer build or
+  `--allow-unverified`, instead of a self-update; `jkit search` marks them ○. Corretto's catch-all
+  "latest" entries no longer show up in `search` or get picked by `install`.
+- A signing vendor's download link with no file name, or one in its query string, is refused
+  rather than installed without a signature.
+- Ctrl-C while copying an install to another disk no longer leaves `tools/.<name>.partial` behind.
 - **zsh: the `cd` hook no longer runs in `$( )` subshells**, so prompt themes don't show jkit
   messages.
 - Versions with `-dev`, `-preview`, `-pre` or `-nightly` count as pre-releases, and a build label

@@ -7,6 +7,7 @@ import dev.jkit.model.Suggest;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -54,6 +55,16 @@ public final class FoojaySource {
         public boolean downloadable() {
             return pkg != null;
         }
+
+        /**
+         * Whether its signature is by a key the vendor has retired, which install can't check:
+         * Amazon's 2019 Corretto builds, the ones it still serves from its old CloudFront host
+         * (all of them, and nothing else, are there).
+         */
+        public boolean retiredKey() {
+            return pkg != null && signature != null && pkg.vendor().foojayName().equals("corretto")
+                    && "d3pxv6yz143wms.cloudfront.net".equalsIgnoreCase(signature.getHost());
+        }
     }
 
     /** A feature release and its support status. */
@@ -79,7 +90,12 @@ public final class FoojaySource {
         return packages(platform, "latest=available&release_status=ga" + (pre ? "&release_status=ea" : ""), fx);
     }
 
-    /** Every build of one major from one vendor, newest first. */
+    /**
+     * Every build of one major from one vendor, newest first. Only those: the vendor a build is
+     * listed under decides which key its signature must be by, or whether jkit looks for one, and
+     * its version whether Temurin signed it. A list that answers a question about Temurin 21 with a
+     * build it calls Zulu, or Temurin 17.0.3, would otherwise choose to skip the signature check.
+     */
     public List<Pkg> builds(int major, Vendor vendor, Platform platform, boolean fx, boolean pre)
             throws IOException {
         String status = pre ? "release_status=ga&release_status=ea" : "release_status=ga";
@@ -87,6 +103,9 @@ public final class FoojaySource {
                 "jdk_version=" + major + "&distribution="
                         + URLEncoder.encode(vendor.foojayName(), StandardCharsets.UTF_8)
                         + "&" + status, fx);
+        // vendor names come back as foojay's own (requireKnown turns synonyms into those)
+        all.removeIf(p -> !p.vendor().foojayName().equals(vendor.foojayName())
+                || p.major() != major || p.version().part(0) != major);
         all.sort(Comparator.comparing(Pkg::version).reversed());
         return all;
     }
@@ -98,14 +117,21 @@ public final class FoojaySource {
      * it out for some Temurin builds that have one, and a compromised foojay could leave it out on
      * purpose, or point the download somewhere else, to have a build installed on its own checksum:
      * the link is next to whatever download foojay names, and a signature from there must still be
-     * by the vendor's key.
+     * by the vendor's key. A download link with no file name to put .sig after is refused: without
+     * a signature such a build would install on foojay's checksum.
      * <p>
      * For other builds, the link foojay lists, https only: a listed link that isn't https is
      * refused for a vendor jkit has keys for, and dropped for others, whose links jkit never fetches.
      */
     static URI signature(JsonNode info, URI download, URI base, Pkg pkg) {
         if (vendorSigns(pkg.vendor(), pkg.version())) {
-            return nextTo(download);
+            URI next = nextTo(download);
+            if (next == null) {
+                throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " " + pkg.version()
+                        + " as " + Visible.of(download.toString()) + ", where jkit can't find its signature; refusing it",
+                        "try again later, or pick another vendor");
+            }
+            return next;
         }
         String sig = Json.text(info, "signature_uri");
         if (sig.isEmpty()) {
@@ -134,8 +160,11 @@ public final class FoojaySource {
             17, Version.parse("17.0.4"), 18, Version.parse("18.0.2"));
 
     /**
-     * Whether the vendor publishes a signature for this build: every Microsoft and Corretto build
-     * foojay lists, and Temurin's from mid-2022 on.
+     * Whether jkit looks for the vendor's signature of this build: every Microsoft and Corretto
+     * build, and Temurin's from mid-2022 on. Not that each has one jkit can check: Amazon signed
+     * its 2019 Corretto builds with keys it has since retired, and a few old Corretto downloads
+     * (Alpine builds of 2020, a macOS 8u242) have no .sig at all. Those are refused unless
+     * --allow-unverified, as any build whose signature can't be checked.
      */
     static boolean vendorSigns(Vendor vendor, Version version) {
         return switch (vendor.foojayName()) {
@@ -148,11 +177,77 @@ public final class FoojaySource {
         };
     }
 
-    /** {@code <download>.sig}: the file name with {@code .sig} added, on the same server. */
+    /**
+     * Whether {@code download} is where {@code vendor} publishes its builds, for the vendors jkit
+     * has keys for: Adoptium's GitHub releases, aka.ms, and corretto.aws (with Amazon's older
+     * CloudFront host, which still serves its 2019 builds). That is every build foojay lists for
+     * them. Only the address foojay names is checked: from there the vendor's own server redirects
+     * (aka.ms to download.visualstudio.microsoft.com, GitHub to its release-assets host), which
+     * foojay doesn't decide, and Http checks each hop stays https.
+     */
+    static boolean onVendorHost(String vendor, URI download) {
+        String host = download.getHost() == null ? "" : download.getHost().toLowerCase(Locale.ROOT);
+        String path = download.getRawPath() == null ? "" : download.getRawPath();
+        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null
+                && !path.contains("..") && !path.toLowerCase(Locale.ROOT).contains("%2e");
+        return plain && switch (vendor) {
+            case "temurin" -> host.equals("github.com") && path.startsWith("/adoptium/");
+            case "microsoft" -> host.equals("aka.ms");
+            case "corretto" -> host.equals("corretto.aws") || host.equals("d3pxv6yz143wms.cloudfront.net");
+            default -> true;
+        };
+    }
+
+    /** "Adoptium's GitHub releases": where {@link #onVendorHost} expects the vendor's downloads. */
+    private static String vendorHost(String vendor) {
+        return switch (vendor) {
+            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/)";
+            case "microsoft" -> "aka.ms";
+            default -> "corretto.aws";
+        };
+    }
+
+    /**
+     * The download link in a build's foojay answer, null when there is none. For a vendor jkit has
+     * keys for it must be on that vendor's own server ({@link #onVendorHost}), or the build is
+     * refused: a signature by the vendor's key is checked wherever the file comes from, but a
+     * Temurin build from before Adoptium signed has only its checksum, which comes from foojay,
+     * and this keeps the file itself coming from Adoptium. A local mirror on this machine
+     * ({@code JKIT_SOURCES_FOOJAY_URL=http://localhost...}) is yours, and may serve the files itself.
+     */
+    private URI download(JsonNode info, Pkg pkg) {
+        String url = Json.text(info, "direct_download_uri");
+        if (url.isEmpty()) {
+            return null;
+        }
+        URI download = Http.sent(url, "a download", base);
+        String vendor = pkg.vendor().foojayName();
+        if (vendor.equals("corretto") && download.getRawPath() != null && download.getRawPath().contains("/latest/")) {
+            return null; // what packages() skips, should a list name it otherwise
+        }
+        if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+                && !onVendorHost(vendor, download)) {
+            throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
+                    + pkg.version() + " at " + Visible.of(String.valueOf(download.getHost())) + ", not "
+                    + vendorHost(vendor) + "; refusing it",
+                    "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
+        }
+        return download;
+    }
+
+    /**
+     * {@code <download>.sig}: the file name with {@code .sig} added, on the same server. Null when
+     * the link has no file name to add it to (no path, or one ending in /), or a query: the vendors
+     * jkit has keys for link their downloads by path alone, and adding .sig to the path of a link
+     * that names its file in the query asks for something else. A signature is then missing,
+     * which for these vendors refuses the install.
+     */
     static URI nextTo(URI download) {
-        String path = download.getRawPath() == null || download.getRawPath().isEmpty() ? "/" : download.getRawPath();
-        return URI.create(download.getScheme() + "://" + download.getRawAuthority() + path + ".sig"
-                + (download.getRawQuery() == null ? "" : "?" + download.getRawQuery()));
+        String path = download.getRawPath();
+        if (path == null || path.isEmpty() || path.endsWith("/") || download.getRawQuery() != null) {
+            return null;
+        }
+        return URI.create(download.getScheme() + "://" + download.getRawAuthority() + path + ".sig");
     }
 
     /**
@@ -257,8 +352,8 @@ public final class FoojaySource {
             // this answer carries the download link and often the checksum itself, so https too
             JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id())))
                     .path("result").path(0);
-            String url = Json.text(info, "direct_download_uri");
-            if (url.isEmpty()) {
+            URI download = download(info, pkg);
+            if (download == null) {
                 continue;
             }
             Checksum checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type"));
@@ -272,7 +367,6 @@ public final class FoojaySource {
                         ? Checksum.parseStrict(http.getFresh(uri), pkg.fileName(), named)
                         : Checksum.parse(http.getFresh(uri), pkg.fileName(), Json.text(info, "checksum_type"));
             }
-            URI download = Http.sent(url, "a download", base);
             return new Artifact(tool, pkg.version(), pkg.vendor(), download, pkg.fileName(),
                     pkg.archiveType(), checksum == null ? null : checksum.algorithm(),
                     checksum == null ? null : checksum.hash(), fx, signature(info, download, base, pkg));
@@ -298,13 +392,12 @@ public final class FoojaySource {
      */
     public Availability availability(Pkg pkg) throws IOException {
         JsonNode info = Json.fetch(http, Http.requireSecure(base.resolve("ids/" + pkg.id()))).path("result").path(0);
-        String url = Json.text(info, "direct_download_uri");
-        if (url.isEmpty()) {
+        URI download = download(info, pkg);
+        if (download == null) {
             return Availability.NONE;
         }
         boolean checksum = Checksum.of(Json.text(info, "checksum"), Json.text(info, "checksum_type")) != null
                 || !Json.text(info, "checksum_uri").isEmpty();
-        URI download = Http.sent(url, "a download", base);
         return new Availability(pkg, checksum, signature(info, download, base, pkg));
     }
 
@@ -360,6 +453,18 @@ public final class FoojaySource {
         return new JkitException(vendor + " has no build matching " + what + " for " + platform);
     }
 
+    /**
+     * foojay lists, next to each Corretto release, a catch-all entry per major whose link is
+     * corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz: whatever Amazon's
+     * newest build is that day, under a bare version ("8", "11", "21"). Not a build jkit can name,
+     * pin or tell apart from the real one with the same number. The list carries no links, but
+     * these, and only these, are named for their major alone ({@code amazon-corretto-21-...}),
+     * where a release is named for its version ({@code amazon-corretto-21.0.9.10.1-...}).
+     */
+    static boolean latestCorretto(Pkg pkg) {
+        return pkg.vendor().foojayName().equals("corretto") && pkg.fileName().matches("amazon-corretto-[0-9]+-.*");
+    }
+
     private List<Pkg> packages(Platform platform, String extra, boolean fx) throws IOException {
         String query = "packages?operating_system=" + platform.os()
                 + "&architecture=" + platform.arch()
@@ -389,7 +494,7 @@ public final class FoojaySource {
                     n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
                     Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"),
                     !n.path("directly_downloadable").isBoolean() || n.path("directly_downloadable").asBoolean());
-            if (pkg.vendor().isRetired()) {
+            if (pkg.vendor().isRetired() || latestCorretto(pkg)) {
                 continue;
             }
             String key = pkg.vendor().foojayName() + "|" + pkg.version().raw();

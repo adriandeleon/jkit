@@ -182,6 +182,37 @@ class ExecTest {
         assertThat(Signals.endedBy(130, true)).isNull();
     }
 
+    @Test
+    void onlyACtrlCThatEndedTheCommandEndsJkitFromSigint() {
+        assertThat(Signals.ctrlC(130, true, false)).isTrue();
+        assertThat(Signals.ctrlC(130, false, false)).isFalse(); // the command exited 130, or got SIGINT alone
+        assertThat(Signals.ctrlC(0, true, false)).isFalse(); // a REPL that handled it
+        assertThat(Signals.ctrlC(143, true, false)).isFalse();
+        assertThat(Signals.ctrlC(130, true, true)).isFalse();
+        // a container's init: the kernel drops a signal PID 1 sends itself
+        assertThat(Signals.canRaise(1, false)).isFalse();
+        assertThat(Signals.canRaise(4242, false)).isTrue();
+        assertThat(Signals.canRaise(4242, true)).isFalse();
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void onlyTheHooksOwnEnvFileIsDeletedOnCtrlC() throws Exception {
+        Path temp = Files.createDirectories(tmp.resolve("temp"));
+        Path ours = Files.createFile(temp.resolve("jkit-env.Ab12Cd"));
+        Map<String, String> e = new HashMap<>(Map.of("TMPDIR", temp + "/", "JKIT_ENV_FILE", ours.toString()));
+        assertThat(Signals.hookEnvFile(e)).isEqualTo(ours);
+        e.put("JKIT_ENV_FILE", Files.createFile(temp.resolve("notes.txt")).toString());
+        assertThat(Signals.hookEnvFile(e)).isNull();
+        e.put("JKIT_ENV_FILE", Files.createFile(tmp.resolve("jkit-env.Ab12Cd")).toString()); // not in TMPDIR
+        assertThat(Signals.hookEnvFile(e)).isNull();
+        Files.createSymbolicLink(temp.resolve("jkit-env.Link12"), ours);
+        e.put("JKIT_ENV_FILE", temp.resolve("jkit-env.Link12").toString());
+        assertThat(Signals.hookEnvFile(e)).isNull();
+        e.remove("JKIT_ENV_FILE");
+        assertThat(Signals.hookEnvFile(e)).isNull();
+    }
+
     /**
      * Runs jkit exec in a JVM of its own under perl, which reports the signal that ended it (Java
      * can't tell a death by SIGINT from exit code 130): a bash script stops on Ctrl-C only on the first.
@@ -190,7 +221,9 @@ class ExecTest {
         Path perl = Path.of("/usr/bin/perl");
         assumeTrue(Files.isExecutable(perl), "no perl to tell how a process ended");
         String jvm = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        ProcessBuilder pb = new ProcessBuilder(perl.toString(), "-e", "system(@ARGV); print(($? & 127) . ' ' . ($? >> 8))",
+        // SIGINT at its default, as in an interactive shell, so jkit handles it
+        ProcessBuilder pb = new ProcessBuilder(perl.toString(), "-e",
+                "$SIG{INT} = 'DEFAULT'; system(@ARGV); print(($? & 127) . ' ' . ($? >> 8))",
                 jvm, "-cp", System.getProperty("java.class.path"), "dev.jkit.cli.Main", "exec", "--no-project", "--",
                 "/bin/sh", "-c", script).directory(project.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
         pb.environment().put("JKIT_HOME", home.toString());
@@ -203,11 +236,20 @@ class ExecTest {
 
     @Test
     @DisabledOnOs(OS.WINDOWS)
-    void aCommandEndedByASignalEndsJkitWithTheSameSignal() throws Exception {
-        // the command isn't left ignoring SIGINT, and jkit ends from it too (signal 2, no exit code)
-        assertThat(endedBy("kill -INT $$; echo survived")).isEqualTo("2 0");
-        assertThat(endedBy("kill -TERM $$")).isEqualTo("15 0");
-        // an exit code is passed on as it is
+    void aCtrlCThatEndsTheCommandEndsJkitWithSigint() throws Exception {
+        // a Ctrl-C reaches jkit (the command's parent) and the command: jkit ends from SIGINT
+        // (signal 2, no exit code), and the command wasn't left ignoring SIGINT
+        assertThat(endedBy("kill -INT $PPID; sleep 1; kill -INT $$; echo survived")).isEqualTo("2 0");
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void otherwiseTheCommandsExitCodeComesThrough() throws Exception {
+        // SIGINT to the command alone, or an exit code that looks like a signal: only the code
+        assertThat(endedBy("kill -INT $$")).isEqualTo("0 130");
+        assertThat(endedBy("exit 130")).isEqualTo("0 130");
+        assertThat(endedBy("exit 129")).isEqualTo("0 129");
+        assertThat(endedBy("kill -TERM $$")).isEqualTo("0 143");
         assertThat(endedBy("exit 3")).isEqualTo("0 3");
     }
 }

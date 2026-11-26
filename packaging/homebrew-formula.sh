@@ -51,7 +51,7 @@ class Jkit < Formula
   ]
 
   on_macos do
-    depends_on macos: :sequoia
+    depends_on macos: :sonoma
 
     on_arm do
       url "$base/jkit-$version-macos-aarch64.tar.gz"

@@ -19,8 +19,9 @@ import java.util.Map;
  * {@code JKIT_SHELL_<TOOL>} and each install applied from a project file in
  * {@code JKIT_PROJECT_<TOOL>}; a shell choice wins over a project's. A *_HOME the user set
  * outside jkit is kept in {@code JKIT_USER_<TOOL>} the first time jkit replaces it, and comes back
- * (instead of the global version) once neither applies any more. It only ever removes PATH
- * entries under tools/, so it never touches anything the user added.
+ * (instead of the global version) once neither applies any more, its bin first on PATH. It only
+ * ever removes PATH entries under tools/ and the global bins, so it never removes anything the
+ * user added.
  */
 public final class ShellEnv {
     static final String GRAALVM_FOLLOWS = "JKIT_GRAALVM_FOLLOWS_JDK";
@@ -69,7 +70,7 @@ public final class ShellEnv {
         if (tool == Tool.GRAALVM) {
             out.put(GRAALVM_FOLLOWS, null);
         }
-        out.put("PATH", path(env, home, active));
+        out.put("PATH", path(env, home, active, out));
         return out;
     }
 
@@ -104,7 +105,7 @@ public final class ShellEnv {
                 out.put(GRAALVM_FOLLOWS, null);
             }
         }
-        out.put("PATH", path(env, home, active));
+        out.put("PATH", path(env, home, active, out));
         return out;
     }
 
@@ -167,7 +168,7 @@ public final class ShellEnv {
                 out.put(GRAALVM_FOLLOWS, null);
             }
         }
-        out.put("PATH", path(env, home, active(after)));
+        out.put("PATH", path(env, home, active(after), out));
         return out;
     }
 
@@ -252,7 +253,17 @@ public final class ShellEnv {
         }
     }
 
-    private static boolean isGlobal(String value, JkitHome home, Tool tool) {
+    /**
+     * Whether jkit chose {@code tool} in this shell: with jkit use, from a project, or by keeping the
+     * user's own *_HOME aside. Without one, a reset has nothing to take away.
+     */
+    public static boolean hasChoice(Map<String, String> env, Tool tool) {
+        return blankToNull(env.get(stateVariable(tool))) != null || env.containsKey(projectVariable(tool))
+                || env.containsKey(userVariable(tool));
+    }
+
+    /** Whether a *_HOME value is the global link, as the hook sets it. */
+    public static boolean isGlobal(String value, JkitHome home, Tool tool) {
         Path path = Fs.path(value);
         return path != null && path.toAbsolutePath().normalize().equals(home.global(tool).toAbsolutePath().normalize());
     }
@@ -266,20 +277,53 @@ public final class ShellEnv {
         return Files.exists(link) ? link.toString() : null;
     }
 
-    static String path(Map<String, String> env, JkitHome home, Map<Tool, String> active) {
+    /**
+     * PATH with each active install's bin first. For a tool with none, PATH follows the *_HOME the
+     * shell ends up with ({@code changes} over {@code env}): the user's own puts its bin first
+     * instead of the global one the hook added, so {@code java} is $JAVA_HOME/bin/java; the global
+     * link puts the global bin back. Only entries under tools/ and the global bins are jkit's to
+     * remove; the user's own entries all stay.
+     */
+    static String path(Map<String, String> env, JkitHome home, Map<Tool, String> active, Map<String, String> changes) {
         List<String> entries = new ArrayList<>();
+        List<String> dropped = new ArrayList<>();
         for (Tool t : Tool.values()) {
-            if (t.onPath() && active.containsKey(t)) {
+            if (!t.onPath()) {
+                continue;
+            }
+            String global = home.global(t).resolve("bin").toString();
+            if (active.containsKey(t)) {
                 entries.add(Path.of(active.get(t), "bin").toString());
+                continue;
+            }
+            String toolHome = blankToNull(changes.containsKey(t.homeVariable())
+                    ? changes.get(t.homeVariable()) : env.get(t.homeVariable()));
+            if (toolHome == null || underTools(toolHome, home)) {
+                continue;
+            }
+            Path ownBin = isGlobal(toolHome, home, t) ? null : Fs.path(toolHome);
+            if (ownBin == null) {
+                if (!onPath(env, global)) {
+                    entries.add(global);
+                }
+            } else if (Files.isDirectory(ownBin.resolve("bin"))) {
+                dropped.add(global);
+                if (!onPath(env, ownBin.resolve("bin").toString())) {
+                    entries.add(ownBin.resolve("bin").toString());
+                }
             }
         }
         String current = env.getOrDefault("PATH", "");
         for (String entry : current.split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !underTools(entry, home)) {
+            if (!entry.isEmpty() && !underTools(entry, home) && !dropped.contains(entry)) {
                 entries.add(entry);
             }
         }
         return String.join(File.pathSeparator, entries);
+    }
+
+    private static boolean onPath(Map<String, String> env, String entry) {
+        return List.of(env.getOrDefault("PATH", "").split(File.pathSeparator)).contains(entry);
     }
 
     /**

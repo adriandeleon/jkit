@@ -8,8 +8,11 @@ Aider, …) and CI. The rules an agent needs:
   **`jkit exec`** instead.
 - **Nothing asks a question.** No command prompts or reads stdin. Without a terminal, download
   progress is a plain line on stderr at each quarter and at least every 30 seconds.
-- **Stopping it is safe.** Ctrl-C or SIGTERM during an install deletes the partial download and
-  exits 130 or 143; nothing half-installed is left.
+- **Stopping it is safe.** Ctrl-C, SIGTERM or SIGHUP during an install deletes the partial
+  download; nothing half-installed is left. SIGTERM exits 143 and SIGHUP 129. After SIGINT jkit
+  ends from SIGINT itself, as a program without a handler does: a shell shows that as 130, and
+  from Node or Python it is a death by signal (`signal` `SIGINT`, a negative `returncode`), not
+  exit code 130.
 - **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `pin`,
   `unpin`, `sync`, `remove`, `prune`, `config` and `self-update` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
   list of commands to try. Shapes: [json.md](json.md).
@@ -42,6 +45,12 @@ REPL keeps running and its exit code comes through. To stop it from another proc
 agent's cancel), send jkit SIGTERM (or SIGHUP): it passes SIGTERM on, waits for the command and
 exits with its exit code; a second SIGTERM kills the command. A SIGINT sent to jkit's pid alone does
 nothing.
+
+The exit code is always the command's, with one exception: when a Ctrl-C reached both jkit and the
+command and the command died from it, jkit ends from SIGINT too, so a script running `jkit exec`
+stops as it would without jkit. A shell shows 130 either way; a program that started jkit sees a
+death by SIGINT. A command that merely exits 130, or is sent SIGINT on its own, gives exit code
+130. As PID 1 (a container's init) jkit never ends from a signal: it exits 130.
 
 ## A typical agent loop
 

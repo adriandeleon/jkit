@@ -221,7 +221,7 @@ public final class SelfUpdate {
                     + Visible.of(says.isEmpty() ? "nothing" : says) + "); nothing was changed",
                     platform.isLinux() && "musl".equals(platform.libc())
                             ? "the musl Linux builds are static and need nothing from the system"
-                            : "Linux builds need glibc 2.34 or newer; macOS builds need macOS 15 or newer");
+                            : "Linux builds need glibc 2.34 or newer; macOS builds need macOS 14 or newer");
         }
         return binary;
     }

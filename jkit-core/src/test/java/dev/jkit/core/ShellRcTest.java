@@ -49,6 +49,25 @@ class ShellRcTest {
     }
 
     @Test
+    void markersAreFoundIndentedOrWithTrailingSpacesToo() {
+        String rc = "a\n  " + ShellRc.START + "  \n" + "eval \"$(jkit hook bash)\"\n\t" + ShellRc.END + " \nb\n";
+        assertThat(ShellRc.hasBlock(rc)).isTrue();
+        assertThat(ShellRc.manualLine(rc)).isZero(); // inside jkit's block
+        assertThat(ShellRc.add(rc, "bash").changed()).isFalse();
+        assertThat(ShellRc.remove(rc).text()).isEqualTo("a\nb\n");
+    }
+
+    @Test
+    void aStartMarkerWithoutItsEndIsNoBlockAndNothingIsAddedOrRemoved() {
+        String rc = "a\n" + ShellRc.START + "\neval \"$(jkit hook bash)\"\nb\n";
+        assertThat(ShellRc.hasBlock(rc)).isFalse();
+        assertThat(ShellRc.unterminatedStart(rc)).isEqualTo(2);
+        assertThat(ShellRc.add(rc, "bash").changed()).isFalse();
+        assertThat(ShellRc.remove(rc).changed()).isFalse();
+        assertThat(ShellRc.unterminatedStart(String.join("\n", ShellRc.block("bash")))).isZero();
+    }
+
+    @Test
     void removesABlockInTheMiddleAndKeepsWhatFollows() {
         String rc = "a\n" + String.join("\n", ShellRc.block("zsh")) + "\nb\n";
         assertThat(ShellRc.remove(rc).text()).isEqualTo("a\nb\n");

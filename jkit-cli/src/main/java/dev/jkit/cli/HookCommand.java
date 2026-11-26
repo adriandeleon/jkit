@@ -12,8 +12,6 @@ import dev.jkit.model.Perms;
 import dev.jkit.model.ShellQuote;
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -147,6 +145,7 @@ final class HookCommand implements Callable<Integer> {
         String self = self(ctx);
         Changes report = new Changes(ctx);
         boolean added = false;
+        refuseUnterminated(text, shown, shell, "--install");
         if (ShellRc.hasBlock(text)) {
             ctx.out.println("the jkit hook is already in " + shown + "; nothing changed there");
         } else if (manual > 0) {
@@ -216,7 +215,7 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
-            AtomicFile.write(config, edit.text(), StandardCharsets.UTF_8, true);
+            ProjectFile.write(config, edit.text(), true);
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
                     + shown);
@@ -244,18 +243,29 @@ final class HookCommand implements Callable<Integer> {
     }
 
     /**
-     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent):
-     * read and written back in the same charset, so every byte jkit doesn't change stays as it was.
+     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent),
+     * as project files are read: read and written back in the same charset, so every byte jkit
+     * doesn't change stays as it was (a byte-order mark too, read as the text's first character).
      */
     static Charset charsetOf(Path file) throws IOException {
         if (!Files.isRegularFile(file)) {
             return StandardCharsets.UTF_8;
         }
-        try {
-            StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(file)));
-            return StandardCharsets.UTF_8;
-        } catch (CharacterCodingException e) {
-            return StandardCharsets.ISO_8859_1;
+        return ProjectFile.encoding(Files.readAllBytes(file)).charset();
+    }
+
+    /**
+     * A start marker whose end marker is gone (edited by hand): jkit can't tell where its block
+     * ends, so it neither adds a second one nor guesses what to take out.
+     */
+    private static void refuseUnterminated(String text, String shown, String shell, String flag) {
+        int start = ShellRc.unterminatedStart(text);
+        if (start > 0) {
+            throw new JkitException("line " + start + " of " + shown + " starts jkit's block (" + ShellRc.START
+                    + ") but no " + ShellRc.END + " line ends it; nothing changed",
+                    "add a " + ShellRc.END + " line where the block's lines end, then run jkit hook " + shell + " " + flag
+                            + " again",
+                    "or delete the block's lines by hand");
         }
     }
 
@@ -265,6 +275,7 @@ final class HookCommand implements Callable<Integer> {
         String shown = Changes.tilde(file.toString());
         Charset charset = charsetOf(file);
         String text = Files.exists(file) ? Files.readString(file, charset) : "";
+        refuseUnterminated(text, shown, shell, "--uninstall");
         ShellRc.Edit edit = ShellRc.remove(text);
         int manual = ShellRc.manualLine(edit.text());
         if (!edit.changed()) {

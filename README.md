@@ -10,7 +10,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-informational)](#install)
 [![License: MIT](https://img.shields.io/github/license/adriandeleon/jkit)](LICENSE)
 
-Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
+Installs and switches JDKs (20+ vendors), Maven, Gradle and sbt: per shell, per project or
 globally. One native binary, no JDK needed to run it.
 
 jkit is developed with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding
@@ -58,7 +58,7 @@ Next to SDKMAN, mise and asdf, jkit is narrower and stricter:
 - JDKs from 20+ vendors through foojay. Projects keep their `.sdkmanrc`, `.tool-versions` or
   `.java-version`: jkit reads them.
 - `jkit exec` and `--json` for scripts, CI, editors and agents.
-- Every change it makes is printed: folders, links, variables.
+- Nothing changes out of sight: jkit prints each folder, link and variable it touches.
 
 What it doesn't do: it manages JDKs, GraalVM, Maven, Gradle and sbt, nothing else (no Kotlin,
 JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows support is a preview.
@@ -71,16 +71,16 @@ JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows su
 | Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository, so `apt upgrade` keeps it current ([setup](https://jkit-project.dev/install/#apt)); or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
 | Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
-| Alpine and other musl Linux (x64) | the `-linux-x64-musl` `.tar.gz` from the releases (from the release after 0.4.0). GraalVM can't build a musl binary for arm64 yet |
+| Alpine and other musl Linux (x64) | the `-linux-x64-musl` `.tar.gz` from the releases (from 0.5.0). GraalVM can't build a musl binary for arm64 yet |
 | Anything else | a `.tar.gz` or `.zip` from the releases |
 
 Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
-anywhere on your `PATH`. From the release after 0.4.0, the Windows `.zip` also holds
+anywhere on your `PATH`. From 0.5.0, the Windows `.zip` also holds
 `vcruntime140.dll` and `vcruntime140_1.dll`, the Visual C++ runtime `jkit.exe` needs: keep them
 next to it, in a folder of its own. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
 (Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04 or RHEL 8); the `-musl` builds are static
 and need nothing from the system, so they also run on Alpine and on older glibc distributions;
-macOS builds need macOS 15 or newer and are signed and notarized. Pre-releases (versions with a
+macOS builds need macOS 14 or newer (15 for 0.4.0 and earlier) and are signed and notarized. Pre-releases (versions with a
 hyphen) are on the releases page only.
 
 `jkit self-update` updates a jkit from a `.tar.gz` or `.zip` in place, after checking it against
@@ -91,7 +91,7 @@ that replaces it).
 To check a download: `sha256sum -c SHA256SUMS --ignore-missing` (from 0.4.0, `gpg --verify
 SHA256SUMS.asc SHA256SUMS` checks that file against jkit's release key, in
 [SECURITY.md](SECURITY.md)), and for where it was built,
-`gh attestation verify <file> --repo adriandeleon/jkit`. From the release after 0.4.0, the `.deb`
+`gh attestation verify <file> --repo adriandeleon/jkit`. From 0.5.0, the `.deb`
 and `.rpm` are also signed with the Vitrina repository's key: after
 `sudo rpm --import https://vitrina-project.dev/vitrina.asc`, `rpm -K` checks an `.rpm`, and so does
 `dnf` when it installs one. Each release also has a CycloneDX SBOM,
@@ -116,7 +116,7 @@ jkit runs on Windows, but this part is less tested than macOS and Linux:
 - Switching on `cd` isn't available in PowerShell yet.
 - Windows on ARM runs the x64 build under emulation.
 - `jkit.exe` needs the Microsoft Visual C++ runtime. winget installs the Visual C++
-  Redistributable (2015 or newer, x64) with jkit. From the release after 0.4.0 the `.zip` carries
+  Redistributable (2015 or newer, x64) with jkit. From 0.5.0 the `.zip` carries
   the runtime's two DLLs next to `jkit.exe`, and `jkit self-update` keeps them up to date; with
   0.4.0 and earlier, install the Redistributable first. Once the Redistributable is installed you
   can delete the two DLLs, and Windows Update keeps the runtime patched.
@@ -199,7 +199,7 @@ releases.
 ## Uninstall
 
 ```bash
-jkit hook --uninstall          # takes the line out of your shell's startup file
+jkit hook --uninstall          # takes the block out of your shell's startup file
 rm -rf ~/.jkit                 # every install, link and setting
 brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit, winget uninstall AdrianDeLeon.jkit
 ```
