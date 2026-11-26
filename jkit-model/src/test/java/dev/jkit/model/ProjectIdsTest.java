@@ -81,4 +81,13 @@ class ProjectIdsTest {
         assertThat(Version.looksLikeVersion("openjdk64-17.0.2")).isFalse();
         assertThat(Version.looksLikeVersion("")).isFalse();
     }
+
+    @Test
+    void sdkmanEarlyAccessIdsKeepTheBuild() {
+        PinnedTool pin = SdkmanIds.parse(Tool.JDK, "26.ea.20-open");
+        assertThat(pin.version()).isEqualTo("26-ea+20");
+        assertThat(Version.parse(pin.version()).isPreRelease()).isTrue();
+        assertThat(Version.parse("26-ea+20").matches(pin.version())).isTrue();
+        assertThat(Version.parse("26-ea+19").matches(pin.version())).isFalse();
+    }
 }

@@ -25,35 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `jkit-<version>-linux-x64-musl.tar.gz`, which needs nothing from the system (it also runs on
   glibc distributions older than the 2.34 the other builds need). `jkit self-update` on a musl
   system picks it; before, it refused. There's no arm64 musl build: GraalVM's native-image can't
-  make one yet. It contains musl
-  libc and zlib, whose licenses are in `THIRD-PARTY-NOTICES`.
-- **The `.deb` and `.rpm` are signed** with the key the Vitrina apt repository signs with
-  (`8486A7AF4FC8FEE93D83CDB4EA5FA138C2C09C4A`, at https://vitrina-project.dev/vitrina.asc), so
-  apt and dnf users trust one key. After `sudo rpm --import https://vitrina-project.dev/vitrina.asc`,
-  `rpm -K` and `dnf` check an `.rpm`; `debsig-verify` checks a `.deb`. Installing without the key
-  imported works as before.
+  make one yet. It contains musl libc and zlib, whose licenses are in `THIRD-PARTY-NOTICES`.
 - **`jkit doctor` reports leftover `*.jkit-tmp` files** from an interrupted write of a startup
   file, `config.toml` or `jkit.toml` (check `temp-files`), with the command that removes them.
 
 ### Changed
 
 - **macOS builds need macOS 14 (Sonoma) or newer**, down from 15; the Homebrew formula says so too.
-- **Temurin and Microsoft JDKs are always checked against the vendor's OpenPGP signature**, the
-  `.sig` the vendor publishes next to the download, whether or not foojay lists one. Some current
-  Temurin builds (21.0.13+9, 25.0.5+8) installed on foojay's checksum alone. Temurin builds from
-  before Adoptium started signing (before 8u342, 11.0.16, 17.0.4, 18.0.2) install on their
-  checksum, and jkit says only the checksum was checked.
-- **foojay can't steer a JDK around its signature check.** jkit takes only builds of the vendor and
-  major release you asked for, and downloads Temurin, Microsoft and Corretto builds only from the
-  vendor's own server (Adoptium's GitHub releases, aka.ms, corretto.aws); a build listed anywhere
-  else is refused. [SECURITY.md](SECURITY.md) says what that does and doesn't guarantee.
 - **Installs don't wait on each other's downloads.** The install lock is held only to look at and
   change `tools/`, so parallel installs (two terminals, CI jobs sharing a home) download side by
   side, and `remove`, `prune` and `self-update` don't wait for a download. `prune` and `doctor`
   leave alone the folder a running install downloads into.
-- **A signed build must be the version asked for.** After a good signature, jkit checks every part
-  of a JDK's version, and now Maven's (`lib/maven-core-<version>.jar`) and sbt's too, so a build the
-  publisher signed for another version is refused.
 - **`jkit install jdk@lts <vendor>`** (and `pin`, and `search` with a vendor) picks that vendor's
   newest LTS release, not the newest LTS of any vendor.
 - **`~/.bashrc`, `~/.zshrc`, fish's file, `config.toml` and `jkit.toml` are written atomically**
@@ -65,18 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$JAVA_HOME/bin/java`.
 - **`export JKIT_AUTO_SWITCH=0` stops switching on `cd` in a shell that's already open**, and the
   `cd` hook does less work when nothing changes.
-- Unpacked JDKs, Maven, Gradle and sbt are no longer group-writable.
-- Signature files are downloaded with a 64 KB limit, not up to 2 GB and checked afterwards.
-- `jkit self-update` for a `.deb` installed from a file prints a command that downloads into a
-  private `mktemp -d` folder instead of a fixed `/tmp` name.
-- Building jkit on a JDK older than 25, or a Maven older than the wrapper's, stops at once with a
-  clear message.
 - **Ctrl-C stops an install or self-update cleanly.** Ctrl-C, SIGTERM or SIGHUP during a download
   deletes the partial file and says so. Ctrl-C then ends jkit by SIGINT, so a shell script running
   jkit stops too (exit 130 on Windows, or as a container's PID 1); SIGTERM and SIGHUP exit 143 and
   129. A SIGINT the shell set to be ignored (a background job) stays ignored.
-- GitHub releases list the version's changelog entry and how to install it, instead of a list of
-  pull requests.
 - **Slow downloads start again.** A download that, 30 seconds in, would take more than 10 more
   minutes reconnects once, so a slow CDN edge no longer holds an install for a quarter of an hour.
 - **Progress in CI logs.** Without a terminal, download progress is a line at each quarter and at
@@ -85,6 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Hints keep full paths, since a quoted `~` isn't expanded.
 - **`jkit doctor` says where each default vendor comes from**, instead of "from config.toml" for a
   file that doesn't set it.
+- Project: GitHub releases list the version's changelog entry and how to install it, instead of
+  a list of pull requests; building jkit on a JDK older than 25, or a Maven older than the
+  wrapper's, stops at once with a clear message.
 
 ### Fixed
 
@@ -102,12 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool, and says there was nothing to reset.
 - **`jkit hook --install` and `--uninstall` find jkit's block when it's indented** or has trailing
   spaces; with its end marker missing, both say so and change nothing.
-- **Corretto builds from 2019** (8u222, 8u232, 11.0.4, 11.0.5), signed with Amazon's since-retired
-  keys, are refused with a message that says so and suggests a newer build or
-  `--allow-unverified`, instead of a self-update; `jkit search` marks them ○. Corretto's catch-all
-  "latest" entries no longer show up in `search` or get picked by `install`.
-- A signing vendor's download link with no file name, or one in its query string, is refused
-  rather than installed without a signature.
+- **PowerShell: `use`, `reset`, `pin`, `sync` and `exec` work with the hook loaded.**
+  - The hook applied changes by running a script file, which Windows PowerShell's default
+    execution policy blocks, so jkit reported changes the shell never got; it no longer runs a
+    file. [docs/windows.md](docs/windows.md) says how to let Windows PowerShell load the hook from
+    `$PROFILE`.
+  - PowerShell drops a bare `--` from a function's arguments, so `jkit exec jdk@21 -- java
+    -version` failed with `Unknown option: '-version'`; the hook puts the `--` back.
+  - `jkit pin` and `jkit sync` no longer suggest `shell.auto_switch`, which PowerShell's hook
+    can't do yet (and warned about in every new shell); `jkit config set shell.auto_switch true`
+    says it changes nothing in PowerShell and that `jkit sync` applies a project's versions.
+- **The Windows zip starts without the Visual C++ Redistributable.** It now ships Microsoft's
+  `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` next to `jkit.exe`. `jkit self-update` replaces
+  DLLs already there, and never adds them to a folder without them.
+- Corretto's catch-all "latest" entries no longer show up in `search` or get picked by `install`.
 - Ctrl-C while copying an install to another disk no longer leaves `tools/.<name>.partial` behind.
 - **zsh: the `cd` hook no longer runs in `$( )` subshells**, so prompt themes don't show jkit
   messages.
@@ -116,24 +101,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An archive entry name the file system can't hold gives the "unsafe to unpack" error instead of
   an unexpected error.
 - Proxy passwords in `HTTPS_PROXY` or `JKIT_NETWORK_PROXY` keep a literal `+`.
-- **`jkit use`, `reset`, `pin` and `sync` change a Windows PowerShell shell again.** The PowerShell
-  hook applied their changes by running a script file, which Windows PowerShell's default
-  execution policy blocks, so jkit reported changes the shell never got. It no longer runs a file.
-  The README now says how to let Windows PowerShell load the hook from `$PROFILE`.
-- **`jkit exec … -- <command>` works in PowerShell with the hook loaded.** PowerShell drops a bare
-  `--` from a function's arguments, so jkit saw `jkit exec jdk@21 java -version` and failed with
-  `Unknown option: '-version'`. The hook puts the `--` back.
-- **jkit no longer offers PowerShell a switch on `cd` it doesn't have.** In PowerShell, `jkit pin`
-  and `jkit sync` suggested turning on `shell.auto_switch`, and `jkit config set shell.auto_switch
-  true` said new shells would switch on `cd`; PowerShell's hook can't yet, and warned about it in
-  every new shell. The suggestion is gone there, and `config set` says it changes nothing in
-  PowerShell and that `jkit sync` applies a project's versions.
-- **The Windows zip starts without the Visual C++ Redistributable.** It now ships Microsoft's
-  `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` next to `jkit.exe`. `jkit self-update` replaces
-  DLLs already there, and never adds them to a folder without them.
 - `jkit use jdk@99` and `jkit exec jdk@99` no longer suggest installing a release that doesn't
   exist.
 - Every bad `jkit config set` argument exits 2, as an unknown vendor already did.
+
+### Security
+
+- **Temurin and Microsoft JDKs are always checked against the vendor's OpenPGP signature**, the
+  `.sig` the vendor publishes next to the download, whether or not foojay lists one. Some current
+  Temurin builds (21.0.13+9, 25.0.5+8) installed on foojay's checksum alone. Temurin builds from
+  before Adoptium started signing (before 8u342, 11.0.16, 17.0.4, 18.0.2) install on their
+  checksum, and jkit says only the checksum was checked. A signing vendor's download link with no
+  file name, or one in its query string, is refused rather than installed without a signature.
+- **foojay can't steer a JDK around its signature check.** jkit takes only builds of the vendor and
+  major release you asked for, and downloads Temurin, Microsoft and Corretto builds only from the
+  vendor's own server (Adoptium's GitHub releases, aka.ms, corretto.aws); a build listed anywhere
+  else is refused. [SECURITY.md](SECURITY.md) says what that does and doesn't guarantee.
+- **A signed build must be the version asked for.** After a good signature, jkit checks every part
+  of a JDK's version, and now Maven's (`lib/maven-core-<version>.jar`) and sbt's too, so a build the
+  publisher signed for another version is refused.
+- **Corretto builds from 2019** (8u222, 8u232, 11.0.4, 11.0.5), signed with Amazon's since-retired
+  keys, are refused with a message that says so and suggests a newer build or
+  `--allow-unverified`, instead of a self-update; `jkit search` marks them ○.
+- **The `.deb` and `.rpm` are signed** with the key the Vitrina apt repository signs with
+  (`8486A7AF4FC8FEE93D83CDB4EA5FA138C2C09C4A`, at https://vitrina-project.dev/vitrina.asc), so
+  apt and dnf users trust one key. After `sudo rpm --import https://vitrina-project.dev/vitrina.asc`,
+  `rpm -K` and `dnf` check an `.rpm`; `debsig-verify` checks a `.deb`. Installing without the key
+  imported works as before.
+- Signature files are downloaded with a 64 KB limit, not up to 2 GB and checked afterwards.
+- Unpacked JDKs, Maven, Gradle and sbt are no longer group-writable.
+- `jkit self-update` for a `.deb` installed from a file prints a command that downloads into a
+  private `mktemp -d` folder instead of a fixed `/tmp` name.
 
 ## [0.4.0] - 2026-11-24
 

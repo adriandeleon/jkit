@@ -54,9 +54,8 @@ jkit self-update                       # jkit itself (or how to, for brew, apt, 
 Next to SDKMAN, mise and asdf, jkit is narrower and stricter:
 
 - One native binary. Running it needs no JDK, bash or plugins.
-- Every download is checked against its published checksum; Temurin, Microsoft and Corretto JDKs,
-  Maven 3.9.0 and later, and sbt also against their publisher's OpenPGP signature, with the keys
-  built into jkit.
+- Every download is checked against its published checksum, and the main JDKs, Maven and sbt
+  also against their publisher's OpenPGP signature ([how](#how-it-works)).
 - JDKs from 20+ vendors through foojay. Projects keep their `.sdkmanrc`, `.tool-versions` or
   `.java-version`: jkit reads them.
 - `jkit exec` and `--json` for scripts, CI, editors and agents.
@@ -70,120 +69,57 @@ JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows su
 | Platform | |
 | --- | --- |
 | macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
-| Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository, so `apt upgrade` keeps it current ([setup](https://jkit-project.dev/install/#apt)); or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
+| Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository ([setup](https://jkit-project.dev/install/#apt)), or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
-| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`) |
-| Alpine and other musl Linux (x64) | the `-linux-x64-musl` `.tar.gz` from the releases (from 0.5.0). GraalVM can't build a musl binary for arm64 yet |
-| Anything else | a `.tar.gz` or `.zip` from the releases |
+| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`). See [docs/windows.md](docs/windows.md) |
+| Alpine and other musl Linux (x64) | the `-linux-x64-musl` `.tar.gz` from the releases (from 0.5.0; GraalVM can't build a musl binary for arm64 yet) |
+| Anything else | a `.tar.gz` or `.zip` from the releases; put `jkit` anywhere on your `PATH` |
 
-Each archive holds `jkit` (or `jkit.exe`), `LICENSE` and `THIRD-PARTY-NOTICES`; put `jkit`
-anywhere on your `PATH`. From 0.5.0, the Windows `.zip` also holds
-`vcruntime140.dll` and `vcruntime140_1.dll`, the Visual C++ runtime `jkit.exe` needs: keep them
-next to it, in a folder of its own. Linux builds, Homebrew's included, need glibc 2.34 or newer and zlib
-(Debian 12+, Ubuntu 22.04+, RHEL 9+; not Ubuntu 20.04 or RHEL 8); the `-musl` builds are static
-and need nothing from the system, so they also run on Alpine and on older glibc distributions;
-macOS builds need macOS 14 or newer (15 for 0.4.0 and earlier) and are signed and notarized. Pre-releases (versions with a
-hyphen) are on the releases page only.
+Linux builds, Homebrew's included, need glibc 2.34+ and zlib (Debian 12+, Ubuntu 22.04+, RHEL 9+);
+the `-musl` builds are static and need nothing from the system. macOS builds need macOS 14+ (15
+for 0.4.0 and earlier) and are signed and notarized. Pre-releases are on the releases page only.
 
-`jkit self-update` updates a jkit from a `.tar.gz` or `.zip` in place, after checking it against
-the release's `SHA256SUMS` and that file's signature by jkit's release key; for Homebrew, apt, dnf
-and winget it prints that tool's upgrade command (for a `.deb` installed from a file, the download
-that replaces it).
+To verify a download (`SHA256SUMS` and its signature, build attestations, the signed `.deb` and
+`.rpm`), see [SECURITY.md](SECURITY.md#verifying-a-download).
 
-To check a download, put it next to the release's `SHA256SUMS` and `SHA256SUMS.asc` (from 0.4.0)
-and run, in that folder:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/adriandeleon/jkit/main/jkit-core/src/main/resources/dev/jkit/core/keys/jkit-release.asc | gpg --import
-gpg --verify SHA256SUMS.asc SHA256SUMS      # Good signature, key A9444E8F5048FEBCB942E110FC89EBE68C4539E6
-sha256sum -c SHA256SUMS --ignore-missing    # <file>: OK
-```
-
-[SECURITY.md](SECURITY.md#verifying-a-download) explains each step, gpg's "not certified" warning,
-and the macOS and Windows commands. `gh attestation verify <file> --repo adriandeleon/jkit` shows
-where a file was built. From 0.5.0, the `.deb`
-and `.rpm` are also signed with the Vitrina repository's key: after
-`sudo rpm --import https://vitrina-project.dev/vitrina.asc`, `rpm -K` checks an `.rpm`, and so does
-`dnf` when it installs one. Each release also has a CycloneDX SBOM,
-made from the Linux x64 build: the other builds compile in the same libraries, and the macOS x64
-binary is built with Liberica NIK instead of GraalVM CE.
-
-### Windows (preview)
-
-jkit runs on Windows, but this part is less tested than macOS and Linux:
-
-- Add the hook to your PowerShell profile by hand (`jkit hook --install` doesn't do PowerShell
-  yet): `notepad $PROFILE`, then add `jkit hook pwsh | Out-String | Invoke-Expression`.
-  Windows PowerShell (5.1, the one Windows comes with) runs no profile until scripts are allowed:
-  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7 allows them already.
-- `jkit use … --global` points `%USERPROFILE%\.jkit\global\jdk` at the install. For programs
-  started outside a hooked PowerShell (cmd.exe, IDEs, Explorer) to follow it too, run
-  `jkit env --install` once: it sets `JAVA_HOME` and the other `*_HOME` variables in your user
-  environment to the global links and puts their `bin` folders first on your user `PATH`, so a
-  later `jkit use … --global` reaches new programs with no further change. Each change is printed;
-  `jkit env --uninstall` takes out only what it set. A `java` on the system `PATH` still comes
-  first; `jkit doctor` says if there is one.
-- Switching on `cd` isn't available in PowerShell yet.
-- Windows on ARM runs the x64 build under emulation.
-- `jkit.exe` needs the Microsoft Visual C++ runtime. winget installs the Visual C++
-  Redistributable (2015 or newer, x64) with jkit. From 0.5.0 the `.zip` carries
-  the runtime's two DLLs next to `jkit.exe`, and `jkit self-update` keeps them up to date; with
-  0.4.0 and earlier, install the Redistributable first. Once the Redistributable is installed you
-  can delete the two DLLs, and Windows Update keeps the runtime patched.
+`jkit self-update` replaces a jkit from a `.tar.gz` or `.zip` after checking it against the
+release's signed `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that tool's upgrade command.
 
 ## How it works
 
-- Installs go to `~/.jkit/tools/<tool>/<version>`; nothing outside `~/.jkit` is touched except the
-  short marked block `jkit hook --install` adds to your shell's startup file (`--uninstall` removes it).
+- Nothing outside `~/.jkit` (below) is touched except the marked block `jkit hook --install` adds
+  to your shell's startup file. Every change is printed: folders, links, cache files, variables.
 - The global default is a link, `~/.jkit/global/<tool>`, which the hook puts on `PATH` and uses for
-  `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME` and `GRAALVM_HOME`. Point an IDE at
-  `~/.jkit/global/jdk` and it follows `jkit use … --global`.
-- `jkit use` without `--global` changes only the current shell, through the hook.
-- Every change jkit makes is printed: folders, links, cache files, and each variable it sets.
-- Downloads come over https only and are checked against the checksum their source publishes:
-  SHA-256 or stronger counts as verified; old Maven releases that only have SHA-1 install with a
-  warning, marked unverified; a download with no checksum is refused unless you pass
-  `--allow-unverified`. Temurin, Microsoft and Corretto builds, Maven 3.9.0 and later, and sbt
-  are also checked against their publisher's OpenPGP signature, with keys built into jkit; a
-  signature that is missing, doesn't match, or isn't by the publisher's key stops the install
-  (`--allow-unverified` installs it anyway, marked unverified). Corretto publishes no checksum,
-  so its signature is the check. `jkit search` marks builds with neither as ○. See [SECURITY.md](SECURITY.md).
-- No telemetry and no background update checks. Only commands that need version lists or
-  downloads go online (`install`, `search`, `sync`, `upgrade`, `pin`, `config set`, `self-update`,
-  `doctor --network`), and only to the sources below: foojay and the vendor download it lists,
-  services.gradle.org, Maven Central, and GitHub (sbt's and jkit's own releases). `use`, `status`,
-  `list`, `env`, `exec`, `doctor` and the shell hook never do. With `--offline` or
-  `JKIT_NETWORK_OFFLINE=1`, version lists come only from the cache.
+  `JAVA_HOME`, `MAVEN_HOME`, `GRADLE_HOME`, `SBT_HOME` and `GRAALVM_HOME`; point an IDE at
+  `~/.jkit/global/jdk` and it follows `jkit use … --global`. `jkit use` without `--global`
+  changes only the current shell, through the hook.
+- Downloads come over https only and are checked against their source's checksum (SHA-256 or
+  stronger; SHA-1 only, as for old Maven, installs marked unverified; none is refused). Temurin,
+  Microsoft and Corretto, Maven 3.9.0+ and sbt are also checked against their publisher's OpenPGP
+  signature, with keys built into jkit: a missing or bad one stops the install. `--allow-unverified`
+  overrides both, marked unverified; `jkit search` marks builds with nothing to check ○.
+  [Details](SECURITY.md#what-jkit-verifies).
+- No telemetry and no background update checks. Only `install`, `search`, `sync`, `upgrade`,
+  `pin`, `config set`, `self-update` and `doctor --network` go online, and only to
+  [foojay](https://foojay.io) and the vendor download it lists, services.gradle.org, Maven
+  Central, and GitHub (sbt's and jkit's own releases). `use`, `status`, `list`, `env`, `exec`,
+  `doctor` and the shell hook never do.
 
 | Path | What |
 | --- | --- |
-| `~/.jkit/tools/` | installed JDKs, Maven, Gradle and sbt |
+| `~/.jkit/tools/<tool>/<version>` | installed JDKs, Maven, Gradle and sbt |
 | `~/.jkit/global/` | links to the global defaults |
 | `~/.jkit/index/` | version lists, cached 24 h (`--refresh` refetches, `--offline` uses only the cache) |
 | `~/.jkit/config.toml` | settings (below) |
-
-`JKIT_HOME` moves all of it. It must be an absolute path to a folder you (or root) own that other users can't write to.
+| `JKIT_HOME` | moves all of it: an absolute path to a folder you (or root) own that others can't write to |
 
 ### Settings
 
-`~/.jkit/config.toml`:
-
-```toml
-[jdk]
-vendor = "temurin"        # default JDK vendor
-[graalvm]
-vendor = "graalvm-ce"     # default GraalVM vendor
-[shell]
-auto_switch = true        # switch to a project's versions on cd (default false; jkit hook --install --auto-switch)
-```
-
-`jkit config` lists each setting, its value and where it comes from; `jkit config set jdk.vendor zulu`
-and `jkit config unset jdk.vendor` change the file, keeping its comments.
-
-Environment variables: `JKIT_HOME`, `JKIT_JDK_VENDOR`, `JKIT_GRAALVM_VENDOR`, `JKIT_AUTO_SWITCH`
-(`1`/`0`), `JKIT_PROJECT_FILE` (use this project file, or none when empty), `JKIT_NETWORK_OFFLINE` (`1`/`true`: like `--offline`),
-`HTTPS_PROXY`/`NO_PROXY` (or `JKIT_NETWORK_PROXY`), and `JKIT_SOURCES_{FOOJAY,GRADLE,MAVEN,SBT,RELEASES}_URL`
-for https mirrors.
+`~/.jkit/config.toml` holds three: `jdk.vendor` (default `temurin`), `graalvm.vendor`
+(`graalvm-ce`) and `shell.auto_switch` (switch on `cd`, default `false`). `jkit config` lists them
+and where each value comes from; `jkit config set jdk.vendor zulu` changes the file, keeping its
+comments. The file and the environment variables (vendors, proxy, offline, mirrors):
+[docs/settings.md](docs/settings.md).
 
 ## Projects
 
@@ -197,14 +133,13 @@ and with auto-switch on, bash, zsh and fish switch on `cd`. See
 - [docs/troubleshooting.md](docs/troubleshooting.md): `status`, `doctor` and `env`.
 - [docs/agents.md](docs/agents.md): using jkit from scripts, CI and AI agents (`jkit exec`).
 - [docs/json.md](docs/json.md): `--json` output for editors and tools.
-- Editors: [Editora](https://editora-project.dev/) 0.29.0 and later drive jkit for every command:
-  project pins, installs, `sync`, `status`, `doctor`, `prune`, settings and the shell hook. See
-  [Editora's jkit docs](https://editora-project.dev/docs/build-tools/#jkit).
-- `jkit <command> --help` for every option. Tab completion comes with the hook (bash, and zsh
-  through bashcompinit).
-
-Sources: [foojay](https://foojay.io) for JDKs, services.gradle.org, Maven Central, and sbt's GitHub
-releases.
+- [docs/windows.md](docs/windows.md): the PowerShell hook, `jkit env --install`, the VC++ runtime.
+- Editors: [Editora](https://editora-project.dev/) 0.29.0+ drives every jkit command
+  ([its jkit docs](https://editora-project.dev/docs/build-tools/#jkit)).
+- `jkit <command> --help` for every option. Tab completion comes with the hook (bash; zsh through
+  bashcompinit).
+- Building and contributing: [CONTRIBUTING.md](CONTRIBUTING.md); design notes in
+  [docs/design/](docs/design/).
 
 ## Uninstall
 
@@ -219,36 +154,6 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 Switching on `cd` in PowerShell, `jkit hook --install` for PowerShell, native fish and zsh
 completion, signature checks for other JDK vendors (Gradle publishes no signatures), and
 Windows on ARM natively.
-
-## Build
-
-Needs JDK 25; Maven comes through the wrapper (its checksum is pinned in
-`.mvn/wrapper/maven-wrapper.properties`).
-
-```bash
-./mvnw verify                                          # compile + unit tests
-GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative package -DskipTests
-# binary: jkit-cli/target/jkit
-GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTests
-# jkit-cli/target/jkit_<version>_amd64.deb and jkit-<version>-<release>.x86_64.rpm
-```
-
-The `.deb` and `.rpm` are built in pure Java (jdeb, rpm-builder), for the build machine's
-architecture. To try a build without touching your own setup, give it a home of its own:
-`export JKIT_HOME="$(mktemp -d)"`.
-
-When dependencies change, update `packaging/third-party/components.tsv` and regenerate the notices
-with `packaging/third-party-notices.sh` (CI runs it with `--check`).
-
-| Module | Contents |
-| --- | --- |
-| `jkit-model` | ToolSpec, Version, Vendor, Platform; no I/O |
-| `jkit-sources` | Http (+ cache), foojay, Gradle, Maven Central and sbt clients |
-| `jkit-core` | Store, Installer, Archives, Config, ShellEnv, project files |
-| `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
-| `jkit-cli` | picocli commands and the native binary |
-
-To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); design notes are in [docs/design/](docs/design/).
 
 ## License
 

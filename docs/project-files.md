@@ -95,7 +95,8 @@ jkit hook --install --auto-switch
 
 That sets `auto_switch = true` under `[shell]` in `~/.jkit/config.toml` (`JKIT_AUTO_SWITCH=1` works
 too). bash, zsh and fish then switch when you enter a project and go back to the global versions
-when you leave, printing every variable they change. PowerShell doesn't switch on `cd` yet.
+when you leave, printing every variable they change. PowerShell doesn't switch on `cd` yet
+([windows.md](windows.md)).
 
 - Entering a project never downloads anything: a missing version stays on its shell or global
   choice, with a note to run `jkit sync`.
