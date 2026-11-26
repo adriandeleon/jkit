@@ -88,10 +88,17 @@ public final class Installer {
 
     private final JkitHome home;
     private final Http http;
+    private final java.util.function.Consumer<String> waiting;
 
     public Installer(JkitHome home, Http http) {
+        this(home, http, System.err::println);
+    }
+
+    /** @param waiting told, in a line for the user, when this install waits for another jkit */
+    public Installer(JkitHome home, Http http, java.util.function.Consumer<String> waiting) {
         this.home = home;
         this.http = http;
+        this.waiting = waiting;
     }
 
     /**
@@ -143,7 +150,7 @@ public final class Installer {
                 // Another jkit is downloading this very build: wait for it rather than download it
                 // a second time, then look again. If that install fails, this one downloads.
                 if (!waited) {
-                    System.err.println("another jkit is installing " + artifact.label() + "; waiting for it to finish…");
+                    waiting.accept("another jkit is installing " + artifact.label() + "; waiting for it to finish…");
                     waited = true;
                 }
                 pause();
@@ -511,7 +518,7 @@ public final class Installer {
      * the lock file only once however many code paths hold it.
      */
     private Store.Lock lock() throws IOException {
-        return new Store(home).lock(home.lockFile(), "waiting for another jkit to finish installing…");
+        return new Store(home, waiting).lock(home.lockFile(), "waiting for another jkit to finish installing…");
     }
 
     /** Runs chmod a+x on the regular files directly in {@code bin}, except .bat, .cmd and .exe files. */

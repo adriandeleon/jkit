@@ -450,6 +450,7 @@ class InstallerTest {
 
     @Test
     void aSecondInstallOfTheSameBuildWaitsForTheFirstInsteadOfDownloadingIt() throws Exception {
+        java.util.List<String> said = new java.util.concurrent.CopyOnWriteArrayList<>();
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Artifact build = artifact(sha256(archive));
@@ -488,8 +489,9 @@ class InstallerTest {
         };
         try {
             other.start();
-            Installer.Result result = new Installer(home, counting).install(build, Http.Progress.NONE,
+            Installer.Result result = new Installer(home, counting, said::add).install(build, Http.Progress.NONE,
                     Installer.Verification.REQUIRED);
+            assertThat(said).containsExactly("another jkit is installing " + build.label() + "; waiting for it to finish…");
             assertThat(result.fresh()).isFalse();
             assertThat(downloads[0]).isZero();
         } finally {

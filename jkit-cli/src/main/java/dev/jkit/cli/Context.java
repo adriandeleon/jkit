@@ -265,7 +265,7 @@ final class Context {
     }
 
     Installer installer() {
-        return new Installer(home, http());
+        return new Installer(home, http(), err::println);
     }
 
     /** A source's base URL: https, or http to this machine; a version list over plain http could be altered. */
