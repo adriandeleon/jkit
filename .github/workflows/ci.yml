@@ -62,6 +62,39 @@ jobs:
       - name: Build and test
         run: ./mvnw -B verify
 
+      # The hook lint steps check the recorded hooks in hooks-golden/: the templates rendered for
+      # sample paths, which HooksGoldenTest (in Build and test) keeps equal to what jkit prints.
+      # root0-self1 has plain paths; the other recordings put quotes and $ in them on purpose.
+      - name: Lint the bash hook
+        if: runner.os == 'Linux'
+        run: |
+          shellcheck --version
+          g=jkit-platform/src/test/resources/dev/jkit/platform/hooks-golden
+          cat "$g/bash-root0-self1.txt" "$g/auto-switch-bash.txt" > "$RUNNER_TEMP/hook.bash"
+          shellcheck -s bash "$RUNNER_TEMP/hook.bash"
+
+      - name: Parse the zsh hook
+        # shellcheck has no zsh mode, and zsh comes with macOS; -n parses without running anything
+        if: runner.os == 'macOS'
+        run: |
+          g=jkit-platform/src/test/resources/dev/jkit/platform/hooks-golden
+          cat "$g/zsh-root0-self1.txt" "$g/auto-switch-zsh.txt" > "$RUNNER_TEMP/hook.zsh"
+          zsh -n "$RUNNER_TEMP/hook.zsh"
+
+      - name: Lint the PowerShell hook
+        # fails on parse errors and on PSScriptAnalyzer's Error findings, and prints its warnings
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Scope CurrentUser -Force
+          $hook = Get-Content -Raw jkit-platform/src/test/resources/dev/jkit/platform/hooks-golden/pwsh-root0-self1.txt
+          $errors = $null
+          [void][Management.Automation.Language.Parser]::ParseInput($hook, [ref]$null, [ref]$errors)
+          if ($errors) { $errors | Out-String | Write-Output; exit 1 }
+          $found = @(Invoke-ScriptAnalyzer -ScriptDefinition $hook -Severity Warning, Error)
+          $found | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Output
+          if ($found | Where-Object Severity -eq 'Error') { exit 1 }
+
       - name: Check THIRD-PARTY-NOTICES
         if: runner.os == 'Linux'
         run: packaging/third-party-notices.sh --check

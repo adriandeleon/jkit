@@ -24,11 +24,8 @@ __jkit_run() {
   if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
     # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin;
     # (pattern) because bash 3.2 (macOS) ends $( ) at a case pattern's lone )
-    __jkit_bin=$(printf '%s
-' "$PATH" | tr ':' '
-' | while IFS= read -r __jkit_d; do
-      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%s
-' "$__jkit_d/jkit"; break; fi ;; esac
+    __jkit_bin=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
+      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%s\n' "$__jkit_d/jkit"; break; fi ;; esac
     done)
   fi
   if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi
@@ -38,6 +35,7 @@ jkit() {
   __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
   JKIT_ENV_FILE="$__jkit_env" __jkit_run "$@"
   __jkit_rc=$?
+  # shellcheck source=/dev/null  # the environment changes jkit wrote just now
   [ -s "$__jkit_env" ] && . "$__jkit_env"
   rm -f "$__jkit_env"
   return $__jkit_rc
