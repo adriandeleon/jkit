@@ -92,7 +92,7 @@ final class Context {
         }
         this.config = loaded;
         this.configError = error;
-        this.store = new Store(home);
+        this.store = new Store(home, err::println);
         this.os = OsServices.current();
         this.refresh = refresh;
         this.offline = offline;

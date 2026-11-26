@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /** Reads what is installed under tools/. Each install carries a jkit-install.properties file. */
@@ -29,9 +30,17 @@ public final class Store {
     public static final String MARKER = "jkit-install.properties";
 
     private final JkitHome home;
+    private final Consumer<String> waiting;
 
+    /** A store that says on stderr when it waits for another jkit's lock. */
     public Store(JkitHome home) {
+        this(home, System.err::println);
+    }
+
+    /** @param waiting told, in a line for the user, when a lock is held elsewhere and this waits for it */
+    public Store(JkitHome home, Consumer<String> waiting) {
         this.home = home;
+        this.waiting = waiting;
     }
 
     /** Installs usable as {@code tool}, newest first. GraalVM = GraalVM-based JDK installs. */
@@ -125,7 +134,8 @@ public final class Store {
     private static final Map<Path, ReentrantLock> TURNS = new ConcurrentHashMap<>();
 
     /**
-     * Holds the OS lock on {@code file} until closed, saying {@code waiting} on stderr when another
+     * Holds the OS lock on {@code file} until closed, saying {@code waiting} (to the store's waiting
+     * callback, stderr by default) when another
      * jkit holds it instead of hanging silently. Within this process the file is opened and locked
      * once: on Unix, closing any channel to a file lets go of every lock the process has on it, so
      * a second channel (Installer's and the commands' lock on the same file) would release the
@@ -136,7 +146,7 @@ public final class Store {
         home.create();
         ReentrantLock turn = TURNS.computeIfAbsent(file.toAbsolutePath().normalize(), f -> new ReentrantLock());
         if (!turn.tryLock()) {
-            System.err.println(waiting);
+            this.waiting.accept(waiting);
             turn.lock();
         }
         if (turn.getHoldCount() > 1) {
@@ -147,7 +157,7 @@ public final class Store {
             channel = FileChannel.open(file, Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE), Perms.file());
             FileLock lock = channel.tryLock();
             if (lock == null) {
-                System.err.println(waiting);
+                this.waiting.accept(waiting);
                 lock = channel.lock();
             }
             FileChannel open = channel;
