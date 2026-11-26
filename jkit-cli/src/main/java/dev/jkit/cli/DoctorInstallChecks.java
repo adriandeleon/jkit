@@ -174,7 +174,7 @@ final class DoctorInstallChecks {
         for (ToolState s : states.tools()) {
             if (s.pin() != null && s.pinInstall() == null) {
                 missing.add(s.tool().id());
-                r.warn(p.source() + " wants " + StatusCommand.pinText(s.pin()) + ", not installed",
+                r.warn(p.source(s.pin().tool()) + " wants " + StatusCommand.pinText(s.pin()) + ", not installed",
                         StatusCommand.installCommand(s.pin()));
             }
         }

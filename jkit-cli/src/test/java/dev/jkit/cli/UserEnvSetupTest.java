@@ -11,6 +11,8 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import dev.jkit.platform.UserEnv;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -98,7 +100,63 @@ class UserEnvSetupTest {
         Changes report = new Changes(ctx);
         Map<String, String> writes = UserEnvSetup.install(home, Map.of("JAVA_HOME", "C:\\Program Files\\Java\\jdk-11"), report);
         assertThat(writes).containsEntry("JAVA_HOME", jdk);
-        assertThat(report.notes()).contains("replaced JAVA_HOME=C:\\Program Files\\Java\\jdk-11, which was set before");
+        assertThat(writes).containsEntry("JKIT_SAVED_JDK", "C:\\Program Files\\Java\\jdk-11");
+        assertThat(report.notes()).contains("replaced JAVA_HOME=C:\\Program Files\\Java\\jdk-11, which was set before; "
+                + "it is kept in JKIT_SAVED_JDK, and jkit env --uninstall puts it back");
+    }
+
+    @Test
+    void uninstallPutsBackTheValueInstallReplaced() {
+        Changes report = new Changes(ctx);
+        Map<String, String> current = new HashMap<>(Map.of("JAVA_HOME", "C:\\jdk-11"));
+        current.putAll(UserEnvSetup.install(home, Map.copyOf(current), report));
+        assertThat(current).containsEntry("JAVA_HOME", jdk).containsEntry("JKIT_SAVED_JDK", "C:\\jdk-11");
+        assertThat(printed(report)).contains("user   JKIT_SAVED_JDK=C:\\jdk-11");
+
+        // installing again keeps what was saved
+        assertThat(UserEnvSetup.install(home, Map.copyOf(current), new Changes(ctx))).doesNotContainKey("JKIT_SAVED_JDK");
+
+        Changes undo = new Changes(ctx);
+        Map<String, String> writes = UserEnvSetup.uninstall(home, current, undo);
+        assertThat(writes).containsEntry("JAVA_HOME", "C:\\jdk-11").containsEntry("JKIT_SAVED_JDK", null)
+                .containsEntry("MAVEN_HOME", null);
+        assertThat(undo.notes()).contains("put back JAVA_HOME=C:\\jdk-11, which was set before jkit env --install");
+    }
+
+    @Test
+    void installAndUninstallJsonHaveASchemaVersion() throws Exception {
+        Map<String, String> stored = new HashMap<>();
+        UserEnv fake = new UserEnv() {
+            @Override
+            public Map<String, String> read(Collection<String> names) {
+                Map<String, String> found = new HashMap<>(stored);
+                found.keySet().retainAll(names);
+                return found;
+            }
+
+            @Override
+            public String systemPath() {
+                return "";
+            }
+
+            @Override
+            public void write(Map<String, String> values) {
+                values.forEach((k, v) -> {
+                    if (v == null) {
+                        stored.remove(k);
+                    } else {
+                        stored.put(k, v);
+                    }
+                });
+            }
+        };
+        assertThat(UserEnvSetup.run(ctx, fake, true, true)).isZero();
+        assertThat(stored).containsEntry("JAVA_HOME", jdk);
+        assertThat(UserEnvSetup.run(ctx, fake, false, true)).isZero();
+        assertThat(stored).doesNotContainKey("JAVA_HOME");
+        String printed = out.toString(StandardCharsets.UTF_8);
+        assertThat(printed.split("\\{\\s*\"schemaVersion\"", -1)).hasSize(3);
+        assertThat(printed).contains("\"action\" : \"install\"").contains("\"action\" : \"uninstall\"");
     }
 
     @Test

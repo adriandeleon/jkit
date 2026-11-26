@@ -108,8 +108,8 @@ final class ProjectShell {
                         + ", which jkit reads but doesn't write",
                         "point " + ProjectFile.OVERRIDE + " at a jkit.toml, or unset it and run: " + retry + " --here");
             }
-            throw new JkitException("the project file here is " + Changes.tilde(found.get().dir().toString())
-                    + "/" + files + ", which jkit reads but doesn't write",
+            throw new JkitException((found.get().files().size() == 1 ? "the project file here is "
+                    : "the project files here are ") + where(found.get()) + ", which jkit reads but doesn't write",
                     "create a jkit.toml in this folder instead: " + retry + " --here"
                             + (found.get().dir().equals(cwd) ? " (it then wins over " + files + ")" : ""));
         }
@@ -157,6 +157,20 @@ final class ProjectShell {
         }
     }
 
+    /**
+     * The project's file for a message: {@code ~/app/jkit.toml}, or for several files their folder
+     * and names, {@code ~/app (.sdkmanrc, .tool-versions)}.
+     */
+    static String where(ProjectSpec project) {
+        return project.files().size() == 1 ? Changes.tilde(project.files().getFirst().toString())
+                : Changes.tilde(project.dir().toString()) + " (" + project.source() + ")";
+    }
+
+    /** The name of the file that pins {@code tool} in {@code project}, or "the project file" when there is none. */
+    static String pinFile(Optional<ProjectSpec> project, Tool tool) {
+        return project.map(p -> p.source(tool)).orElse("the project file");
+    }
+
     /** Suffix of {@link ShellEnv#PROJECT} when a pin wasn't installed, so the cd hook looks again. */
     static final String MISSING = ";missing";
 
@@ -165,7 +179,6 @@ final class ProjectShell {
         if (states.projectError() != null) {
             throw new JkitException(states.projectError());
         }
-        String file = states.project().map(ProjectSpec::source).orElse("the project file");
         Map<Tool, Installed> applied = new EnumMap<>(Tool.class);
         Map<Tool, Path> homes = new EnumMap<>(Tool.class);
         List<String> notes = new ArrayList<>();
@@ -174,6 +187,7 @@ final class ProjectShell {
             if (s.pin() == null) {
                 continue;
             }
+            String file = pinFile(states.project(), s.pin().tool());
             if (s.pinInstall() == null) {
                 notes.add(file + " wants " + StatusCommand.pinText(s.pin()) + ", not installed: jkit sync");
                 missing = true;

@@ -55,7 +55,10 @@ final class RemoveCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.create(false, true);
+        return run(Context.local());
+    }
+
+    int run(Context ctx) throws Exception {
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         List<Installed> matches = Resolve.installed(ctx, spec, vendor, vendorText, fx, "remove");
@@ -82,18 +85,24 @@ final class RemoveCommand implements Callable<Integer> {
                 List<String> notes = ListCommand.notes(ctx, i);
                 if (!notes.isEmpty()) {
                     List<String> hints = new ArrayList<>();
+                    List<String> uses = new ArrayList<>();
+                    boolean global = false;
                     for (String note : notes) {
                         // "global graalvm" and "graalvm in this shell" name the graalvm tool, not jdk
                         String t = note.contains("graalvm") ? "graalvm" : i.tool().id();
                         if (note.startsWith("global")) {
+                            global = true;
+                            uses.add("the global " + t);
                             hints.add("make another version the default first: jkit use " + t + "@<version> --global");
                             hints.add("or clear the default: jkit reset " + t + " --global");
                         } else {
+                            uses.add("this shell's " + t + " (chosen with jkit use)");
                             hints.add("stop using it in this shell: jkit reset " + t);
                         }
                     }
-                    hints.add("or remove it anyway (the link goes too): add --force");
-                    throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(", ", notes)
+                    hints.add(global ? "or remove it anyway (the global link goes too): add --force"
+                            : "or remove it anyway: add --force");
+                    throw new JkitException(i.tool() + " " + i.label() + " is " + String.join(" and ", uses)
                             + "; nothing removed", hints.toArray(String[]::new));
                 }
             }
@@ -187,7 +196,7 @@ final class RemoveCommand implements Callable<Integer> {
         }
         for (ToolState s : here.tools()) {
             if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
-                removedLinks.note("warning: " + here.project().map(p -> p.source()).orElse("the project file")
+                removedLinks.note("warning: " + ProjectShell.pinFile(here.project(), s.pin().tool())
                         + " here pins " + StatusCommand.pinText(s.pin()) + ", which this was: jkit sync installs it again");
             }
         }

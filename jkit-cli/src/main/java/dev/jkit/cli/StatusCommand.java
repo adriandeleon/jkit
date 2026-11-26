@@ -106,8 +106,8 @@ final class StatusCommand implements Callable<Integer> {
     private static String detail(ToolState s, ToolStates.Result result) {
         return switch (s.source()) {
             case PROJECT -> s.pin() == null
-                    ? projectFile(result) + " (follows its GraalVM jdk)"
-                    : projectFile(result) + " (" + pinText(s.pin()) + ")";
+                    ? ProjectShell.pinFile(result.project(), Tool.JDK) + " (follows its GraalVM jdk)"
+                    : ProjectShell.pinFile(result.project(), s.pin().tool()) + " (" + pinText(s.pin()) + ")";
             case OUTSIDE, STALE -> s.tool().homeVariable() + "=" + Changes.tilde(s.current().toString());
             default -> "";
         };
@@ -123,7 +123,8 @@ final class StatusCommand implements Callable<Integer> {
         if (s.matches()) {
             return s.source() == Source.SHELL && s.pin() != null && s.pinInstall() != null
                     && !Fs.same(s.pinInstall().home(), s.shellChoice())
-                    ? projectFile(result) + " wants " + pinText(s.pin()) + "; this shell chose another with jkit use"
+                    ? ProjectShell.pinFile(result.project(), s.pin().tool()) + " wants " + pinText(s.pin())
+                            + "; this shell chose another with jkit use"
                             + ", to follow it: jkit reset " + tool
                     : null;
         }
@@ -134,8 +135,10 @@ final class StatusCommand implements Callable<Integer> {
                     ? tool.homeVariable() + " follows the project's GraalVM JDK, which this shell doesn't have yet: "
                             + "jkit sync"
                     : s.pinInstall() == null
-                    ? projectFile(result) + " wants " + pinText(s.pin()) + ", not installed: jkit sync"
-                    : projectFile(result) + " wants " + tool + " " + s.pinInstall().label() + "; this shell has "
+                    ? ProjectShell.pinFile(result.project(), s.pin().tool()) + " wants " + pinText(s.pin())
+                            + ", not installed: jkit sync"
+                    : ProjectShell.pinFile(result.project(), s.pin().tool()) + " wants " + tool + " "
+                            + s.pinInstall().label() + "; this shell has "
                             + (s.source() == Source.NONE ? "none" : label(s.source())) + ": jkit sync";
             case GLOBAL -> switch (s.source()) {
                 case OUTSIDE -> tool.homeVariable() + " is set outside jkit and wins over the global " + tool
@@ -160,10 +163,6 @@ final class StatusCommand implements Callable<Integer> {
                 && (tool != Tool.JDK || !(i.vendor() != null && i.vendor().isGraalVmBased())))
                 .findFirst().orElse(installed.getFirst());
         return installed.size() + " installed, none chosen: " + useCommand(tool, newest, true);
-    }
-
-    private static String projectFile(ToolStates.Result result) {
-        return result.project().map(ProjectSpec::source).orElse("project file");
     }
 
     /** {@code jdk = "21"}, {@code jdk = 21 zulu fx}. */

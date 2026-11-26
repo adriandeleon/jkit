@@ -94,9 +94,9 @@ final class ListCommand implements Callable<Integer> {
         if (here.project().isEmpty()) {
             return notes;
         }
-        String file = here.project().get().source();
         for (ToolState s : here.tools()) {
             if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
+                String file = here.project().get().source(s.pin() != null ? s.pin().tool() : s.tool());
                 notes.add(s.tool() == Tool.GRAALVM ? "graalvm in " + file : file);
             }
         }

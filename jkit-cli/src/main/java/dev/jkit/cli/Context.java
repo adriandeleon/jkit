@@ -48,12 +48,16 @@ final class Context {
     final boolean homeExisted;
     /** Set once a {@link Changes} has reported creating the home. */
     boolean homeReported;
-    /** Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}. */
-    // search looks builds up on several threads, each of which can write to the cache
+    /**
+     * Version lists the cache wrote during this command, not yet reported; see {@link Changes#disk}.
+     * Synchronized: search looks builds up on several threads, each of which can write to the cache.
+     */
     final List<CacheWrite> cacheWrites = Collections.synchronizedList(new ArrayList<>());
 
-    /** One cached version list written: {@code created} false when it replaced an older copy. */
-    /** A file the cache wrote ({@code source} is where it came from), or deleted ({@code source} null). */
+    /**
+     * A file the cache wrote ({@code source} is where it came from; {@code created} false when it
+     * replaced an older copy), or deleted ({@code source} null).
+     */
     record CacheWrite(URI source, Path file, boolean created) { }
 
     private Context(Map<String, String> env, boolean refresh, boolean offline, PrintStream out) {
@@ -137,8 +141,19 @@ final class Context {
         return "jkit/" + VersionProvider.version();
     }
 
+    /** For the commands with --refresh and --offline ({@link Options}). */
     static Context create(boolean refresh, boolean offline) {
         return new Context(Envs.system(), refresh, offline, System.out);
+    }
+
+    /** For commands that work on what is installed and never use the network (use, reset, remove, prune, unpin). */
+    static Context local() {
+        return create(false, true);
+    }
+
+    /** For commands that always go online and have no --offline (self-update). */
+    static Context online() {
+        return create(false, false);
     }
 
     /**

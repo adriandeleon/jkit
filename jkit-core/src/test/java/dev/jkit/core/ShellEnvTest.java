@@ -89,6 +89,19 @@ class ShellEnvTest {
     }
 
     @Test
+    void emptyPathEntriesStayWhereTheyAre() {
+        // an empty entry is the current folder: the user's choice, kept as written
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path("/usr/bin", "", "/bin", "")));
+        assertThat(ShellEnv.use(env, home, Tool.JDK, jdk17, false).get("PATH"))
+                .isEqualTo(path(bin(jdk17), "/usr/bin", "", "/bin", ""));
+        assertThat(ShellEnv.fresh(env, home, Map.of(Tool.JDK, jdk17), false).get("PATH"))
+                .isEqualTo(path(bin(jdk17), "/usr/bin", "", "/bin", ""));
+        // and none appears where there was none
+        env.put("PATH", "");
+        assertThat(ShellEnv.use(env, home, Tool.JDK, jdk17, false).get("PATH")).isEqualTo(bin(jdk17));
+    }
+
+    @Test
     void pathEntriesAreComparedAsFolders(@TempDir Path tmp) {
         String bin = tmp.resolve("jdk/bin").toString();
         assertThat(ShellEnv.samePathEntry(bin, bin + File.separator)).isTrue();

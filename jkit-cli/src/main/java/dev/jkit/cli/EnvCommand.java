@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -186,15 +187,21 @@ final class EnvCommand implements Callable<Integer> {
             }
         }
         if (!missing.isEmpty()) {
-            String file = states.project().map(ProjectSpec::source).orElse("the project file");
-            List<String> wants = missing.stream().map(s -> StatusCommand.pinText(s.pin())).toList();
+            // each pin under the file that set it: .sdkmanrc wants jdk 21; .tool-versions wants maven 3.9
+            Map<String, List<String>> wants = new LinkedHashMap<>();
+            for (ToolState s : missing) {
+                wants.computeIfAbsent(ProjectShell.pinFile(states.project(), s.pin().tool()), f -> new ArrayList<>())
+                        .add(StatusCommand.pinText(s.pin()));
+            }
+            List<String> parts = new ArrayList<>();
+            wants.forEach((file, pins) -> parts.add(file + " wants " + String.join(", ", pins)));
             List<String> hints = new ArrayList<>();
             for (ToolState s : missing) {
                 hints.add("install it: " + StatusCommand.installCommand(s.pin()));
             }
             hints.add("or ignore the project file: " + ignoreCommand);
             throw new JkitException(JkitException.NOT_INSTALLED,
-                    file + " wants " + String.join(", ", wants) + ", not installed", hints.toArray(String[]::new));
+                    String.join("; ", parts) + ", not installed", hints.toArray(String[]::new));
         }
         Map<String, String> variables = ShellEnv.fresh(ctx.env, ctx.home, homes, isGraalVm(ctx, homes.get(Tool.JDK)));
         return new Result(dir, states.project(), homes, variables);

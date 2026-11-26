@@ -346,6 +346,31 @@ class SourcesTest {
     }
 
     @Test
+    void noMatchNamesOnlyVendorsThatHaveTheVersion() {
+        String index = "{\"result\":[" + String.join(",",
+                pkg("t", "temurin", 21, "21.0.5+11", "glibc", ""),
+                pkg("z", "zulu", 21, "21.0.5+11", "glibc", ""),
+                pkg("c", "corretto", 21, "21.0.5+11", "glibc", "")) + "]}";
+        String zulu = "{\"result\":[" + String.join(",",
+                pkg("z", "zulu", 21, "21.0.5+11", "glibc", ""), pkg("z3", "zulu", 21, "21.0.3+9", "glibc", "")) + "]}";
+        String corretto = "{\"result\":[" + String.join(",",
+                pkg("c", "corretto", 21, "21.0.5+11", "glibc", ""), pkg("c4", "corretto", 21, "21.0.4+7", "glibc", "")) + "]}";
+        FoojaySource foojay = new FoojaySource(fake(Map.of("latest=available", index,
+                "distribution=temurin", "{\"result\":[]}", "distribution=zulu", zulu, "distribution=corretto", corretto)),
+                FoojaySource.DEFAULT_BASE);
+        // an older build only zulu still lists
+        assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21.0.3", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .hasMessageContaining("temurin has no build matching jdk@21.0.3")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly("available from: zulu"));
+        // a version nobody has: no list of vendors that don't have it either
+        assertThatThrownBy(() -> foojay.resolve(Tool.JDK, "21.0.99", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .hasMessageContaining("temurin has no build matching jdk@21.0.99")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
+                        "no other vendor has jdk@21.0.99 either; the newest jdk 21 is 21.0.5+11 (corretto, temurin, zulu)",
+                        "see them all: jkit search jdk@21"));
+    }
+
+    @Test
     void noMatchNamesVendorsThatHaveTheMajor() {
         String index = "{\"result\":[" + pkg("z", "zulu", 22, "22.0.2+9", "glibc", "") + "]}";
         FoojaySource foojay = new FoojaySource(fake(Map.of(

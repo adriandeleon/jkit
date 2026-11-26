@@ -7,6 +7,7 @@ import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.ProjectSpec;
+import dev.jkit.model.Tool;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
 import java.io.PrintStream;
@@ -66,6 +67,14 @@ final class SyncCommand implements Callable<Integer> {
         ProjectSpec project = states.project().get();
         PrintStream say = json.json ? ctx.err : ctx.out;
         project.warnings().forEach(w -> ctx.err.println("warning: " + Changes.tilde(w)));
+        if (!project.skipped().isEmpty()) {
+            // installing the rest would leave CI on whatever version it already had for these
+            String names = String.join(", ", project.skipped().stream().map(Tool::id).toList());
+            throw new JkitException(project.source() + " pins " + names + ", but jkit can't read "
+                    + (project.skipped().size() == 1 ? "that pin" : "those pins") + " (see the warning above); "
+                    + "nothing was " + (dryRun ? "checked" : "installed"),
+                    "fix the entry in " + Changes.tilde(project.dir().toString()) + ", then run jkit sync again");
+        }
         say.println((dryRun ? "would sync " : "syncing ") + Changes.tilde(project.dir().toString())
                 + " (" + project.source() + ")");
         if (project.tools().isEmpty()) {

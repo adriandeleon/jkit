@@ -19,10 +19,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.tomlj.Toml;
 import org.tomlj.TomlParseError;
@@ -213,13 +216,16 @@ public final class ProjectFile {
     static ProjectSpec checked(ProjectSpec spec) {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         List<String> warnings = new ArrayList<>(spec.warnings());
+        Set<Tool> skipped = EnumSet.noneOf(Tool.class);
+        skipped.addAll(spec.skipped());
         spec.tools().forEach((tool, pin) -> {
             boolean versionOk = pin.version() == null || SAFE_VERSION.matcher(pin.version()).matches();
             boolean vendorOk = pin.vendor() == null || SAFE_VENDOR.matcher(pin.vendor().name()).matches();
             if (versionOk && vendorOk) {
                 tools.put(tool, pin);
             } else {
-                warnings.add(spec.files().getFirst() + ": " + tool + " pins a "
+                skipped.add(tool);
+                warnings.add(spec.origin(tool) + ": " + tool + " pins a "
                         + (versionOk ? "vendor" : "version") + " with characters jkit doesn't accept, skipped");
             }
         });
@@ -229,7 +235,7 @@ public final class ProjectFile {
             warnings.subList(MAX_WARNINGS, warnings.size()).clear();
             warnings.add(spec.files().getFirst() + ": " + more + " more warnings not shown");
         }
-        return new ProjectSpec(spec.files(), tools, warnings);
+        return new ProjectSpec(spec.files(), tools, warnings, skipped, spec.origins());
     }
 
     static final int MAX_WARNINGS = 20;
@@ -313,20 +319,27 @@ public final class ProjectFile {
     /** Earlier specs win where several pin the same tool. */
     private static ProjectSpec merge(List<ProjectSpec> specs) {
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
+        Map<Tool, Path> origins = new EnumMap<>(Tool.class);
+        Set<Tool> skipped = EnumSet.noneOf(Tool.class);
         List<String> warnings = new ArrayList<>();
         List<Path> files = new ArrayList<>();
         for (ProjectSpec spec : specs) {
-            spec.tools().forEach(tools::putIfAbsent);
+            spec.tools().forEach((tool, pin) -> {
+                if (tools.putIfAbsent(tool, pin) == null) {
+                    origins.put(tool, spec.origin(tool));
+                }
+            });
+            skipped.addAll(spec.skipped());
             warnings.addAll(spec.warnings());
             files.addAll(spec.files());
         }
-        return new ProjectSpec(files, tools, warnings);
+        return new ProjectSpec(files, tools, warnings, skipped, origins);
     }
 
     private static ProjectSpec withWarning(ProjectSpec spec, String warning) {
         List<String> warnings = new ArrayList<>(spec.warnings());
         warnings.add(warning);
-        return new ProjectSpec(spec.files(), spec.tools(), warnings);
+        return new ProjectSpec(spec.files(), spec.tools(), warnings, spec.skipped(), spec.origins());
     }
 
     // jkit.toml
@@ -348,7 +361,9 @@ public final class ProjectFile {
         }
         List<String> warnings = new ArrayList<>();
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
+        Set<Tool> skipped = EnumSet.noneOf(Tool.class);
         Map<Tool, String> keyFor = new EnumMap<>(Tool.class);
+        List<String> lines = text.lines().toList();
         for (String key : toml.keySet()) {
             if (!key.equals("tools")) {
                 warnings.add(at(file, toml.inputPositionOf(List.of(key))) + ": unknown key '" + shown(key) + "', skipped");
@@ -359,7 +374,9 @@ public final class ProjectFile {
         } else if (toml.isTable("tools")) {
             TomlTable table = toml.getTable("tools");
             for (String key : table.keySet()) {
-                String where = at(file, toml.inputPositionOf(List.of("tools", key)));
+                TomlPosition position = toml.inputPositionOf(List.of("tools", key));
+                String where = at(file, position);
+                String line = position == null || position.line() > lines.size() ? "" : lines.get(position.line() - 1);
                 Tool tool = Tool.find(key).orElse(null);
                 if (tool == null) {
                     warnings.add(where + ": unknown tool '" + shown(key) + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
@@ -370,19 +387,33 @@ public final class ProjectFile {
                             "keep one of them");
                 }
                 keyFor.put(tool, key);
-                PinnedTool pinned = tomlEntry(tool, key, table.get(List.of(key)), where, warnings);
+                PinnedTool pinned = tomlEntry(tool, key, table.get(List.of(key)), where, line, warnings);
                 if (pinned != null) {
                     tools.put(tool, pinned);
+                } else {
+                    skipped.add(tool);
                 }
             }
         }
-        return new ProjectSpec(List.of(file), tools, warnings);
+        return new ProjectSpec(List.of(file), tools, warnings, skipped, Map.of());
     }
 
-    /** {@code "21"} or {@code { version = "21", vendor = "zulu", fx = true }}; null when skipped. */
-    private static PinnedTool tomlEntry(Tool tool, String key, Object value, String where, List<String> warnings) {
+    /**
+     * {@code "21"} or {@code { version = "21", vendor = "zulu", fx = true }}; null when skipped. A
+     * whole number ({@code jdk = 21}) is read as its digits; a decimal ({@code maven = 3.10}) is
+     * refused, as TOML reads it as the number 3.1 and the version would change.
+     */
+    private static PinnedTool tomlEntry(Tool tool, String key, Object value, String where, String line,
+                                        List<String> warnings) {
         if (value instanceof String text) {
             return pinned(tool, key, text, null, false, where, warnings);
+        }
+        if (value instanceof Long number) {
+            return pinned(tool, key, number.toString(), null, false, where, warnings);
+        }
+        if (value instanceof Double) {
+            warnings.add(decimalWarning(where, key, key, line));
+            return null;
         }
         if (!(value instanceof TomlTable table)) {
             warnings.add(where + ": " + shown(key) + " should be a version string or a table, skipped");
@@ -395,6 +426,14 @@ public final class ProjectFile {
             Object v = table.get(List.of(field));
             switch (field) {
                 case "version" -> {
+                    if (v instanceof Long number) {
+                        version = number.toString();
+                        continue;
+                    }
+                    if (v instanceof Double) {
+                        warnings.add(decimalWarning(where, key, "version", line));
+                        return null;
+                    }
                     if (!(v instanceof String s)) {
                         warnings.add(where + ": " + shown(key) + ".version should be a string, skipped " + shown(key));
                         return null;
@@ -419,6 +458,20 @@ public final class ProjectFile {
             }
         }
         return pinned(tool, key, version, vendor, fx, where, warnings);
+    }
+
+    /**
+     * Why a version written as a decimal is skipped, quoting it as written on its line when it can
+     * be found there: TOML has already turned {@code 3.10} into 3.1.
+     */
+    private static String decimalWarning(String where, String key, String field, String line) {
+        Matcher m = Pattern.compile("(?:^|[\\s{,\"'])" + Pattern.quote(field) + "[\"']?\\s*=\\s*([0-9][0-9_]*\\.[0-9_]+)")
+                .matcher(line);
+        String written = m.find() ? m.group(1).replace("_", "") : null;
+        String name = field.equals(key) ? shown(key) : shown(key) + "." + field;
+        return where + ": " + name + (written != null ? " = " + written : "")
+                + " is a TOML number, which drops trailing zeros (3.10 reads as 3.1); quote it: "
+                + field + " = \"" + (written != null ? written : "3.10") + "\", skipped " + shown(key);
     }
 
     private static PinnedTool pinned(Tool tool, String key, String versionText, String vendorText, boolean fx,
@@ -458,6 +511,7 @@ public final class ProjectFile {
         List<String> warnings = new ArrayList<>();
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         TreeSet<String> unmanaged = new TreeSet<>();
+        Set<Tool> skipped = EnumSet.noneOf(Tool.class);
         for (int i = 0; i < lines.size(); i++) {
             String line = stripComment(lines.get(i));
             if (line.isEmpty()) {
@@ -478,14 +532,16 @@ public final class ProjectFile {
             }
             try {
                 tools.put(tool, SdkmanIds.parse(tool, id));
+                skipped.remove(tool);
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
+                skipped.add(tool);
+                warnings.add(where + ": " + message(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
             warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
-        return new ProjectSpec(List.of(file), tools, warnings);
+        return new ProjectSpec(List.of(file), tools, warnings, skipped, Map.of());
     }
 
     // .tool-versions (asdf, mise): "<name> <version> [fallback versions…]"; jkit uses the first
@@ -495,6 +551,7 @@ public final class ProjectFile {
         List<String> warnings = new ArrayList<>();
         Map<Tool, PinnedTool> tools = new EnumMap<>(Tool.class);
         TreeSet<String> unmanaged = new TreeSet<>();
+        Set<Tool> skipped = EnumSet.noneOf(Tool.class);
         for (int i = 0; i < lines.size(); i++) {
             String line = stripComment(lines.get(i));
             if (line.isEmpty()) {
@@ -512,15 +569,19 @@ public final class ProjectFile {
                 continue;
             }
             try {
-                tools.put(tool, ToolVersionsIds.parse(tool, words[1]));
+                List<String> notes = new ArrayList<>();
+                tools.put(tool, ToolVersionsIds.parse(tool, words[1], notes));
+                skipped.remove(tool);
+                notes.forEach(note -> warnings.add(where + ": " + message(note)));
             } catch (IllegalArgumentException e) {
-                warnings.add(where + ": " + shown(e.getMessage()) + ", skipped");
+                skipped.add(tool);
+                warnings.add(where + ": " + message(e.getMessage()) + ", skipped");
             }
         }
         if (!unmanaged.isEmpty()) {
             warnings.add(file + ": jkit doesn't manage " + shown(String.join(", ", unmanaged)) + ", skipped");
         }
-        return new ProjectSpec(List.of(file), tools, warnings);
+        return new ProjectSpec(List.of(file), tools, warnings, skipped, Map.of());
     }
 
     // .java-version
@@ -535,7 +596,8 @@ public final class ProjectFile {
             String version = legacyJavaVersion(text);
             if (!Version.looksLikeVersion(version)) {
                 return new ProjectSpec(List.of(file), Map.of(), List.of(file + ":" + (i + 1) + ": '" + shown(text)
-                        + "' is not a Java version (jkit reads only numbers such as 21 or 17.0.2), skipped"));
+                        + "' is not a Java version (jkit reads only numbers such as 21 or 17.0.2), skipped"),
+                        Set.of(Tool.JDK), Map.of());
             }
             return new ProjectSpec(List.of(file), Map.of(Tool.JDK, new PinnedTool(Tool.JDK, version, null, false)),
                     List.of());
@@ -642,6 +704,15 @@ public final class ProjectFile {
             return "";
         }
         String t = text.length() > 40 ? text.substring(0, 40) + "…" : text;
+        return Visible.of(t);
+    }
+
+    /**
+     * A message about a project file entry that quotes it, as a warning shows it: escaped, and at
+     * most 240 characters, as the quoted entry can be any length.
+     */
+    static String message(String text) {
+        String t = text.length() > 240 ? text.substring(0, 240) + "…" : text;
         return Visible.of(t);
     }
 

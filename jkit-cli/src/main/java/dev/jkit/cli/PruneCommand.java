@@ -60,7 +60,7 @@ final class PruneCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        return run(Context.create(false, true), Path.of("").toAbsolutePath(), Instant.now());
+        return run(Context.local(), Path.of("").toAbsolutePath(), Instant.now());
     }
 
     /** One build to remove, the newer build in its line that replaces it, and the bytes it takes. */

@@ -31,7 +31,7 @@ final class UnpinCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        return run(Context.create(false, true), Path.of("").toAbsolutePath());
+        return run(Context.local(), Path.of("").toAbsolutePath());
     }
 
     int run(Context ctx, Path cwd) throws Exception {

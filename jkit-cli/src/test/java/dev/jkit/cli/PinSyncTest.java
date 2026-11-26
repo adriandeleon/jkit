@@ -3,6 +3,8 @@ package dev.jkit.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
@@ -257,6 +259,69 @@ class PinSyncTest {
         env.put("JAVA_HOME", temurin21.toString());
         assertThat(reset.run(ctx())).isZero();
         assertThat(Files.readString(envFile)).contains("export JAVA_HOME='/opt/my-jdk'").contains("unset JKIT_USER_JDK");
+    }
+
+    @Test
+    void syncReadsABareNumberAndFailsOnAPinItCannotRead() throws Exception {
+        env.put("JKIT_ENV_FILE", envFile.toString());
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = 21\n");
+        assertThat(new SyncCommand().run(ctx(), project)).isZero();
+        assertThat(output()).contains("jdk 21: 21.0.9+10 temurin (installed)").doesNotContain("pins no tools");
+
+        // TOML reads 3.10 as 3.1: the pin is skipped, and sync must not pass as if nothing were pinned
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\nmaven = 3.10\n");
+        assertThatThrownBy(() -> new SyncCommand().run(ctx(), project))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("jkit.toml pins maven, but jkit can't read that pin (see the warning above); nothing was installed");
+    }
+
+    @Test
+    void resetGlobalJsonReportsTheLinkItRemoved() throws Exception {
+        ResetCommand reset = new ResetCommand();
+        reset.tool = Tool.MAVEN;
+        reset.global = true;
+        reset.json.json = true;
+        assertThat(reset.run(ctx())).isZero();
+        assertThat(home.resolve("global/maven")).doesNotExist();
+        JsonNode doc = new ObjectMapper().readTree(output());
+        assertThat(doc.path("schemaVersion").asInt()).isEqualTo(JsonOut.SCHEMA_VERSION);
+        assertThat(doc.path("scope").asText()).isEqualTo("global");
+        assertThat(doc.path("tool").asText()).isEqualTo("maven");
+        assertThat(doc.path("changed").asBoolean()).isTrue();
+        assertThat(doc.path("changes").get(0).path("kind").asText()).isEqualTo("link");
+        assertThat(doc.path("changes").get(0).path("action").asText()).isEqualTo("remove");
+
+        out.reset();
+        assertThat(reset.run(ctx())).isZero(); // nothing left to clear
+        JsonNode again = new ObjectMapper().readTree(output());
+        assertThat(again.path("changed").asBoolean()).isFalse();
+        assertThat(again.path("changes")).isEmpty();
+    }
+
+    @Test
+    void removeSaysWhatUsesTheBuildAndWhatForceWouldTake() {
+        RemoveCommand remove = new RemoveCommand();
+        remove.spec = ToolSpec.parse("jdk@21");
+        env.put("JKIT_SHELL_JDK", temurin21.toString()); // chosen with jkit use; there is no global jdk
+        assertThatThrownBy(() -> remove.run(ctx())).isInstanceOf(JkitException.class)
+                .hasMessage("jdk 21.0.9+10 temurin is this shell's jdk (chosen with jkit use); nothing removed")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .containsExactly("stop using it in this shell: jkit reset jdk", "or remove it anyway: add --force"));
+        RemoveCommand removeMaven = new RemoveCommand();
+        removeMaven.spec = ToolSpec.parse("maven@3.9.11");
+        assertThatThrownBy(() -> removeMaven.run(ctx()))
+                .hasMessage("maven 3.9.11 is the global maven; nothing removed")
+                .satisfies(e -> assertThat(((JkitException) e).hints())
+                        .contains("or remove it anyway (the global link goes too): add --force"));
+        assertThat(temurin21).exists();
+    }
+
+    @Test
+    void aHintNamesTheFileThatPinsTheTool() throws Exception {
+        Files.writeString(project.resolve(".sdkmanrc"), "java=21.0.9-tem\n");
+        Files.writeString(project.resolve(".tool-versions"), "maven 3.8.8\n");
+        ProjectShell.Plan plan = ProjectShell.plan(ctx(), project);
+        assertThat(plan.notes()).contains(".tool-versions wants maven 3.8.8, not installed: jkit sync");
     }
 
     @Test
