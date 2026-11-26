@@ -538,7 +538,9 @@ public final class FoojaySource {
             List<Pkg> newest;
             try {
                 newest = newestPerVendorAndMajor(platform, fx, pre).stream()
-                        .filter(p -> p.vendor().foojayName().equals(vendor.foojayName()) && p.major() == major)
+                        // the same checks as builds(): the vendor and version decide which checks apply
+                        .filter(p -> p.vendor().foojayName().equals(vendor.foojayName()) && p.major() == major
+                                && p.version().part(0) == major)
                         .filter(p -> p.version().matches(versionSpec) && (pre || !p.version().isPreRelease()))
                         .toList();
             } catch (IOException | JkitException e) {

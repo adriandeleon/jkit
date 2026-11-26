@@ -549,6 +549,15 @@ class SourcesTest {
                 .hasMessage("--offline, but the list of temurin 21 builds isn't cached")
                 .satisfies(e -> assertThat(((JkitException) e).hints()).containsExactly(
                         "fill the cache: jkit search jdk@21 temurin (without --offline)"));
+        // as online, a build filed under 21 whose version is another major's isn't a 21 build:
+        // Temurin 17.0.3 has no signature, which Temurin 21 builds must have
+        String misfiled = "{\"result\":[" + pkg("o", "temurin", 21, "17.0.3+7", "glibc", "") + "]}";
+        FoojaySource stale = new FoojaySource(offline(Map.of("latest=available", misfiled, "ids/o", info(
+                "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/o.tar.gz", ""))),
+                FoojaySource.DEFAULT_BASE);
+        assertThatThrownBy(() -> stale.resolve(Tool.JDK, null, Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .isInstanceOf(JkitException.class)
+                .hasMessage("--offline, but the list of temurin 21 builds isn't cached");
     }
 
     @Test
