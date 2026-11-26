@@ -297,7 +297,9 @@ Phase 3 and 4 notes, where they differ from or add to the text above:
   sets `auto_switch = true` in `config.toml` (`ConfigWriter`, which edits one line and reads the
   file back), printing both changes. For PowerShell, `jkit hook pwsh` warns that it isn't supported yet.
 - `sync`, `pin` and `unpin` also record `JKIT_PROJECT`, so the next `cd` within the project stays
-  quiet. While auto-switch is off they add a note on how to turn it on.
+  quiet. While auto-switch is off they add a note on how to turn it on
+  (`jkit config set shell.auto_switch true`, then a new shell). They leave it out in a shell whose
+  hook can't switch on `cd` (PowerShell), where turning it on would only add a warning.
 - `list` marks installs with the project file's name (`jkit.toml`), and its `--json` has `project`
   (`dir`, `files`, `tools`: tool → install, or `null` when not installed).
 - `use` notes when it overrides the project's pin in this shell, and `use --global` when the
