@@ -122,6 +122,35 @@ class ShellEnvTest {
     }
 
     @Test
+    void theUsersOwnJavaHomeInsideToolsKeepsItsBinAfterReset(@TempDir Path tmp) throws Exception {
+        JkitHome own = new JkitHome(tmp.resolve(".jkit"));
+        Path mine = Files.createDirectories(own.toolsRoot().resolve("jdk/21/bin")).getParent();
+        Path jdk17 = Files.createDirectories(own.toolsRoot().resolve("jdk/17"));
+        // the user exported JAVA_HOME to an install of jkit's, and the hook put its bin first
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path(bin(mine), "/usr/bin"), "JAVA_HOME", mine.toString()));
+        apply(env, ShellEnv.use(env, own, Tool.JDK, jdk17, false));
+        assertThat(env).containsEntry("JKIT_USER_JDK", mine.toString());
+
+        Map<String, String> reset = ShellEnv.reset(env, own, Tool.JDK);
+        assertThat(reset).containsEntry("JAVA_HOME", mine.toString());
+        assertThat(reset.get("PATH")).isEqualTo(path(bin(mine), "/usr/bin"));
+        apply(env, reset);
+
+        // the same when a project leaves
+        apply(env, ShellEnv.project(env, own, Map.of(Tool.JDK, jdk17), false, "k"));
+        Map<String, String> leave = ShellEnv.project(env, own, Map.of(), false, null);
+        assertThat(leave).containsEntry("JAVA_HOME", mine.toString());
+        assertThat(leave.get("PATH")).isEqualTo(path(bin(mine), "/usr/bin"));
+        apply(env, leave);
+
+        // and when jkit use chose the very install the user's JAVA_HOME names
+        apply(env, ShellEnv.use(env, own, Tool.JDK, mine, false));
+        Map<String, String> same = ShellEnv.reset(env, own, Tool.JDK);
+        assertThat(same).containsEntry("JAVA_HOME", mine.toString());
+        assertThat(same.get("PATH")).isEqualTo(path(bin(mine), "/usr/bin"));
+    }
+
+    @Test
     void backToTheGlobalLinkPutsTheGlobalBinBack(@TempDir Path tmp) throws Exception {
         JkitHome own = new JkitHome(tmp.resolve(".jkit"));
         Files.createDirectories(own.global(Tool.JDK).getParent());

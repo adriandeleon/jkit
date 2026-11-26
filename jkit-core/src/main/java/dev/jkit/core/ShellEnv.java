@@ -315,7 +315,9 @@ public final class ShellEnv {
             }
             String toolHome = blankToNull(changes.containsKey(t.homeVariable())
                     ? changes.get(t.homeVariable()) : env.get(t.homeVariable()));
-            if (toolHome == null || underTools(toolHome, home)) {
+            // a tool with no jkit choice left: its *_HOME is the user's own, wherever it is, or the
+            // global link (a choice going away gives *_HOME back in changes)
+            if (toolHome == null) {
                 continue;
             }
             Path ownBin = isGlobal(toolHome, home, t) ? null : Fs.path(toolHome);
@@ -325,8 +327,10 @@ public final class ShellEnv {
                 }
             } else if (Files.isDirectory(ownBin.resolve("bin"))) {
                 dropped.add(global);
-                if (!onPath(env, ownBin.resolve("bin").toString())) {
-                    entries.add(ownBin.resolve("bin").toString());
+                String bin = ownBin.resolve("bin").toString();
+                // entries under tools/ are taken off below, so the user's own one there goes back first
+                if (!onPath(env, bin) || underTools(bin, home)) {
+                    entries.add(bin);
                 }
             }
         }
