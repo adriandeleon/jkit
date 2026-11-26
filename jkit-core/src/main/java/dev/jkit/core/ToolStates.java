@@ -101,11 +101,11 @@ public final class ToolStates {
         Source source;
         if (current == null) {
             source = Source.NONE;
-        } else if (shellChoice != null && same(current, shellChoice)) {
+        } else if (shellChoice != null && Fs.same(current, shellChoice)) {
             source = Source.SHELL;
-        } else if (pinInstall != null && same(current, pinInstall.home())) {
+        } else if (pinInstall != null && Fs.same(current, pinInstall.home())) {
             source = Source.PROJECT;
-        } else if (same(current, home.global(tool)) || (global != null && same(current, global))) {
+        } else if (Fs.same(current, home.global(tool)) || (global != null && Fs.same(current, global))) {
             source = Source.GLOBAL;
         } else if (real(current).startsWith(real(home.root()))) {
             source = Source.STALE;
@@ -135,11 +135,11 @@ public final class ToolStates {
         Source source = g.source();
         Path current = g.current();
         if (current != null && installAt(store, Tool.GRAALVM, current) != null) {
-            if (jdk.shellChoice() != null && same(current, jdk.shellChoice())) {
+            if (jdk.shellChoice() != null && Fs.same(current, jdk.shellChoice())) {
                 source = Source.SHELL;
-            } else if (jdk.pinInstall() != null && same(current, jdk.pinInstall().home())) {
+            } else if (jdk.pinInstall() != null && Fs.same(current, jdk.pinInstall().home())) {
                 source = Source.PROJECT;
-            } else if (same(current, home.global(Tool.JDK)) || (jdk.global() != null && same(current, jdk.global()))) {
+            } else if (Fs.same(current, home.global(Tool.JDK)) || (jdk.global() != null && Fs.same(current, jdk.global()))) {
                 source = Source.GLOBAL;
             }
         }
@@ -195,7 +195,7 @@ public final class ToolStates {
 
     private static Installed installAt(Store store, Tool tool, Path path) throws IOException {
         for (Installed i : store.list(tool)) {
-            if (same(path, i.home())) {
+            if (Fs.same(path, i.home())) {
                 return i;
             }
         }
@@ -206,11 +206,6 @@ public final class ToolStates {
         // a relative JAVA_HOME means a different JDK in every folder (and doctor runs its java): ignore it
         Path path = Fs.path(value);
         return path == null || !path.isAbsolute() ? null : path;
-    }
-
-    /** Same folder, following links (the global link and its target are the same install). */
-    static boolean same(Path a, Path b) {
-        return real(a).equals(real(b));
     }
 
     private static Path real(Path p) {

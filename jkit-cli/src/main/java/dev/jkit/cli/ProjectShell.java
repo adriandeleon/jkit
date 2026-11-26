@@ -1,6 +1,7 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.AtomicFile;
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
@@ -181,7 +182,7 @@ final class ProjectShell {
             }
             applied.put(s.tool(), s.pinInstall());
             homes.put(s.tool(), s.pinInstall().home());
-            if (s.shellChoice() != null && !same(s.shellChoice(), s.pinInstall().home())) {
+            if (s.shellChoice() != null && !Fs.same(s.shellChoice(), s.pinInstall().home())) {
                 notes.add("this shell chose its own " + s.tool() + " with jkit use, which wins over " + file
                         + ": jkit reset " + s.tool() + " to follow " + file);
             }
@@ -199,18 +200,10 @@ final class ProjectShell {
             return null;
         }
         for (Installed i : ctx.store.list(tool.storeTool())) {
-            if (same(i.home(), home)) {
+            if (Fs.same(i.home(), home)) {
                 return i;
             }
         }
         return null;
-    }
-
-    private static boolean same(Path a, Path b) {
-        try {
-            return a.toRealPath().equals(b.toRealPath());
-        } catch (IOException e) {
-            return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
-        }
     }
 }

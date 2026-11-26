@@ -13,18 +13,11 @@ import java.nio.file.attribute.PosixFilePermission;
  * folder. Root may own things too: a Dockerfile installs as root, then runs as another user.
  */
 public final class Owners {
-    private static final boolean POSIX =
-            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final boolean UNIX_VIEW =
             FileSystems.getDefault().supportedFileAttributeViews().contains("unix");
     private static Integer myUid;
 
     private Owners() { }
-
-    /** Whether files have POSIX owners and permissions here (not on Windows). */
-    public static boolean posix() {
-        return POSIX;
-    }
 
     /**
      * This process's uid, or -1 where it can't be read: on Linux {@code /proc/self} belongs to it;

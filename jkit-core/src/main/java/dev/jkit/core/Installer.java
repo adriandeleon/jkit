@@ -17,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystemException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -316,9 +315,6 @@ public final class Installer {
         }
     }
 
-    private static final boolean POSIX =
-            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
-
     /**
      * The final move into tools/. On Windows an antivirus scan of the files just unpacked often
      * holds them for a moment and the move fails with access denied: try again for a few seconds.
@@ -525,7 +521,7 @@ public final class Installer {
         for (String name : names) {
             Path launcher = toolHome.resolve("bin").resolve(name);
             if (Files.isRegularFile(launcher)) {
-                if (POSIX && !name.contains(".") && !Files.isExecutable(launcher)) {
+                if (Perms.posix() && !name.contains(".") && !Files.isExecutable(launcher)) {
                     makeExecutable(toolHome.resolve("bin")); // a zip made without Unix modes
                     // the JDK starts child processes through these: without +x, ProcessBuilder fails
                     for (String helper : List.of("jspawnhelper", "jexec")) {

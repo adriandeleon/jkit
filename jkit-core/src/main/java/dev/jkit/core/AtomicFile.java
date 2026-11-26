@@ -1,5 +1,6 @@
 package dev.jkit.core;
 
+import dev.jkit.model.Perms;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -8,7 +9,6 @@ import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -25,7 +25,6 @@ import java.util.Set;
  * full disk or Ctrl-C halfway leaves the old file as it was, never a truncated ~/.bashrc.
  */
 public final class AtomicFile {
-    private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     /** How many links in a row are followed before giving up (Linux's own limit). */
     private static final int MAX_LINKS = 40;
 
@@ -43,13 +42,13 @@ public final class AtomicFile {
         Path dir = target.toAbsolutePath().getParent();
         byte[] bytes = encode(text, charset);
         Set<PosixFilePermission> perms = null;
-        if (POSIX) {
+        if (Perms.posix()) {
             perms = Files.exists(target, LinkOption.NOFOLLOW_LINKS)
                     && !Files.isSymbolicLink(target)
                     ? Files.getPosixFilePermissions(target, LinkOption.NOFOLLOW_LINKS)
                     : PosixFilePermissions.fromString("rw-r--r--");
         }
-        FileAttribute<?>[] owner = POSIX
+        FileAttribute<?>[] owner = Perms.posix()
                 ? new FileAttribute<?>[] {PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))}
                 : new FileAttribute<?>[0];
         Path tmp;

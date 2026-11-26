@@ -6,7 +6,6 @@ import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -30,7 +29,7 @@ public record JkitHome(Path root) {
         // $HOME first, like the shell: it differs from the passwd entry under sudo -E, in some
         // containers and in tests that point HOME somewhere else
         String home = env.get("HOME");
-        if (Fs.path(home) == null || !Fs.path(home).isAbsolute() || !Owners.posix()) {
+        if (Fs.path(home) == null || !Fs.path(home).isAbsolute() || !Perms.posix()) {
             home = System.getProperty("user.home");
         }
         // no passwd entry (docker run -u 1001) and no HOME: user.home is "?", relative to every folder
@@ -63,9 +62,6 @@ public record JkitHome(Path root) {
 
     public Path config() { return root.resolve("config.toml"); }
 
-    private static final boolean POSIX =
-            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
-
     /**
      * Creates the home if needed, readable only by this user: its {@code bin} folders go first on
      * PATH, so nobody else may put anything in it.
@@ -80,7 +76,7 @@ public record JkitHome(Path root) {
             Perms.mkdirs(root.getParent());
         }
         try {
-            if (POSIX) {
+            if (Perms.posix()) {
                 Files.createDirectory(root, PosixFilePermissions.asFileAttribute(
                         PosixFilePermissions.fromString("rwx------")));
             } else {
@@ -102,7 +98,7 @@ public record JkitHome(Path root) {
      * that's the default umask on some distributions.
      */
     public void requireSafe() {
-        if (!POSIX) {
+        if (!Perms.posix()) {
             return;
         }
         try {

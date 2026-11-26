@@ -1,6 +1,7 @@
 package dev.jkit.core;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.SdkmanIds;
@@ -13,7 +14,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -160,7 +160,7 @@ public final class ProjectFile {
                 return "it is a link jkit can't follow";
             }
         }
-        if (!POSIX) {
+        if (!Perms.posix()) {
             return null;
         }
         try {
@@ -186,7 +186,7 @@ public final class ProjectFile {
     }
 
     private static String trustProblem(Path dir) {
-        if (!POSIX) {
+        if (!Perms.posix()) {
             return null;
         }
         try {
@@ -201,9 +201,6 @@ public final class ProjectFile {
             return "cannot check the folder's owner";
         }
     }
-
-    private static final boolean POSIX =
-            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private static final Pattern SAFE_VERSION = Pattern.compile("[0-9A-Za-z.+_-]{1,64}");
     private static final Pattern SAFE_VENDOR = Pattern.compile("[A-Za-z0-9._-]{1,64}");

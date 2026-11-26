@@ -33,6 +33,26 @@ public final class Fs {
         }
     }
 
+    /**
+     * Whether two paths name the same folder: equal as written, or the same file on disk, links
+     * followed (the global link and its target are the same install). Windows reads a junction back
+     * with long names (runneradmin) where jkit was given short ones (RUNNER~1), so comparing the
+     * text alone says a global link points elsewhere when it doesn't.
+     */
+    public static boolean same(Path a, Path b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize())) {
+            return true;
+        }
+        try {
+            return Files.exists(a) && Files.exists(b) && Files.isSameFile(a, b);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist. */
     public static void copyTree(Path from, Path to) throws IOException {
         try (var all = Files.walk(from)) {

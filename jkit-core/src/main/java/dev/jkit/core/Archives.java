@@ -1,13 +1,13 @@
 package dev.jkit.core;
 
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
 import dev.jkit.model.Visible;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryNotEmptyException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -30,9 +30,6 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
  * point outside it and entries written through a symlink an earlier entry made.
  */
 public final class Archives {
-    private static final boolean POSIX =
-            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
-
     private Archives() { }
 
     /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 1,000 files. */
@@ -107,7 +104,7 @@ public final class Archives {
      * 002 or 000.
      */
     private static void closeToOthers(Path root) throws IOException {
-        if (!POSIX) {
+        if (!Perms.posix()) {
             return;
         }
         try (var all = Files.walk(root)) {
@@ -272,7 +269,7 @@ public final class Archives {
     }
 
     private static void setMode(Path file, int mode) throws IOException {
-        if (!POSIX || mode == 0) {
+        if (!Perms.posix() || mode == 0) {
             return;
         }
         // never writable by anyone but the owner, whatever the archive says: these run from PATH

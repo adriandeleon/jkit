@@ -111,7 +111,7 @@ public final class ConfigWriter {
         for (int i = 0; i < lines.size(); i++) {
             Matcher header = HEADER.matcher(lines.get(i));
             if (ARRAY_HEADER.matcher(lines.get(i)).matches() || header.matches()) {
-                inTable = header.matches() && unquote(header.group(1)).equals(table);
+                inTable = header.matches() && ProjectWriter.unquote(header.group(1)).equals(table);
                 if (inTable && section < 0) {
                     section = i;
                     lastKey = i;
@@ -121,7 +121,7 @@ public final class ConfigWriter {
             Matcher k = KEY.matcher(lines.get(i));
             if (inTable && k.find()) {
                 lastKey = i;
-                if (unquote(k.group(2)).equals(key) && line < 0) {
+                if (ProjectWriter.unquote(k.group(2)).equals(key) && line < 0) {
                     line = i;
                     valueStart = k.end();
                 }
@@ -161,14 +161,6 @@ public final class ConfigWriter {
             throw new JkitException("invalid " + file + ": " + toml.errors().getFirst(), "fix it by hand first");
         }
         return toml;
-    }
-
-    private static String unquote(String key) {
-        String k = key.trim();
-        if (k.length() >= 2 && (k.startsWith("\"") && k.endsWith("\"") || k.startsWith("'") && k.endsWith("'"))) {
-            return k.substring(1, k.length() - 1);
-        }
-        return k;
     }
 
     private static JkitException cantEdit(Path file, String dotted) {

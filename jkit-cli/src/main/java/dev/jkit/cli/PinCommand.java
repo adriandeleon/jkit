@@ -139,7 +139,7 @@ final class PinCommand implements Callable<Integer> {
                         "name a version: jkit pin " + tool.id() + "@<version>");
             }
             version = exact || !tool.hasVendors() ? current.version().raw()
-                    : String.valueOf(JsonOut.major(current.tool(), current.version()));
+                    : String.valueOf(current.major());
         }
         PinnedTool wanted = new PinnedTool(tool, version, vendor, fx);
         Installed installed = ToolStates.resolve(ctx.store, ctx.config, wanted).orElse(null);

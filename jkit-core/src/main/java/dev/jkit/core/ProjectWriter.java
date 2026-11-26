@@ -159,7 +159,8 @@ public final class ProjectWriter {
         return at;
     }
 
-    private static String unquote(String key) {
+    /** A TOML key without its quotes. */
+    static String unquote(String key) {
         String k = key.trim();
         if (k.length() >= 2 && (k.startsWith("\"") && k.endsWith("\"") || k.startsWith("'") && k.endsWith("'"))) {
             return k.substring(1, k.length() - 1);

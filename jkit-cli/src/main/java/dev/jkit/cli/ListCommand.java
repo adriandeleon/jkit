@@ -96,7 +96,7 @@ final class ListCommand implements Callable<Integer> {
         }
         String file = here.project().get().source();
         for (ToolState s : here.tools()) {
-            if (s.pinInstall() != null && Resolve.same(s.pinInstall().home(), i.home())) {
+            if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
                 notes.add(s.tool() == Tool.GRAALVM ? "graalvm in " + file : file);
             }
         }
@@ -110,11 +110,11 @@ final class ListCommand implements Callable<Integer> {
                 continue;
             }
             Path global = ctx.os.readLink(ctx.home.global(t));
-            if (Resolve.same(global, i.home())) {
+            if (Fs.same(global, i.home())) {
                 notes.add(t == Tool.GRAALVM ? "global graalvm" : "global");
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(Fs.path(shell), i.home())) {
+            if (shell != null && Fs.same(Fs.path(shell), i.home())) {
                 notes.add(t == Tool.GRAALVM ? "graalvm in this shell" : "this shell");
             }
         }

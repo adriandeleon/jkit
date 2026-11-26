@@ -1,6 +1,7 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.Config;
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.Store;
 import dev.jkit.core.ToolState;
@@ -279,7 +280,7 @@ final class DoctorCommand implements Callable<Integer> {
                 String fix = installed.isEmpty()
                         ? "install one and make it global: jkit install " + s.tool() + "@<version>, then jkit use … --global;"
                                 + " or remove the link: " + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()))
-                        : useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: "
+                        : StatusCommand.useCommand(s.tool(), installed.getFirst(), true) + ", or remove the link: "
                                 + (WINDOWS ? "Remove-Item " : "rm ") + arg(r.ctx.home.global(s.tool()));
                 r.fail("global " + s.tool() + " → " + tilde(s.global()) + ", which no longer exists", fix);
             }
@@ -382,7 +383,7 @@ final class DoctorCommand implements Callable<Integer> {
             if (found.isEmpty()) {
                 r.warn("'" + command + "' isn't on PATH, though " + tool.homeVariable() + " is set by jkit",
                         "open a new shell; if that doesn't help, load the jkit hook after other PATH changes");
-            } else if (!sameFile(found.getFirst().getParent(), expectedBin)) {
+            } else if (!Fs.same(found.getFirst().getParent(), expectedBin)) {
                 r.warn("'" + command + "' on PATH is " + tilde(found.getFirst()) + ", not $" + tool.homeVariable()
                                 + "/bin/" + command,
                         "load the jkit hook after other PATH changes in your shell profile, or remove the other " + command);
@@ -601,14 +602,6 @@ final class DoctorCommand implements Callable<Integer> {
         return found;
     }
 
-    private static boolean sameFile(Path a, Path b) {
-        try {
-            return Files.exists(b) && a.toRealPath().equals(b.toRealPath());
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
     private static long size(Path dir) throws IOException {
         try (Stream<Path> all = Files.walk(dir)) {
             return all.filter(Files::isRegularFile).mapToLong(p -> {
@@ -648,11 +641,6 @@ final class DoctorCommand implements Callable<Integer> {
             return d.toHours() + " h";
         }
         return d.toDays() + " days";
-    }
-
-    private static String useCommand(Tool tool, Installed i, boolean global) {
-        return "jkit use " + tool + "@" + i.version().raw() + (i.vendor() == null ? "" : " " + i.vendor().name())
-                + (i.fx() ? " --fx" : "") + (global ? " --global" : "");
     }
 
     private static String tilde(Path path) {

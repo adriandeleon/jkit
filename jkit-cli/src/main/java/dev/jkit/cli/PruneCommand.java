@@ -300,12 +300,12 @@ final class PruneCommand implements Callable<Integer> {
         for (Tool t : Tool.values()) {
             String project = ctx.env.get(ShellEnv.projectVariable(t));
             if (t.storeTool() == i.tool() && project != null && !project.isBlank()
-                    && Resolve.same(Fs.path(project), i.home())) {
+                    && Fs.same(Fs.path(project), i.home())) {
                 return true;
             }
         }
         for (ToolState s : here.tools()) {
-            if (s.pinInstall() != null && Resolve.same(s.pinInstall().home(), i.home())) {
+            if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
                 return true;
             }
         }

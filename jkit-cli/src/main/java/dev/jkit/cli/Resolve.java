@@ -23,25 +23,6 @@ final class Resolve {
     private Resolve() { }
 
     /**
-     * Whether two paths name the same folder: equal as written, or the same file on disk. Windows
-     * reads a junction back with long names (runneradmin) where jkit was given short ones (RUNNER~1),
-     * so comparing the text alone says a global link points elsewhere when it doesn't.
-     */
-    static boolean same(Path a, Path b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        if (a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize())) {
-            return true;
-        }
-        try {
-            return Files.exists(a) && Files.exists(b) && Files.isSameFile(a, b);
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    /**
      * {@code jdk@lts} as a feature release: online, the newest GA LTS foojay lists; offline (use,
      * exec, remove, upgrade), the newest LTS release installed. Any other spec is returned as is.
      */
@@ -106,7 +87,7 @@ final class Resolve {
         }
         TreeSet<Integer> majors = new TreeSet<>(Comparator.reverseOrder());
         for (Installed i : ctx.store.list(spec.tool().storeTool())) {
-            int major = JsonOut.major(i.tool(), i.version());
+            int major = i.major();
             boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
             if (ToolSpec.isLtsMajor(major) && (spec.tool() != Tool.GRAALVM || graal)) {
                 majors.add(major);

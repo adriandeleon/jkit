@@ -20,6 +20,11 @@ public record Installed(Tool tool, Version version, Vendor vendor, Path home, bo
         return (vendor == null ? version.raw() : version.raw() + "-" + vendor.name()) + (fx ? "-fx" : "");
     }
 
+    /** The feature release: 21 for {@code 21.0.9+10}, 8 for {@code 1.8.0_472}, 3 for Maven 3.9.11. */
+    public int major() {
+        return tool.storeTool() == Tool.JDK && version.part(0) == 1 ? version.part(1) : version.part(0);
+    }
+
     public String label() {
         return version + (vendor == null ? "" : " " + vendor.name()) + (fx ? " fx" : "");
     }

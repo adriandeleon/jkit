@@ -428,9 +428,7 @@ final class SearchCommand implements Callable<Integer> {
 
     private static boolean isInstalled(List<Installed> installed, int major, String vendor, boolean fx) {
         for (Installed i : installed) {
-            Version v = i.version();
-            int m = v.part(0) == 1 ? v.part(1) : v.part(0);
-            if (m == major && i.fx() == fx && i.vendor() != null && i.vendor().name().equals(vendor)) {
+            if (i.major() == major && i.fx() == fx && i.vendor() != null && i.vendor().name().equals(vendor)) {
                 return true;
             }
         }

@@ -175,18 +175,18 @@ final class RemoveCommand implements Callable<Integer> {
         }
         for (Tool t : Tool.values()) {
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (t.storeTool() == i.tool() && shell != null && Resolve.same(Fs.path(shell), i.home())) {
+            if (t.storeTool() == i.tool() && shell != null && Fs.same(Fs.path(shell), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
             }
             String project = ctx.env.get(ShellEnv.projectVariable(t));
             if (t.storeTool() == i.tool() && (shell == null || shell.isBlank()) && project != null
-                    && Resolve.same(Fs.path(project), i.home())) {
+                    && Fs.same(Fs.path(project), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder "
                         + "(applied from a project file): jkit sync to install it again, or jkit reset " + t);
             }
         }
         for (ToolState s : here.tools()) {
-            if (s.pinInstall() != null && Resolve.same(s.pinInstall().home(), i.home())) {
+            if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
                 removedLinks.note("warning: " + here.project().map(p -> p.source()).orElse("the project file")
                         + " here pins " + StatusCommand.pinText(s.pin()) + ", which this was: jkit sync installs it again");
             }
@@ -201,7 +201,7 @@ final class RemoveCommand implements Callable<Integer> {
         for (Tool t : Tool.values()) {
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
-            if (t.storeTool() == i.tool() && Resolve.same(target, i.home())) {
+            if (t.storeTool() == i.tool() && Fs.same(target, i.home())) {
                 ctx.os.removeLink(link);
                 removedLinks.link(link, null);
                 removedLinks.note("warning: there is no global " + t + " any more");

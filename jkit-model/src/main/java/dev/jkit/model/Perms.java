@@ -16,6 +16,11 @@ public final class Perms {
 
     private Perms() { }
 
+    /** Whether files have POSIX owners and permissions here (not on Windows). */
+    public static boolean posix() {
+        return POSIX;
+    }
+
     /** createDirectories, each new folder rwxr-xr-x. */
     public static Path mkdirs(Path dir) throws IOException {
         return POSIX

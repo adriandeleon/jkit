@@ -248,7 +248,7 @@ final class UpgradeCommand implements Callable<Integer> {
             boolean moved = false;
             try (AutoCloseable lock = ctx.store.linkLock()) {
                 Path target = ctx.os.readLink(link);
-                if (target != null && Resolve.same(target, previous.home())
+                if (target != null && Fs.same(target, previous.home())
                         && Files.isRegularFile(newHome.resolve(Store.MARKER), LinkOption.NOFOLLOW_LINKS)) {
                     ctx.os.pointLink(link, newHome);
                     moved = true;
@@ -258,7 +258,7 @@ final class UpgradeCommand implements Callable<Integer> {
                 changes.link(link, newHome);
             }
             String shell = ctx.env.get(ShellEnv.stateVariable(t));
-            if (shell != null && Resolve.same(Fs.path(shell), previous.home())) {
+            if (shell != null && Fs.same(Fs.path(shell), previous.home())) {
                 changes.note("this shell still uses the old build: jkit use " + t + "@" + line.major()
                         + (line.vendor() == null ? "" : " " + line.vendor().name()) + (line.fx() ? " --fx" : ""));
             }

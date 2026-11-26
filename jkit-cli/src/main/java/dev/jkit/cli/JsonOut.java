@@ -14,7 +14,6 @@ import dev.jkit.core.ShellEnv;
 import dev.jkit.core.Store;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
-import dev.jkit.model.Version;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.Collection;
@@ -123,7 +122,7 @@ final class JsonOut {
         node.put("tool", i.tool().id());
         node.put("id", i.id());
         node.put("version", i.version().raw());
-        node.put("major", major(i.tool(), i.version()));
+        node.put("major", i.major());
         node.put("vendor", i.vendor() == null ? null : i.vendor().name());
         node.put("fx", i.fx());
         node.put("graalvm", i.vendor() != null && i.vendor().isGraalVmBased());
@@ -139,11 +138,11 @@ final class JsonOut {
                 continue;
             }
             Path link = ctx.os.readLink(ctx.home.global(t));
-            if (Resolve.same(link, i.home())) {
+            if (Fs.same(link, i.home())) {
                 global.add(t.id());
             }
             String state = ctx.env.get(ShellEnv.stateVariable(t));
-            if (state != null && Resolve.same(Fs.path(state), i.home())) {
+            if (state != null && Fs.same(Fs.path(state), i.home())) {
                 shell.add(t.id());
             }
         }
@@ -199,10 +198,5 @@ final class JsonOut {
             case Path p -> f.textNode(p.toAbsolutePath().toString());
             default -> f.textNode(value.toString());
         };
-    }
-
-    /** The feature release: 21 for {@code 21.0.9+10}, 8 for {@code 1.8.0_472}, 3 for Maven 3.9.11. */
-    static int major(Tool tool, Version v) {
-        return tool.storeTool() == Tool.JDK && v.part(0) == 1 ? v.part(1) : v.part(0);
     }
 }
