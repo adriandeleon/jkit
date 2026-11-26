@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
@@ -492,6 +494,37 @@ public final class FoojaySource {
         return pkg.vendor().foojayName().equals("corretto") && pkg.fileName().matches("amazon-corretto-[0-9]+-.*");
     }
 
+    /**
+     * The version jkit shows and installs a build under: foojay's java_version, except for Mandrel.
+     * foojay gives every Mandrel build of a feature release the bare feature number ("21" for each
+     * Mandrel 23.1.x, "25" for each 25.0.x), which would make them one build: Mandrel's own release
+     * goes after a + ("21+23.1.5"). That keeps the feature release first, where jkit looks for it,
+     * so graalvm@21 still matches, and sorts the builds as build numbers do: an install made under
+     * the bare number ("21") is the oldest of them, and jkit upgrade offers the newest.
+     */
+    static String version(String distribution, String javaVersion, String distributionVersion) {
+        if (distribution.equals("mandrel") && javaVersion.matches("[0-9]{1,3}") && !distributionVersion.isEmpty()
+                && !distributionVersion.contains("+")) {
+            return javaVersion + "+" + distributionVersion;
+        }
+        return javaVersion;
+    }
+
+    private static final Pattern CORRETTO_FILE = Pattern.compile("amazon-corretto-([0-9]+(?:\\.[0-9]+)*)[-_].*");
+
+    /**
+     * The vendor's own number for a build, which tells respins of one version apart: foojay's
+     * distribution_version, or for Corretto the version its file is named for, since foojay gives
+     * both 11.0.20.8.1 and 11.0.20.9.1 the distribution_version 11.0.20. "0" when there is none.
+     */
+    static String respin(String distribution, String fileName, String distributionVersion) {
+        Matcher m = CORRETTO_FILE.matcher(fileName);
+        if (distribution.equals("corretto") && m.matches()) {
+            return m.group(1);
+        }
+        return distributionVersion.isEmpty() ? "0" : distributionVersion;
+    }
+
     private List<Pkg> packages(Platform platform, String extra, boolean fx) throws IOException {
         String query = "packages?operating_system=" + platform.os()
                 + "&architecture=" + platform.arch()
@@ -499,8 +532,10 @@ public final class FoojaySource {
                 + "&javafx_bundled=" + fx + "&" + extra;
         JsonNode root = Json.fetch(http, base.resolve(query));
         String preferred = platform.isWindows() ? "zip" : "tar.gz";
-        // one package per vendor + version, preferring the platform's usual archive type
+        // one package per vendor + version: the vendor's newest respin of it (see below), in the
+        // platform's usual archive type when there is a choice
         Map<String, Pkg> byKey = new LinkedHashMap<>();
+        Map<String, Version> respin = new HashMap<>();
         for (JsonNode n : root.path("result")) {
             if (platform.isLinux() && !Json.text(n, "lib_c_type").equals(platform.libc())) {
                 continue;
@@ -511,23 +546,33 @@ public final class FoojaySource {
             if (n.path("javafx_bundled").asBoolean() != fx) {
                 continue;
             }
-            if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))
+            String distribution = Json.text(n, "distribution");
+            String own = Json.text(n, "distribution_version");
+            own = Version.isSafeText(own) && Version.looksLikeVersion(own) ? own : "";
+            String version = version(distribution, Json.text(n, "java_version"), own);
+            if (!Version.isSafeText(version) || !Vendor.isSafeName(distribution)
                     || !Json.text(n, "id").matches("[A-Za-z0-9_-]{1,128}")
                     || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+%-]{0,199}")
                     || !Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
                 continue; // not text jkit can use as a folder name
             }
-            Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),
-                    n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
+            Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(distribution),
+                    n.path("major_version").asInt(), Version.parse(version),
                     Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"),
                     !n.path("directly_downloadable").isBoolean() || n.path("directly_downloadable").asBoolean());
             if (pkg.vendor().isRetired() || latestCorretto(pkg)) {
                 continue;
             }
+            // Corretto, Zulu, Liberica and others list a respin under the version it rebuilds
+            // (Corretto 11.0.20.8.1 and 11.0.20.9.1 are both 11.0.20): take the newest by the
+            // vendor's own number, not whichever foojay happens to list first
             String key = pkg.vendor().foojayName() + "|" + pkg.version().raw();
             Pkg existing = byKey.get(key);
-            if (existing == null || (!existing.archiveType().equals(preferred) && pkg.archiveType().equals(preferred))) {
+            Version number = Version.parse(respin(distribution, pkg.fileName(), own));
+            int newer = existing == null ? 1 : number.compareTo(respin.get(key));
+            if (newer > 0 || newer == 0 && !existing.archiveType().equals(preferred) && pkg.archiveType().equals(preferred)) {
                 byKey.put(key, pkg);
+                respin.put(key, number);
             }
         }
         return new ArrayList<>(byKey.values());

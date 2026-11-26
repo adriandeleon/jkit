@@ -213,6 +213,57 @@ class SourcesTest {
                         .doesNotContain("JKIT_SOURCES_FOOJAY_URL"));
     }
 
+    /** A build as foojay lists it, with its distribution_version and file name. */
+    private static String build(String id, String dist, int major, String version, String own, String file) {
+        return pkg(id, dist, major, version, "glibc", "").replace("\"" + id + ".tar.gz\"", "\"" + file + "\"")
+                .replace("\"feature\"", "\"distribution_version\":\"" + own + "\",\"feature\"");
+    }
+
+    @Test
+    void aRespinOfAVersionIsTheVendorsNewestNotWhicheverIsListedFirst() throws IOException {
+        // foojay lists both Corretto 11.0.20 builds as 11.0.20, distribution_version included;
+        // only the file name says which is the respin
+        String older = build("c8", "corretto", 11, "11.0.20", "11.0.20", "amazon-corretto-11.0.20.8.1-linux-x64.tar.gz");
+        String newer = build("c9", "corretto", 11, "11.0.20", "11.0.20", "amazon-corretto-11.0.20.9.1-linux-x64.tar.gz");
+        String zulu15 = build("z15", "zulu", 21, "21.0.11+10", "21.50.15", "zulu21.50.15-ca-jdk21.0.11-linux_x64.tar.gz");
+        String zulu19 = build("z19", "zulu", 21, "21.0.11+10", "21.50.19", "zulu21.50.19-ca-jdk21.0.11-linux_x64.tar.gz");
+        for (List<String> order : List.of(List.of(older, newer, zulu15, zulu19), List.of(newer, older, zulu19, zulu15))) {
+            FoojaySource foojay = new FoojaySource(fake(Map.of("latest=available",
+                    "{\"result\":[" + String.join(",", order) + "]}")), FoojaySource.DEFAULT_BASE);
+            assertThat(foojay.newestPerVendorAndMajor(Platform.LINUX_X64, false)).extracting(Pkg::id)
+                    .containsExactlyInAnyOrder("c9", "z19");
+        }
+        assertThat(FoojaySource.respin("corretto", "amazon-corretto-8.242.08.1-linux-x64.tar.gz", "8.0.242"))
+                .isEqualTo("8.242.08.1");
+        assertThat(FoojaySource.respin("zulu", "zulu21.50.19-ca-jdk21.0.11-linux_x64.tar.gz", "21.50.19"))
+                .isEqualTo("21.50.19");
+    }
+
+    @Test
+    void mandrelBuildsOfOneFeatureReleaseAreToldApartByMandrelsOwnRelease() throws IOException {
+        // foojay gives every Mandrel build for Java 21 the java_version "21"
+        String builds = "{\"result\":[" + String.join(",",
+                build("m3", "mandrel", 21, "21", "23.1.3", "mandrel-java21-linux-amd64-23.1.3.0-Final.tar.gz"),
+                build("m5", "mandrel", 21, "21", "23.1.5", "mandrel-java21-linux-amd64-23.1.5.0-Final.tar.gz"),
+                build("m4", "mandrel", 21, "21", "23.1.4", "mandrel-java21-linux-amd64-23.1.4.0-Final.tar.gz")) + "]}";
+        String info = info("https://github.com/graalvm/mandrel/releases/download/mandrel-23.1.5.0-Final/"
+                + "mandrel-java21-linux-amd64-23.1.5.0-Final.tar.gz", "");
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", builds, "ids/m5", info)),
+                FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.builds(21, Vendor.of("mandrel"), Platform.LINUX_X64, false, false))
+                .extracting(p -> p.version().raw()).containsExactly("21+23.1.5", "21+23.1.4", "21+23.1.3");
+        Artifact a = foojay.resolve(Tool.GRAALVM, "21", Vendor.of("mandrel"), Platform.LINUX_X64, false, false);
+        assertThat(a.version().raw()).isEqualTo("21+23.1.5");
+        assertThat(a.signature()).isNull(); // Mandrel isn't signed: no release-file check either
+        // an install made when all of them were "21" is older than each, so upgrade offers the newest
+        assertThat(Version.parse("21")).isLessThan(Version.parse("21+23.1.3"));
+        assertThat(Version.parse("21+23.1.5").matches("21+23.1.5")).isTrue();
+        assertThat(Version.parse("21+23.1.5").matches("21+23.1.4")).isFalse();
+        // others keep foojay's java_version
+        assertThat(FoojaySource.version("temurin", "21", "21.0.0")).isEqualTo("21");
+        assertThat(FoojaySource.version("mandrel", "21", "")).isEqualTo("21");
+    }
+
     @Test
     void correttosCatchAllLatestEntriesAreSkipped() throws IOException {
         // foojay's "8" entry links corretto.aws/downloads/latest/..., whatever build is newest that day
