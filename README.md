@@ -13,6 +13,11 @@
 Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
 globally. One native binary, no JDK needed to run it.
 
+jkit is developed with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding
+agent: much of its code, tests and docs are written with it, and commits it helped write say so
+(`Co-Authored-By: Claude`). Every change goes through the same checks: unit tests on Linux, macOS
+and Windows, native builds, and signed, attested releases.
+
 Website: <https://jkit-project.dev>
 
 ## Quickstart
