@@ -291,6 +291,19 @@ class PinSyncTest {
     }
 
     @Test
+    void useGlobalForTheGlobalAlreadyChangesNothing() throws Exception {
+        UseCommand use = new UseCommand();
+        use.spec = ToolSpec.parse("maven@3.9.11");
+        use.global = true;
+        use.json.json = true;
+        assertThat(use.run(ctx())).isZero();
+        assertThat(errors()).startsWith("the global maven is already 3.9.11, unchanged\n").doesNotContain("link ");
+        JsonNode doc = new ObjectMapper().readTree(output());
+        assertThat(doc.path("changed").asBoolean()).isFalse();
+        assertThat(doc.path("changes")).isEmpty();
+    }
+
+    @Test
     void resetGlobalJsonReportsTheLinkItRemoved() throws Exception {
         ResetCommand reset = new ResetCommand();
         reset.tool = Tool.MAVEN;

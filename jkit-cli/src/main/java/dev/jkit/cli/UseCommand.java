@@ -1,5 +1,6 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
@@ -42,23 +43,34 @@ final class UseCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = Context.local();
+        return run(Context.local());
+    }
+
+    int run(Context ctx) throws Exception {
         spec = Resolve.lts(ctx, spec, vendorText, fx);
         Vendor vendor = Resolve.vendor(ctx, spec, vendorText);
         Installed chosen = Resolve.installed(ctx, spec, vendor, vendorText, fx).getFirst();
         Tool tool = spec.tool();
         if (global) {
-            Resolve.pointGlobal(ctx, ctx.home.global(tool), chosen.home());
-            Changes changes = new Changes(ctx).link(ctx.home.global(tool), chosen.home()).globalEffect(tool);
+            Path link = ctx.home.global(tool);
+            Path target = ctx.os.readLink(link);
+            boolean already = target != null && Fs.same(target, chosen.home());
+            Changes changes = new Changes(ctx);
+            if (!already) {
+                Resolve.pointGlobal(ctx, link, chosen.home());
+                changes.link(link, chosen.home());
+            }
+            changes.globalEffect(tool);
             PinnedTool pin = projectPin(ctx, tool);
             if (pin != null) {
                 changes.note(projectFile(ctx, tool) + " here pins " + StatusCommand.pinText(pin)
                         + ", which wins over the global " + tool + " in this project");
             }
             PrintStream say = json.json ? ctx.err : ctx.out;
-            say.println("global " + tool + " → " + chosen.label());
+            say.println(already ? "the global " + tool + " is already " + chosen.label() + ", unchanged"
+                    : "global " + tool + " → " + chosen.label());
             changes.print(say);
-            printJson(ctx, "global", chosen, changes);
+            printJson(ctx, "global", chosen, changes, !already);
             return 0;
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
@@ -82,7 +94,7 @@ final class UseCommand implements Callable<Integer> {
         PrintStream say = json.json ? ctx.err : ctx.out;
         say.println("using " + tool + " " + chosen.label() + " in this shell");
         report.print(say);
-        printJson(ctx, "shell", chosen, report);
+        printJson(ctx, "shell", chosen, report, true);
         return 0;
     }
 
@@ -103,8 +115,12 @@ final class UseCommand implements Callable<Integer> {
         }
     }
 
-    /** {@code {schemaVersion, scope: global|shell, tool, installed: {…}, changes: […], notes: […]}}. */
-    private void printJson(Context ctx, String scope, Installed chosen, Changes changes) throws Exception {
+    /**
+     * {@code {schemaVersion, scope: global|shell, tool, installed: {…}, changed, changes: […], notes: […]}};
+     * {@code changed} is false when the global already was that install.
+     */
+    private void printJson(Context ctx, String scope, Installed chosen, Changes changes, boolean changed)
+            throws Exception {
         if (!json.json) {
             return;
         }
@@ -112,6 +128,7 @@ final class UseCommand implements Callable<Integer> {
         doc.put("scope", scope);
         doc.put("tool", spec.tool().id());
         doc.put("installed", JsonOut.installed(ctx, chosen));
+        doc.put("changed", changed);
         doc.put("changes", changes.json());
         doc.put("notes", changes.notes());
         ctx.out.println(JsonOut.write(doc));
