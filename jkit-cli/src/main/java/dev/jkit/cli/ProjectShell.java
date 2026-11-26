@@ -132,7 +132,8 @@ final class ProjectShell {
         }
         writeEnvFile(ctx, envFile, plan.changes());
         report.env(plan.changes());
-        if (plan.applies() && !ctx.config.autoSwitch()) {
+        // not in a shell whose hook can't switch on cd: turning auto_switch on there only adds a warning
+        if (plan.applies() && !ctx.config.autoSwitch() && Changes.shellWithoutAutoSwitch(ctx) == null) {
             report.note("to switch to a project's versions on cd: add auto_switch = true under [shell] in "
                     + Changes.tilde(ctx.home.config().toString()) + ", then open a new shell");
         }

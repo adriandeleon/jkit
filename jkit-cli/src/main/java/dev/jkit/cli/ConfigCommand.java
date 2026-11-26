@@ -327,7 +327,13 @@ final class ConfigCommand implements Callable<Integer> {
                     + "; installed JDKs and the global default are unchanged");
             case GRAALVM_VENDOR -> report.note("graalvm@… without a vendor now means " + now.graalvmVendor()
                     + "; installed builds and the global default are unchanged");
-            case AUTO_SWITCH -> report.note(now.autoSwitch()
+            case AUTO_SWITCH -> report.note(Changes.shellWithoutAutoSwitch(ctx) instanceof String shell
+                    ? (now.autoSwitch()
+                            ? shell + " doesn't switch on cd yet, so this changes nothing in it (its hook warns"
+                                    + " about it); jkit sync applies a project's versions there. bash, zsh and fish"
+                                    + " switch on cd"
+                            : shell + " doesn't switch on cd yet, so this changes nothing in it")
+                    : now.autoSwitch()
                     ? "new shells switch to a project's versions on cd (with the hook: " + Changes.HOOK_SETUP
                             + "); this shell doesn't until you open a new one"
                     : "new shells no longer switch on cd; this shell still does until you open a new one");

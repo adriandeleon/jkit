@@ -122,6 +122,22 @@ final class Changes {
             ? "add to your PowerShell $PROFILE: jkit hook pwsh | Out-String | Invoke-Expression"
             : "jkit hook --install";
 
+    /**
+     * The shell jkit runs in, by name for messages, when its hook can't switch on cd yet
+     * (shell.auto_switch); null when it can, or when the shell isn't known. Without a hook, a
+     * Windows shell counts as PowerShell, the only hook jkit has there.
+     */
+    static String shellWithoutAutoSwitch(Context ctx) {
+        String shell = ctx.env.get("JKIT_SHELL");
+        if (shell == null || shell.isBlank()) {
+            shell = ctx.platform.isWindows() ? "pwsh" : null;
+        }
+        if (shell == null || ctx.os.autoSwitchHook(shell) != null) {
+            return null;
+        }
+        return shell.equals("pwsh") ? "PowerShell" : shell;
+    }
+
     /** A project file or shell startup file this command wrote (pin, unpin, hook --install). */
     Changes file(Path file, boolean created) {
         changes.add(new Change("file", file.toAbsolutePath().toString(), created ? "create" : "update", null));
