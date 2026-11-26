@@ -97,8 +97,8 @@ class SelfUpdateTest {
         assertThat(SelfUpdate.Kind.RPM.command(r, Platform.LINUX_X64)).isEqualTo(
                 "sudo dnf install https://github.com/adriandeleon/jkit/releases/download/v0.4.0/jkit-0.4.0-1.x86_64.rpm");
         assertThat(SelfUpdate.Kind.DEB_FILE.command(r, Platform.LINUX_AARCH64)).isEqualTo(
-                "curl -fLo /tmp/jkit_0.4.0_arm64.deb https://github.com/adriandeleon/jkit/releases/download/v0.4.0/"
-                        + "jkit_0.4.0_arm64.deb && sudo apt install /tmp/jkit_0.4.0_arm64.deb");
+                "d=$(mktemp -d) && curl -fLo \"$d/jkit_0.4.0_arm64.deb\" https://github.com/adriandeleon/jkit/releases/"
+                        + "download/v0.4.0/jkit_0.4.0_arm64.deb && sudo apt install \"$d/jkit_0.4.0_arm64.deb\"");
         assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64)).isNull();
         // a pre-release's package names, as GitHub publishes them
         SelfUpdate.Release rc = new SelfUpdate.Release(dev.jkit.model.Version.parse("0.4.0-rc.1"), "x", "0".repeat(64));
