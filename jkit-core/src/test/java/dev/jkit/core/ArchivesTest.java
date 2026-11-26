@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.JkitException;
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -389,6 +390,39 @@ class ArchivesTest {
         }
         assertThatThrownBy(() -> Archives.extract(archive, tmp.resolve("out"), "zip", 10))
                 .isInstanceOf(JkitException.class).hasMessageContaining("more than 10 entries");
+    }
+
+    @Test
+    void entriesThatCollideAreTheArchivesFault() throws IOException {
+        // a file, then a folder of the same name
+        Path fileThenFolder = tmp.resolve("a.tar.gz");
+        try (OutputStream raw = Files.newOutputStream(fileThenFolder);
+             TarArchiveOutputStream tar = new TarArchiveOutputStream(new GzipCompressorOutputStream(raw))) {
+            file(tar, "jdk/f", "x", 0644);
+            file(tar, "jdk/f/g", "y", 0644);
+        }
+        assertThatThrownBy(() -> Archives.extract(fileThenFolder, tmp.resolve("a"), "tar.gz"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("unsafe to unpack")
+                .hasMessageContaining("entries in it collide: jdk" + java.io.File.separator + "f");
+        // a file where a folder with something in it was unpacked, in a zip and in a tar.gz
+        Path folderThenFile = tmp.resolve("b.zip");
+        try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(folderThenFile)) {
+            for (String name : new String[] {"mvn/lib/x.jar", "mvn/lib"}) {
+                zip.putArchiveEntry(new ZipArchiveEntry(name));
+                zip.write(1);
+                zip.closeArchiveEntry();
+            }
+        }
+        assertThatThrownBy(() -> Archives.extract(folderThenFile, tmp.resolve("b"), "zip"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("entries in it collide: mvn/lib");
+        Path tarFolderThenFile = tmp.resolve("c.tar.gz");
+        try (OutputStream raw = Files.newOutputStream(tarFolderThenFile);
+             TarArchiveOutputStream tar = new TarArchiveOutputStream(new GzipCompressorOutputStream(raw))) {
+            file(tar, "jdk/lib/modules", "x", 0644);
+            file(tar, "jdk/lib", "y", 0644);
+        }
+        assertThatThrownBy(() -> Archives.extract(tarFolderThenFile, tmp.resolve("c"), "tar.gz"))
+                .isInstanceOf(JkitException.class).hasMessageContaining("entries in it collide: jdk/lib");
     }
 
     @Test

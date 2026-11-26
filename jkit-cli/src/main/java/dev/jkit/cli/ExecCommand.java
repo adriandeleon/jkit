@@ -5,6 +5,7 @@ import dev.jkit.core.Installed;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Platform;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
@@ -177,7 +178,7 @@ final class ExecCommand implements Callable<Integer> {
         if (name.contains("/") || name.contains(File.separator)) {
             return name;
         }
-        boolean windows = File.separatorChar == '\\';
+        boolean windows = Platform.hostIsWindows();
         // Windows: mvn.cmd before mvn, the Unix script next to it that CreateProcess can't start
         List<String> suffixes = windows ? List.of(".exe", ".cmd", ".bat", "") : List.of("");
         for (String raw : path.split(File.pathSeparator)) {
@@ -254,7 +255,7 @@ final class ExecCommand implements Callable<Integer> {
         }
         // Ctrl-C ended it: so it ends jkit, or a bash script running jkit exec would carry on (bash
         // stops only when the command it waited for died from SIGINT, not when it exited 130)
-        boolean windows = File.separatorChar == '\\';
+        boolean windows = Platform.hostIsWindows();
         if ("INT".equals(Signals.endedBy(code, windows)) && !Signals.gotInt()) {
             Thread.sleep(50); // the same Ctrl-C may still be on its way to jkit's handler
         }

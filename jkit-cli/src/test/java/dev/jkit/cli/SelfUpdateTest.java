@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.sun.net.httpserver.HttpServer;
 import dev.jkit.core.Signatures;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +19,10 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Stream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
@@ -33,6 +38,8 @@ class SelfUpdateTest {
     HttpServer server;
     /** What the mirror serves as SHA256SUMS.asc (null: a 404); the test's check takes "good" as a good signature. */
     String signature = "good";
+    /** Run by the mirror before it serves the release archive, while self-update downloads it. */
+    volatile Runnable duringDownload;
     Map<String, String> env;
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     final ByteArrayOutputStream json = new ByteArrayOutputStream();
@@ -47,6 +54,9 @@ class SelfUpdateTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", ex -> {
             String path = ex.getRequestURI().getPath();
+            if (path.equals("/download/v9.9.9/" + archiveName) && duringDownload != null) {
+                duringDownload.run();
+            }
             byte[] body = path.equals("/latest/download/SHA256SUMS") ? sums.getBytes(StandardCharsets.UTF_8)
                     : path.equals("/download/v9.9.9/SHA256SUMS.asc")
                             ? (signature == null ? null : signature.getBytes(StandardCharsets.UTF_8))
@@ -107,6 +117,40 @@ class SelfUpdateTest {
         assertThat(said).contains("updated jkit 0.3.0 → 9.9.9").contains("updated");
         assertThat(Files.readString(binary)).contains("jkit 9.9.9");
         assertThat(run(binary, "9.9.9", false, false)).contains("jkit 9.9.9 is the newest release");
+    }
+
+    @Test
+    void downloadsWithoutTheInstallLockInAFolderItHolds() throws Exception {
+        Path binary = binary("bin");
+        List<String> seen = new CopyOnWriteArrayList<>();
+        duringDownload = () -> {
+            try {
+                // another jkit's install or prune can take the lock meanwhile
+                Thread other = new Thread(() -> {
+                    try (AutoCloseable lock = Context.forEnvOnline(env, new PrintStream(OutputStream.nullOutputStream()))
+                            .store.lock()) {
+                        seen.add("locked");
+                    } catch (Exception e) {
+                        seen.add(e.toString());
+                    }
+                });
+                other.start();
+                other.join(10_000);
+                // and finds the download's folder in use, not a leftover to delete
+                try (Stream<Path> work = Files.list(tmp.resolve(".jkit/tmp"))) {
+                    work.forEach(p -> seen.add(p.getFileName().toString().replaceAll("\\d+$", "")
+                            + " " + WorkDirs.use(p)));
+                }
+            } catch (Exception e) {
+                seen.add(e.toString());
+            }
+        };
+        run(binary, "0.3.0", false, false);
+        assertThat(seen).containsExactly("locked", "install-self- IN_USE");
+        assertThat(Files.readString(binary)).contains("jkit 9.9.9");
+        try (Stream<Path> left = Files.list(tmp.resolve(".jkit/tmp"))) {
+            assertThat(left).isEmpty();
+        }
     }
 
     @Test

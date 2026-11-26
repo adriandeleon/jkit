@@ -3,15 +3,15 @@ package dev.jkit.cli;
 import dev.jkit.cli.DoctorCommand.Finding;
 import dev.jkit.cli.DoctorCommand.Level;
 import dev.jkit.core.ToolStates;
+import dev.jkit.model.Platform;
 import dev.jkit.model.ShellQuote;
-import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /** What a check sees, where it writes its findings, and how it shows paths in them. */
 final class DoctorReport {
-    static final boolean WINDOWS = File.separatorChar == '\\';
+    static final boolean WINDOWS = Platform.hostIsWindows();
 
     final Context ctx;
     final Path cwd;

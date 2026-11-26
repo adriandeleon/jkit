@@ -163,10 +163,14 @@ public final class Archives {
                     if (budget.bytes < 0) {
                         throw unsafe("it unpacks to more than " + (MAX_UNPACKED >> 30) + " GB");
                     }
-                    Files.copy(source, out, StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                    try {
+                        Files.copy(source, out, StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                    } catch (DirectoryNotEmptyException e) {
+                        throw collide(entry.getName());
+                    }
                 } else {
                     createDirectories(target, out.getParent());
-                    Files.deleteIfExists(out);
+                    clear(out, entry.getName());
                     budget.copy(tar, out);
                     setMode(out, entry.getMode());
                 }
@@ -185,7 +189,7 @@ public final class Archives {
                     symlink(target, out, linkTarget(zip, entry), entry.getName());
                 } else {
                     createDirectories(target, out.getParent());
-                    Files.deleteIfExists(out);
+                    clear(out, entry.getName());
                     try (InputStream in = zip.getInputStream(entry)) {
                         budget.copy(in, out);
                     }
@@ -263,11 +267,30 @@ public final class Archives {
                     Files.createDirectory(p);
                 } catch (FileAlreadyExistsException e) {
                     if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
-                        throw e;
+                        // a file an earlier entry unpacked (jdk/f, then jdk/f/g), or one whose name
+                        // differs only in case on a file system that ignores case
+                        throw collide(target.relativize(p).toString());
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Deletes what an earlier entry unpacked at {@code out}, so a later entry of the same name
+     * wins, as tar does; refuses when that is a folder with something in it.
+     */
+    private static void clear(Path out, String entryName) throws IOException {
+        try {
+            Files.deleteIfExists(out);
+        } catch (DirectoryNotEmptyException e) {
+            throw collide(entryName);
+        }
+    }
+
+    /** Two entries that can't both be unpacked: a file where a folder goes, or the other way round. */
+    private static JkitException collide(String name) {
+        return unsafe("entries in it collide: " + Visible.of(name));
     }
 
     /** Refuses a path below {@code target} with a symlink anywhere on the way (the path itself included). */

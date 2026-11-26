@@ -367,6 +367,37 @@ class HttpTest {
     }
 
     @Test
+    void aCacheThatCantBeWrittenDoesNotFailTheLookup() throws Exception {
+        URI uri = URI.create("https://api.foojay.io/z");
+        Clock clock = Clock.fixed(Instant.parse("2026-11-21T12:00:00Z"), ZoneOffset.UTC);
+        List<String> warnings = new ArrayList<>();
+        CachingHttp.Listener listener = new CachingHttp.Listener() {
+            @Override
+            public void notStored(String message) {
+                warnings.add(message);
+            }
+        };
+        // the cache folder can't be made: a file is in the way
+        Path blocked = Files.writeString(tmp.resolve("blocked"), "x");
+        assertThat(new CachingHttp(answering("{\"result\":[1]}", false), blocked, Duration.ofHours(24), clock,
+                false, false, listener).get(uri)).isEqualTo("{\"result\":[1]}");
+        assertThat(warnings).singleElement().asString().startsWith("couldn't save the answer from api.foojay.io")
+                .endsWith("the next lookup asks again");
+
+        // the answer can't be moved into place (a folder where its file goes): no temp file is left
+        Path dir = Files.createDirectories(tmp.resolve("index"));
+        CachingHttp cache = new CachingHttp(answering("{\"result\":[2]}", false), dir, Duration.ofHours(24), clock,
+                false, false, listener);
+        Path first = Files.createDirectories(dir.resolve(CachingHttp.key(uri) + ".cache"));
+        Files.createDirectories(first.resolve("in-the-way"));
+        assertThat(cache.get(uri)).isEqualTo("{\"result\":[2]}");
+        assertThat(warnings).hasSize(2);
+        try (var files = Files.list(dir)) {
+            assertThat(files.toList()).containsExactly(first);
+        }
+    }
+
+    @Test
     void cacheRefusesHtmlAndFallsBackToAnOldCopyWhenOffline() throws Exception {
         URI uri = URI.create("https://api.foojay.io/x");
         Instant now = Instant.parse("2026-11-21T12:00:00Z");

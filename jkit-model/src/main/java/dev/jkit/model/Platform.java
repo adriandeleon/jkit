@@ -1,5 +1,6 @@
 package dev.jkit.model;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -38,6 +39,14 @@ public enum Platform {
     public boolean isWindows() { return os.equals("windows"); }
 
     public boolean isLinux() { return os.equals("linux"); }
+
+    /**
+     * Whether this jkit runs on Windows: what the file system and processes here behave like.
+     * Unlike {@link #current()}, it never fails and looks at no files.
+     */
+    public static boolean hostIsWindows() {
+        return File.separatorChar == '\\';
+    }
 
     public static Platform current() {
         Platform p = of(System.getProperty("os.name"), System.getProperty("os.arch"));

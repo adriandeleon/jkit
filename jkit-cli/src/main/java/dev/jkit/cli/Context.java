@@ -112,6 +112,16 @@ final class Context {
                         public void stale(String message) {
                             System.err.println("warning: " + message);
                         }
+
+                        private boolean warned;
+
+                        @Override
+                        public void notStored(String message) {
+                            if (!warned) { // once: a command may make several lookups
+                                warned = true;
+                                System.err.println("warning: " + message);
+                            }
+                        }
                     });
         }
         return http;

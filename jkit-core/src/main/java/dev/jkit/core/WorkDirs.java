@@ -46,7 +46,7 @@ public final class WorkDirs {
 
     private WorkDirs() { }
 
-    /** A folder another lock already keeps others from deleting (self-update holds the install lock). */
+    /** A folder another lock already keeps others from deleting (an install's copy next to tools/, under the install lock). */
     public static void add(Path dir) {
         ACTIVE.put(key(dir), Optional.empty());
     }
