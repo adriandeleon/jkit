@@ -1,0 +1,50 @@
+name: Bug report
+description: Something jkit does wrong, or says wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security issue, don't open an issue: see [SECURITY.md](https://github.com/adriandeleon/jkit/blob/main/SECURITY.md).
+        Please check that jkit is up to date first (`jkit self-update --check`).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what it printed, and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: jkit --version
+      placeholder: jkit 0.4.0
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: jkit doctor
+      description: The output of `jkit doctor`. Take out anything you'd rather not share, such as user names in paths.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: OS and shell
+      placeholder: Ubuntu 24.04, bash 5.2 / macOS 15, zsh / Windows 11, PowerShell 7.5
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How jkit was installed
+      options:
+        - Homebrew
+        - apt (Vitrina repository)
+        - .deb file
+        - .rpm file
+        - winget
+        - .tar.gz or .zip
+        - built from source

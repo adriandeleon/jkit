@@ -223,7 +223,7 @@ with `packaging/third-party-notices.sh` (CI runs it with `--check`).
 | `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
 | `jkit-cli` | picocli commands and the native binary |
 
-Design notes for contributors are in [docs/design/](docs/design/).
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); design notes are in [docs/design/](docs/design/).
 
 ## License
 
