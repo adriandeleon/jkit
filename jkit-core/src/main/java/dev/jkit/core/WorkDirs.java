@@ -2,6 +2,7 @@ package dev.jkit.core;
 
 import dev.jkit.model.Perms;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
@@ -9,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,14 @@ public final class WorkDirs {
 
     /** Each folder in use, with the lock on its {@value #LOCK} file when {@link #create} made it. */
     private static final Map<Path, Optional<FileChannel>> ACTIVE = new ConcurrentHashMap<>();
+
+    /** Folders whose install is in tools/ already: deleted on Ctrl-C all the same, but not reported. */
+    private static final Set<Path> DONE = ConcurrentHashMap.newKeySet();
+
+    /** Held by {@link #moveIn} and {@link #deleteAll}, so an install never moves while Ctrl-C deletes. */
+    private static final Object MOVING = new Object();
+
+    private static volatile boolean interrupted;
 
     private WorkDirs() { }
 
@@ -60,6 +71,7 @@ public final class WorkDirs {
 
     /** The folder is done with (deleted, or about to be by this process): lets go of its lock. */
     public static void remove(Path dir) {
+        DONE.remove(key(dir));
         Optional<FileChannel> channel = ACTIVE.remove(key(dir));
         if (channel != null) { // null once Ctrl-C's deleteAll took it
             channel.ifPresent(WorkDirs::close);
@@ -72,42 +84,147 @@ public final class WorkDirs {
      * from before {@link #create} finished, which happens under the install lock.
      */
     public static boolean inUse(Path dir) {
+        return use(dir) != Use.FREE;
+    }
+
+    /** What {@link #use} can tell of a folder in tmp/. */
+    public enum Use {
+        /** No running jkit holds it: left over. */
+        FREE,
+        /** This jkit or another running one works in it. */
+        IN_USE,
+        /**
+         * jkit can't lock its {@value #LOCK} file (a file system without locks, such as some NFS
+         * mounts): left alone, as in use, but doctor and prune name it, with its age.
+         */
+        UNKNOWN
+    }
+
+    /**
+     * How old a folder {@link Use#UNKNOWN} must be to be called probably left over: an install
+     * gives up on a download after three hours, so one a day old isn't running any more.
+     */
+    public static final Duration STALE = Duration.ofDays(1);
+
+    /** How long ago {@code dir} last changed; zero when that can't be read. */
+    public static Duration age(Path dir, Instant now) {
+        try {
+            Duration age = Duration.between(Files.getLastModifiedTime(dir, LinkOption.NOFOLLOW_LINKS).toInstant(), now);
+            return age.isNegative() ? Duration.ZERO : age;
+        } catch (IOException e) {
+            return Duration.ZERO;
+        }
+    }
+
+    /** {@link #inUse}, telling a folder it can't decide about apart. */
+    public static Use use(Path dir) {
         if (ACTIVE.containsKey(key(dir))) {
             // never opened here: on Unix, closing any channel to the file would drop this process's lock
-            return true;
+            return Use.IN_USE;
         }
         Path lock = dir.resolve(LOCK);
         if (!Files.isRegularFile(lock, LinkOption.NOFOLLOW_LINKS)) {
-            return false;
+            return Use.FREE;
         }
         try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE)) {
             FileLock held = channel.tryLock();
             if (held == null) {
-                return true;
+                return Use.IN_USE;
             }
             held.release();
-            return false;
-        } catch (OverlappingFileLockException | IOException e) {
-            return true; // can't tell: leave it, doctor reports it
+            return Use.FREE;
+        } catch (OverlappingFileLockException e) {
+            return Use.IN_USE; // this process holds it
+        } catch (IOException e) {
+            return Use.UNKNOWN;
         }
     }
 
-    /** Deletes every folder still in use, as far as it can; returns the ones it deleted. */
-    public static List<Path> deleteAll() {
-        List<Path> deleted = new ArrayList<>();
-        for (Path dir : List.copyOf(ACTIVE.keySet())) {
-            Optional<FileChannel> channel = ACTIVE.remove(dir);
-            if (channel != null) {
-                channel.ifPresent(WorkDirs::close); // first: Windows doesn't delete an open file
+    /**
+     * Ctrl-C or a signal is ending jkit, from its handler, before {@link #deleteAll}: from then on
+     * no install moves into tools/ ({@link #moveIn}), and jkit's main thread leaves ending the
+     * process to the handler ({@link #interrupted}).
+     */
+    public static void interrupt() {
+        interrupted = true;
+    }
+
+    /** Whether {@link #interrupt} was called: jkit is being ended by a signal. */
+    public static boolean interrupted() {
+        return interrupted;
+    }
+
+    /** An install's move into tools/: a rename, quick. */
+    @FunctionalInterface
+    public interface Move {
+        void run() throws IOException;
+    }
+
+    /**
+     * Runs {@code move}, which moves an install into tools/ from {@code moved} (a folder in a work
+     * folder, or a copy next to tools/); then the folders they are in hold nothing a Ctrl-C needs
+     * to report. Not once jkit is being interrupted, and never while {@link #deleteAll} runs:
+     * deleting the folder halfway through a move would leave a partial install with its marker in
+     * tools/, after saying nothing was installed.
+     */
+    public static void moveIn(Move move, Path... moved) throws IOException {
+        synchronized (MOVING) {
+            if (interrupted) {
+                throw new InterruptedIOException("interrupted");
             }
-            try {
-                Fs.deleteRecursively(dir);
-                deleted.add(dir);
-            } catch (IOException | RuntimeException e) {
-                // the next install or jkit prune clears what's left
+            move.run();
+            for (Path from : moved) {
+                for (Path dir : ACTIVE.keySet()) {
+                    if (key(from).startsWith(dir)) {
+                        DONE.add(dir);
+                    }
+                }
             }
         }
-        return deleted;
+    }
+
+    /**
+     * Deletes every folder still in use, as far as it can, after any move into tools/ under way;
+     * returns the ones it deleted, not counting those whose install was moved into tools/.
+     */
+    public static List<Path> deleteAll() {
+        synchronized (MOVING) {
+            List<Path> deleted = new ArrayList<>();
+            for (Path dir : List.copyOf(ACTIVE.keySet())) {
+                Optional<FileChannel> channel = ACTIVE.remove(dir);
+                if (channel != null) {
+                    channel.ifPresent(WorkDirs::close); // first: Windows doesn't delete an open file
+                }
+                if (delete(dir) && !DONE.remove(dir)) {
+                    deleted.add(dir);
+                }
+            }
+            return deleted;
+        }
+    }
+
+    /**
+     * Deletes {@code dir}, trying again for a moment: the install may still be unpacking into a
+     * part of it not deleted yet, until its next file finds its folder gone (or it sees it is
+     * {@link #interrupted}), and a folder that gains a file while it is deleted isn't empty.
+     */
+    private static boolean delete(Path dir) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Fs.deleteRecursively(dir);
+                return true;
+            } catch (IOException | RuntimeException e) {
+                if (attempt >= 20) {
+                    return false; // the next install or jkit prune clears what's left
+                }
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
     }
 
     private static Path key(Path dir) {

@@ -125,8 +125,21 @@ final class DoctorInstallChecks {
             for (Path p : left) {
                 bytes += size(p);
             }
+            // prune deletes what an interrupted install or removal left, not a folder one running uses
+            List<Path> other = left.stream().filter(p -> !PruneCommand.workFolder(p.getFileName().toString())).toList();
             r.warn(human(bytes) + " left in " + r.tilde(tmp) + " by interrupted downloads",
-                    "when no jkit install is running: " + r.removeAll(r.arg(tmp) + File.separator + "*")); // the * outside any quotes
+                    "delete it: jkit prune (which also removes builds a newer one replaced; --dry-run shows what)"
+                    + (other.isEmpty() ? "" : "; the rest: " + r.removeAll(String.join(" ", other.stream().map(r::arg).toList()))));
+        }
+        Instant now = Instant.now();
+        for (Path p : PruneCommand.unclear(r.ctx, now)) {
+            any = true;
+            Duration age = WorkDirs.age(p, now);
+            if (PruneCommand.stale(age)) {
+                r.warn(PruneCommand.unclearLine(p, age), "when no jkit is running: " + r.removeAll(r.arg(p)));
+            } else {
+                r.info(PruneCommand.unclearLine(p, age));
+            }
         }
         if (!any) {
             r.ok(installs + (installs == 1 ? " install" : " installs") + ", nothing left over");

@@ -108,6 +108,7 @@ public final class Main implements Runnable {
             }
             code = 1;
         }
+        Signals.awaitHandler();
         System.exit(code);
     }
 
@@ -135,6 +136,9 @@ public final class Main implements Runnable {
     private static void cleanUpOnSignals() {
         for (String name : List.of("INT", "TERM", "HUP")) {
             List<Signals.Saved> saved = Signals.handle(() -> {
+                // first: the main thread, which may fail now that its folder goes, then leaves
+                // the message and the exit code to this handler (Signals.awaitHandler)
+                WorkDirs.interrupt();
                 List<Path> deleted = WorkDirs.deleteAll();
                 if (!deleted.isEmpty()) {
                     System.err.println();
@@ -178,6 +182,7 @@ public final class Main implements Runnable {
         // no colors: SafeOutput would print picocli's escape codes as text, and plain help reads fine
         cli.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
+            Signals.awaitHandler(); // an error that Ctrl-C caused (its folder deleted) isn't one to show
             if (System.getenv("JKIT_DEBUG") != null) {
                 ex.printStackTrace();
             }

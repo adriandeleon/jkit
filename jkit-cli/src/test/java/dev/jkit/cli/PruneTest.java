@@ -207,6 +207,34 @@ class PruneTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aWorkFolderJkitCantTellIsInUseIsNamedWithItsAgeAndKept() throws Exception {
+        assumeTrue(!"root".equals(System.getProperty("user.name")));
+        // its lock file can't be locked (as on a file system without locks): maybe a running install
+        Path tmpDir = Files.createDirectories(home.resolve("tmp"));
+        Path old = Files.createDirectories(tmpDir.resolve("install-1"));
+        Path young = Files.createDirectories(tmpDir.resolve("install-2"));
+        for (Path p : java.util.List.of(old, young)) {
+            Files.setPosixFilePermissions(Files.createFile(p.resolve(".lock")), PosixFilePermissions.fromString("r--r--r--"));
+        }
+        Files.setLastModifiedTime(old, FileTime.from(now.minus(Duration.ofDays(3))));
+        Files.setLastModifiedTime(young, FileTime.from(now.minus(Duration.ofMinutes(20))));
+        assertThat(WorkDirs.use(old)).isEqualTo(WorkDirs.Use.UNKNOWN);
+        assertThat(WorkDirs.inUse(old)).isTrue();
+        prune(false);
+        assertThat(output())
+                .contains("left " + old + " (3 days old): jkit can't tell whether an install is using it (this file"
+                        + " system keeps no locks); probably left over: when no jkit is running, rm -rf " + old)
+                .contains("left " + young + " (20 min old): jkit can't tell whether an install is using it (this file"
+                        + " system keeps no locks)\n")
+                .contains("nothing to prune");
+        assertThat(old).isDirectory();
+        assertThat(young).isDirectory();
+        assertThat(PruneCommand.ago(Duration.ofHours(5))).isEqualTo("5 h");
+        assertThat(PruneCommand.ago(Duration.ofDays(1))).isEqualTo("1 day");
+    }
+
+    @Test
     void aBuildThatCantBeRemovedDoesntStopTheRest() throws Exception {
         assumeTrue(FileSystems.getDefault()
                 .supportedFileAttributeViews().contains("posix") && !"root".equals(System.getProperty("user.name")));

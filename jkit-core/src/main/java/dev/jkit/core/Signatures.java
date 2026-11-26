@@ -187,6 +187,21 @@ public final class Signatures {
         InputStream open() throws IOException;
     }
 
+    /**
+     * What can be told of {@code signature} without the file it is over: null when a key jkit has
+     * for {@code tool} or {@code vendor} made it and it is of a kind jkit accepts, so checking the
+     * file decides; otherwise why it can't be checked (never GOOD or BAD). An install asks this
+     * before it downloads, so a signature it would refuse anyway doesn't cost the whole download.
+     */
+    public static Result precheck(byte[] signature, Tool tool, Vendor vendor) throws IOException {
+        Key key = key(tool, vendor);
+        if (key == null) {
+            throw new IllegalArgumentException("no key for " + tool + " " + vendor);
+        }
+        return verify((Data) null, signature, key, ring(key));
+    }
+
+    /** With {@code data} null, stops where the file would be read and returns null ({@link #precheck}). */
     static Result verify(Data data, byte[] signature, Key key, PGPPublicKeyRingCollection ring) throws IOException {
         if (signature.length > MAX_SIGNATURE) {
             return new Result(Outcome.UNREADABLE, null, "the signature file is " + signature.length + " bytes");
@@ -222,6 +237,9 @@ public final class Signatures {
             }
             if (signer.hasRevocation() || primary.hasRevocation()) {
                 return new Result(Outcome.UNKNOWN_KEY, null, whose + " is revoked");
+            }
+            if (data == null) {
+                return null;
             }
             try {
                 sig.init(new BcPGPContentVerifierBuilderProvider(), signer);

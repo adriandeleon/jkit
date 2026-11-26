@@ -17,6 +17,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class SourcesTest {
@@ -54,7 +56,7 @@ class SourcesTest {
             pkg("d", "temurin", 21, "21.0.14+1", "glibc", "\"crac\"")) + "]}";
 
     private static final String INFO = """
-            {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"abc123",
+            {"result":[{"direct_download_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz","checksum":"abc123",
             "checksum_type":"sha256","checksum_uri":""}]}""";
 
     @Test
@@ -63,17 +65,25 @@ class SourcesTest {
                 FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
         assertThat(a.version().raw()).isEqualTo("21.0.13+9");
-        assertThat(a.url()).hasToString("https://github.com/adoptium/t/b.tar.gz");
+        assertThat(a.url()).hasToString("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz");
         assertThat(a.checksumAlgorithm()).isEqualTo("sha256");
         assertThat(a.checksum()).isEqualTo("abc123");
         // none listed, but Temurin signs every 21 build: jkit takes the .sig next to the download
-        assertThat(a.signature()).hasToString("https://github.com/adoptium/t/b.tar.gz.sig");
+        assertThat(a.signature()).hasToString("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz.sig");
     }
 
     /** What install finds for one build of {@code vendor} whose foojay answer is {@code info}. */
     private static Artifact one(String vendor, String version, String info) throws IOException {
-        String builds = "{\"result\":[" + pkg("b", vendor, Version.parse(version).part(0), version, "glibc", "") + "]}";
-        return new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info)), FoojaySource.DEFAULT_BASE)
+        return one(FoojaySource.DEFAULT_BASE, vendor, version, info);
+    }
+
+    /** The same, through the foojay at {@code base}. */
+    private static Artifact one(URI base, String vendor, String version, String info) throws IOException {
+        // listed under the download's own file name, as foojay lists them
+        Matcher link = Pattern.compile("\"direct_download_uri\":\"[^\"?#]*/([A-Za-z0-9][^\"/?#]*)[\"?#]").matcher(info);
+        String builds = "{\"result\":[" + pkg("b", vendor, Version.parse(version).part(0), version, "glibc", "")
+                .replace("\"b.tar.gz\"", "\"" + (link.find() ? link.group(1) : "b.tar.gz") + "\"") + "]}";
+        return new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info)), base)
                 .resolve(Tool.JDK, version, Vendor.of(vendor), Platform.LINUX_X64, false, false);
     }
 
@@ -103,12 +113,13 @@ class SourcesTest {
                 .hasToString(temurin + ".sig");
         // a link with no file name to add .sig to, or one that names it in a query, has no
         // signature jkit can find: refused, rather than installed on foojay's checksum
-        for (String odd : new String[] {"https://github.com/adoptium/t/b.tar.gz?x=1", "https://github.com/adoptium/t/",
+        for (String odd : new String[] {"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz?x=1",
+                "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/",
                 "https://aka.ms/download-jdk/?file=microsoft-jdk-21.0.13.1-linux-x64.tar.gz"}) {
             String vendor = odd.contains("aka.ms") ? "microsoft" : "temurin";
             assertThatThrownBy(() -> one(vendor, vendor.equals("temurin") ? "21.0.13+9" : "21.0.13.1", info(odd, "")))
                     .as(odd).isInstanceOf(JkitException.class)
-                    .hasMessageContaining("where jkit can't find its signature; refusing it");
+                    .hasMessageContaining("refusing it");
         }
         assertThat(FoojaySource.nextTo(URI.create("https://aka.ms"))).isNull();
         assertThat(FoojaySource.nextTo(URI.create("https://aka.ms/a/b.zip"))).hasToString("https://aka.ms/a/b.zip.sig");
@@ -118,18 +129,43 @@ class SourcesTest {
     void aSigningVendorsDownloadMustBeOnThatVendorsServer() throws IOException {
         // every build foojay lists for them is there; a foojay that points one elsewhere is refused,
         // so a Temurin build from before Adoptium signed still comes from Adoptium
+        String releases = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/";
+        assertThat(one("temurin", "17.0.3+7", info(releases + "b.tar.gz", "")).url()).hasToString(releases + "b.tar.gz");
         for (String elsewhere : new String[] {"https://example.invalid/b.tar.gz",
-                "https://github.com/someone/temurin21-binaries/b.tar.gz", "https://github.com/adoptium/../x/b.tar.gz",
-                "https://github.com/adoptium/%2e%2e/x/b.tar.gz", "https://github.com:8443/adoptium/t/b.tar.gz",
-                "https://x@github.com/adoptium/t/b.tar.gz", "https://github.com.example.invalid/adoptium/t/b.tar.gz"}) {
+                "https://github.com/someone/temurin17-binaries/releases/download/jdk-17.0.3%2B7/b.tar.gz",
+                "https://github.com/adoptium/../x/b.tar.gz", "https://github.com/adoptium/%2e%2e/x/b.tar.gz",
+                "https://github.com:8443/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/b.tar.gz",
+                "https://x@github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/b.tar.gz",
+                "https://github.com.example.invalid/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/b.tar.gz",
+                // github.com serves a fork's commits from the original repository's path too
+                "https://github.com/adoptium/temurin17-binaries/archive/0123456789abcdef0123456789abcdef01234567.tar.gz",
+                "https://github.com/adoptium/jdk17u/archive/b.tar.gz",
+                "https://github.com/adoptium/temurin17-binaries/raw/main/b.tar.gz",
+                "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/x/b.tar.gz",
+                releases + "b.tar.gz#x"}) {
             assertThatThrownBy(() -> one("temurin", "17.0.3+7", info(elsewhere, "")))
                     .as(elsewhere).isInstanceOf(JkitException.class)
-                    .hasMessageContaining("not Adoptium's GitHub releases (github.com/adoptium/); refusing it");
+                    .hasMessageContaining("not on Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/"
+                            + "releases/); refusing it");
         }
+        // the file must be the build's own: a release asset of another name is another file
+        String listed = "{\"result\":[" + pkg("b", "temurin", 17, "17.0.3+7", "glibc", "") + "]}";
+        assertThatThrownBy(() -> new FoojaySource(fake(Map.of("jdk_version=", listed, "ids/b", info(releases + "c.tar.gz", ""))),
+                FoojaySource.DEFAULT_BASE).resolve(Tool.JDK, "17", Vendor.of("temurin"), Platform.LINUX_X64, false, false))
+                .hasMessageContaining("refusing it");
         assertThatThrownBy(() -> one("microsoft", "21.0.13.1", info("https://example.invalid/m.tar.gz", "")))
-                .isInstanceOf(JkitException.class).hasMessageContaining("at example.invalid, not aka.ms");
-        assertThatThrownBy(() -> one("corretto", "21.0.13.1+2", info("https://corretto.aws.example.invalid/c.tar.gz", "")))
-                .isInstanceOf(JkitException.class).hasMessageContaining("not corretto.aws");
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("at https://example.invalid/m.tar.gz, not on aka.ms/download-jdk/");
+        assertThatThrownBy(() -> one("microsoft", "21.0.13.1", info("https://aka.ms/other/m.tar.gz", "")))
+                .isInstanceOf(JkitException.class).hasMessageContaining("not on aka.ms/download-jdk/");
+        for (String elsewhere : new String[] {"https://corretto.aws.example.invalid/c.tar.gz",
+                "https://corretto.aws/c.tar.gz", "https://corretto.aws/downloads/c.tar.gz",
+                "https://d3pxv6yz143wms.cloudfront.net/a/b/c.tar.gz"}) {
+            assertThatThrownBy(() -> one("corretto", "21.0.13.1+2", info(elsewhere, "")))
+                    .as(elsewhere).isInstanceOf(JkitException.class).hasMessageContaining("not on corretto.aws");
+        }
+        String corretto = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz";
+        assertThat(one("corretto", "21.0.13.1+2", info(corretto, "")).url()).hasToString(corretto);
         String cloudfront = "https://d3pxv6yz143wms.cloudfront.net/8.232.09.1/amazon-corretto-8.232.09.1-linux-x64.tar.gz";
         assertThat(one("corretto", "8.0.232+9", info(cloudfront, "")).url()).hasToString(cloudfront);
         // search asks too, and says the same
@@ -143,6 +179,89 @@ class SourcesTest {
         assertThat(new FoojaySource(fake(Map.of("jdk_version=", builds, "ids/b", info("http://127.0.0.1:9/b.tar.gz", ""))),
                 URI.create("http://127.0.0.1:9/disco/")).resolve(Tool.JDK, "21", Vendor.of("temurin"),
                 Platform.LINUX_X64, false, false).url()).hasToString("http://127.0.0.1:9/b.tar.gz");
+    }
+
+    @Test
+    void aFoojayMirrorMayServeTheBuildsAVendorSignedButNotTheOthers() throws IOException {
+        // a company's own foojay, which rehosts the files: a signed build is checked by its
+        // signature, next to the mirror's copy, and its version, wherever it comes from
+        URI mirror = URI.create("https://foojay.corp.example/disco/v3.0");
+        String temurin = "https://files.corp.example/jdk/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz";
+        assertThat(one(mirror, "temurin", "21.0.13+9", info(temurin, "")).signature()).hasToString(temurin + ".sig");
+        String microsoft = "https://files.corp.example/jdk/microsoft-jdk-21.0.13.1-linux-x64.tar.gz";
+        assertThat(one(mirror, "microsoft", "21.0.13.1", info(microsoft, "")).signature()).hasToString(microsoft + ".sig");
+        String corretto = "https://files.corp.example/jdk/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz";
+        assertThat(one(mirror, "corretto", "21.0.13.1+2", info(corretto, "")).signature()).hasToString(corretto + ".sig");
+        // a Temurin build from before Adoptium signed has only the mirror's checksum: Adoptium's links only
+        String old = "https://files.corp.example/jdk/OpenJDK17U-jdk_x64_linux_hotspot_17.0.3_7.tar.gz";
+        assertThatThrownBy(() -> one(mirror, "temurin", "17.0.3+7", info(old, "")))
+                .isInstanceOf(JkitException.class)
+                .hasMessageContaining("foojay.corp.example lists the download of temurin 17.0.3+7 at " + old)
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .contains("your foojay mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links"));
+        String adoptium = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.3%2B7/"
+                + "OpenJDK17U-jdk_x64_linux_hotspot_17.0.3_7.tar.gz";
+        assertThat(one(mirror, "temurin", "17.0.3+7", info(adoptium, "")).url()).hasToString(adoptium);
+        // a signed build still needs a .sig jkit can find
+        assertThatThrownBy(() -> one(mirror, "temurin", "21.0.13+9", info("https://files.corp.example/get?id=1", "")))
+                .hasMessageContaining("where jkit can't find its signature")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .contains("JKIT_SOURCES_FOOJAY_URL"));
+        // the default foojay keeps every build of these vendors on the vendor's server
+        assertThatThrownBy(() -> one("temurin", "21.0.13+9", info(temurin, ""))).hasMessageContaining("refusing it")
+                .satisfies(e -> assertThat(((JkitException) e).hints()).singleElement().asString()
+                        .doesNotContain("JKIT_SOURCES_FOOJAY_URL"));
+    }
+
+    /** A build as foojay lists it, with its distribution_version and file name. */
+    private static String build(String id, String dist, int major, String version, String own, String file) {
+        return pkg(id, dist, major, version, "glibc", "").replace("\"" + id + ".tar.gz\"", "\"" + file + "\"")
+                .replace("\"feature\"", "\"distribution_version\":\"" + own + "\",\"feature\"");
+    }
+
+    @Test
+    void aRespinOfAVersionIsTheVendorsNewestNotWhicheverIsListedFirst() throws IOException {
+        // foojay lists both Corretto 11.0.20 builds as 11.0.20, distribution_version included;
+        // only the file name says which is the respin
+        String older = build("c8", "corretto", 11, "11.0.20", "11.0.20", "amazon-corretto-11.0.20.8.1-linux-x64.tar.gz");
+        String newer = build("c9", "corretto", 11, "11.0.20", "11.0.20", "amazon-corretto-11.0.20.9.1-linux-x64.tar.gz");
+        String zulu15 = build("z15", "zulu", 21, "21.0.11+10", "21.50.15", "zulu21.50.15-ca-jdk21.0.11-linux_x64.tar.gz");
+        String zulu19 = build("z19", "zulu", 21, "21.0.11+10", "21.50.19", "zulu21.50.19-ca-jdk21.0.11-linux_x64.tar.gz");
+        for (List<String> order : List.of(List.of(older, newer, zulu15, zulu19), List.of(newer, older, zulu19, zulu15))) {
+            FoojaySource foojay = new FoojaySource(fake(Map.of("latest=available",
+                    "{\"result\":[" + String.join(",", order) + "]}")), FoojaySource.DEFAULT_BASE);
+            assertThat(foojay.newestPerVendorAndMajor(Platform.LINUX_X64, false)).extracting(Pkg::id)
+                    .containsExactlyInAnyOrder("c9", "z19");
+        }
+        assertThat(FoojaySource.respin("corretto", "amazon-corretto-8.242.08.1-linux-x64.tar.gz", "8.0.242"))
+                .isEqualTo("8.242.08.1");
+        assertThat(FoojaySource.respin("zulu", "zulu21.50.19-ca-jdk21.0.11-linux_x64.tar.gz", "21.50.19"))
+                .isEqualTo("21.50.19");
+    }
+
+    @Test
+    void mandrelBuildsOfOneFeatureReleaseAreToldApartByMandrelsOwnRelease() throws IOException {
+        // foojay gives every Mandrel build for Java 21 the java_version "21"
+        String builds = "{\"result\":[" + String.join(",",
+                build("m3", "mandrel", 21, "21", "23.1.3", "mandrel-java21-linux-amd64-23.1.3.0-Final.tar.gz"),
+                build("m5", "mandrel", 21, "21", "23.1.5", "mandrel-java21-linux-amd64-23.1.5.0-Final.tar.gz"),
+                build("m4", "mandrel", 21, "21", "23.1.4", "mandrel-java21-linux-amd64-23.1.4.0-Final.tar.gz")) + "]}";
+        String info = info("https://github.com/graalvm/mandrel/releases/download/mandrel-23.1.5.0-Final/"
+                + "mandrel-java21-linux-amd64-23.1.5.0-Final.tar.gz", "");
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", builds, "ids/m5", info)),
+                FoojaySource.DEFAULT_BASE);
+        assertThat(foojay.builds(21, Vendor.of("mandrel"), Platform.LINUX_X64, false, false))
+                .extracting(p -> p.version().raw()).containsExactly("21+23.1.5", "21+23.1.4", "21+23.1.3");
+        Artifact a = foojay.resolve(Tool.GRAALVM, "21", Vendor.of("mandrel"), Platform.LINUX_X64, false, false);
+        assertThat(a.version().raw()).isEqualTo("21+23.1.5");
+        assertThat(a.signature()).isNull(); // Mandrel isn't signed: no release-file check either
+        // an install made when all of them were "21" is older than each, so upgrade offers the newest
+        assertThat(Version.parse("21")).isLessThan(Version.parse("21+23.1.3"));
+        assertThat(Version.parse("21+23.1.5").matches("21+23.1.5")).isTrue();
+        assertThat(Version.parse("21+23.1.5").matches("21+23.1.4")).isFalse();
+        // others keep foojay's java_version
+        assertThat(FoojaySource.version("temurin", "21", "21.0.0")).isEqualTo("21");
+        assertThat(FoojaySource.version("mandrel", "21", "")).isEqualTo("21");
     }
 
     @Test
@@ -218,7 +337,7 @@ class SourcesTest {
 
     @Test
     void muslPlatformResolvesMuslBuilds() throws IOException {
-        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/c", INFO)),
+        FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/c", INFO.replace("b.tar.gz", "c.tar.gz"))),
                 FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64_MUSL, false, false);
         assertThat(a.version().raw()).isEqualTo("21.0.13+9");
@@ -321,8 +440,8 @@ class SourcesTest {
         String sha512 = "c".repeat(128);
         String md5 = "d".repeat(32);
         String jetbrains = """
-                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
-                "checksum_type":"sha256","checksum_uri":"https://github.com/adoptium/t/b.tar.gz.checksum"}]}""";
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz","checksum":"",
+                "checksum_type":"sha256","checksum_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz.checksum"}]}""";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", jetbrains,
                 "b.tar.gz.checksum", sha512 + " *b.tar.gz\n")), FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
@@ -369,7 +488,7 @@ class SourcesTest {
     @Test
     void checksumOverPlainHttpIsRefused() {
         String info = """
-                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz","checksum":"",
                 "checksum_type":"sha256","checksum_uri":"http://example.invalid/b.sha256"}]}""";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", info,
                 "b.sha256", "f".repeat(64))), FoojaySource.DEFAULT_BASE);
@@ -381,7 +500,7 @@ class SourcesTest {
     @Test
     void skipsBuildsWithoutDirectDownload() throws IOException {
         String none = "{\"result\":[{\"direct_download_uri\":\"\"}]}";
-        String older = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/t/a.tar.gz\",\"checksum\":\"\"}]}";
+        String older = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/a.tar.gz\",\"checksum\":\"\"}]}";
         FoojaySource foojay = new FoojaySource(fake(Map.of("jdk_version=21", BUILDS, "ids/b", none, "ids/a", older)),
                 FoojaySource.DEFAULT_BASE);
         Artifact a = foojay.resolve(Tool.JDK, "21", Vendor.of("temurin"), Platform.LINUX_X64, false, false);
@@ -426,17 +545,17 @@ class SourcesTest {
         assertThat(a.checksum()).isTrue();
         // a checksum file counts too, unread: install fetches it
         String file = """
-                {"result":[{"direct_download_uri":"https://github.com/adoptium/t/b.tar.gz","checksum":"",
-                "checksum_uri":"https://github.com/adoptium/t/b.tar.gz.sha256.txt"}]}""";
+                {"result":[{"direct_download_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz","checksum":"",
+                "checksum_uri":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz.sha256.txt"}]}""";
         assertThat(new FoojaySource(fake(Map.of("ids/b", file)), FoojaySource.DEFAULT_BASE).availability(b).checksum())
                 .isTrue();
         // no checksum at all
-        String bare = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/t/b.tar.gz\",\"checksum\":\"\"}]}";
+        String bare = "{\"result\":[{\"direct_download_uri\":\"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz\",\"checksum\":\"\"}]}";
         a = new FoojaySource(fake(Map.of("ids/b", bare)), FoojaySource.DEFAULT_BASE).availability(b);
         assertThat(a.downloadable()).isTrue();
         assertThat(a.checksum()).isFalse();
         // but Temurin signs every 21 build: install checks that instead
-        assertThat(a.signature()).hasToString("https://github.com/adoptium/t/b.tar.gz.sig");
+        assertThat(a.signature()).hasToString("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/b.tar.gz.sig");
         // a Corretto download has its .sig
         String corretto = """
                 {"result":[{"direct_download_uri":"https://corretto.aws/downloads/resources/21.0.13.9.1/b.tar.gz",

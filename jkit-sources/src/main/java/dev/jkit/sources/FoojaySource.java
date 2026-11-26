@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /** JDK builds from the foojay Disco API (https://api.foojay.io/disco/v3.0). */
@@ -33,6 +35,9 @@ public final class FoojaySource {
     static final int MAX_LOOKUPS = 32;
 
     public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
+
+    /** Amazon's old CloudFront host, which still serves its 2019 Corretto builds, and only those. */
+    static final String CORRETTO_2019_HOST = "d3pxv6yz143wms.cloudfront.net";
 
     /**
      * One JDK package for one platform.
@@ -63,7 +68,7 @@ public final class FoojaySource {
          */
         public boolean retiredKey() {
             return pkg != null && signature != null && pkg.vendor().foojayName().equals("corretto")
-                    && "d3pxv6yz143wms.cloudfront.net".equalsIgnoreCase(signature.getHost());
+                    && CORRETTO_2019_HOST.equalsIgnoreCase(signature.getHost());
         }
     }
 
@@ -129,7 +134,9 @@ public final class FoojaySource {
             if (next == null) {
                 throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " " + pkg.version()
                         + " as " + Visible.of(download.toString()) + ", where jkit can't find its signature; refusing it",
-                        "try again later, or pick another vendor");
+                        base.equals(DEFAULT_BASE) ? "try again later, or pick another vendor"
+                                : "your foojay mirror (JKIT_SOURCES_FOOJAY_URL) must link each file by its path,"
+                                        + " with its .sig next to it; or pick another vendor");
             }
             return next;
         }
@@ -179,31 +186,44 @@ public final class FoojaySource {
 
     /**
      * Whether {@code download} is where {@code vendor} publishes its builds, for the vendors jkit
-     * has keys for: Adoptium's GitHub releases, aka.ms, and corretto.aws (with Amazon's older
+     * has keys for, in the exact shape of the vendor's links, ending in the build's own file name:
+     * a release asset of one of Adoptium's temurin&lt;N&gt;-binaries repositories, aka.ms/download-jdk/,
+     * and corretto.aws/downloads/resources/&lt;version&gt;/ (or &lt;version&gt;/ on Amazon's older
      * CloudFront host, which still serves its 2019 builds). That is every build foojay lists for
-     * them. Only the address foojay names is checked: from there the vendor's own server redirects
+     * them. The host alone isn't enough: github.com serves any commit of a fork from the original
+     * repository's path (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
+     * <p>
+     * Only the address foojay names is checked: from there the vendor's own server redirects
      * (aka.ms to download.visualstudio.microsoft.com, GitHub to its release-assets host), which
      * foojay doesn't decide, and Http checks each hop stays https.
      */
-    static boolean onVendorHost(String vendor, URI download) {
+    static boolean onVendorHost(String vendor, URI download, String fileName) {
         String host = download.getHost() == null ? "" : download.getHost().toLowerCase(Locale.ROOT);
         String path = download.getRawPath() == null ? "" : download.getRawPath();
-        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null
-                && !path.contains("..") && !path.toLowerCase(Locale.ROOT).contains("%2e");
-        return plain && switch (vendor) {
-            case "temurin" -> host.equals("github.com") && path.startsWith("/adoptium/");
-            case "microsoft" -> host.equals("aka.ms");
-            case "corretto" -> host.equals("corretto.aws") || host.equals("d3pxv6yz143wms.cloudfront.net");
-            default -> true;
+        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null && download.getRawQuery() == null
+                && download.getRawFragment() == null && !path.contains("..")
+                && !path.toLowerCase(Locale.ROOT).contains("%2e");
+        int slash = path.lastIndexOf('/');
+        if (!plain || slash < 0 || !path.substring(slash + 1).equals(fileName)) {
+            return false;
+        }
+        String folder = path.substring(0, slash);
+        return switch (vendor) {
+            case "temurin" -> host.equals("github.com")
+                    && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries/releases/download/[^/]+");
+            case "microsoft" -> host.equals("aka.ms") && folder.equals("/download-jdk");
+            case "corretto" -> host.equals("corretto.aws") && folder.matches("/downloads/resources/[^/]+")
+                    || host.equals(CORRETTO_2019_HOST) && folder.matches("/[^/]+");
+            default -> false; // only asked for the vendors above
         };
     }
 
-    /** "Adoptium's GitHub releases": where {@link #onVendorHost} expects the vendor's downloads. */
+    /** Where {@link #onVendorHost} expects the vendor's downloads, for a message. */
     private static String vendorHost(String vendor) {
         return switch (vendor) {
-            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/)";
-            case "microsoft" -> "aka.ms";
-            default -> "corretto.aws";
+            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/releases/)";
+            case "microsoft" -> "aka.ms/download-jdk/";
+            default -> "corretto.aws/downloads/resources/";
         };
     }
 
@@ -212,8 +232,13 @@ public final class FoojaySource {
      * keys for it must be on that vendor's own server ({@link #onVendorHost}), or the build is
      * refused: a signature by the vendor's key is checked wherever the file comes from, but a
      * Temurin build from before Adoptium signed has only its checksum, which comes from foojay,
-     * and this keeps the file itself coming from Adoptium. A local mirror on this machine
-     * ({@code JKIT_SOURCES_FOOJAY_URL=http://localhost...}) is yours, and may serve the files itself.
+     * and this keeps the file itself coming from Adoptium.
+     * <p>
+     * A foojay mirror of your own ({@code JKIT_SOURCES_FOOJAY_URL}) may serve the builds the
+     * vendor signed itself, with their .sig next to them: the signature, which install then
+     * requires, and the version check after it are what make those safe, not the host. Only the
+     * builds without a signature must keep the vendor's links. A mirror on this machine
+     * ({@code http://localhost...}) may serve those too.
      */
     private URI download(JsonNode info, Pkg pkg) {
         String url = Json.text(info, "direct_download_uri");
@@ -225,12 +250,16 @@ public final class FoojaySource {
         if (vendor.equals("corretto") && download.getRawPath() != null && download.getRawPath().contains("/latest/")) {
             return null; // what packages() skips, should a list name it otherwise
         }
-        if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
-                && !onVendorHost(vendor, download)) {
+        boolean mirror = !base.equals(DEFAULT_BASE);
+        boolean pinned = SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
+                && (!mirror || !vendorSigns(pkg.vendor(), pkg.version()));
+        if (pinned && !onVendorHost(vendor, download, pkg.fileName())) {
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
-                    + pkg.version() + " at " + Visible.of(String.valueOf(download.getHost())) + ", not "
-                    + vendorHost(vendor) + "; refusing it",
-                    "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
+                    + pkg.version() + " at " + Visible.of(download.toString()) + ", not on "
+                    + vendorHost(vendor) + "; refusing it", mirror
+                    ? "jkit downloads " + pkg.vendor() + " builds the vendor didn't sign only from there: your foojay"
+                            + " mirror (JKIT_SOURCES_FOOJAY_URL) must keep their links, or pick another version or vendor"
+                    : "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
         }
         return download;
     }
@@ -465,6 +494,37 @@ public final class FoojaySource {
         return pkg.vendor().foojayName().equals("corretto") && pkg.fileName().matches("amazon-corretto-[0-9]+-.*");
     }
 
+    /**
+     * The version jkit shows and installs a build under: foojay's java_version, except for Mandrel.
+     * foojay gives every Mandrel build of a feature release the bare feature number ("21" for each
+     * Mandrel 23.1.x, "25" for each 25.0.x), which would make them one build: Mandrel's own release
+     * goes after a + ("21+23.1.5"). That keeps the feature release first, where jkit looks for it,
+     * so graalvm@21 still matches, and sorts the builds as build numbers do: an install made under
+     * the bare number ("21") is the oldest of them, and jkit upgrade offers the newest.
+     */
+    static String version(String distribution, String javaVersion, String distributionVersion) {
+        if (distribution.equals("mandrel") && javaVersion.matches("[0-9]{1,3}") && !distributionVersion.isEmpty()
+                && !distributionVersion.contains("+")) {
+            return javaVersion + "+" + distributionVersion;
+        }
+        return javaVersion;
+    }
+
+    private static final Pattern CORRETTO_FILE = Pattern.compile("amazon-corretto-([0-9]+(?:\\.[0-9]+)*)[-_].*");
+
+    /**
+     * The vendor's own number for a build, which tells respins of one version apart: foojay's
+     * distribution_version, or for Corretto the version its file is named for, since foojay gives
+     * both 11.0.20.8.1 and 11.0.20.9.1 the distribution_version 11.0.20. "0" when there is none.
+     */
+    static String respin(String distribution, String fileName, String distributionVersion) {
+        Matcher m = CORRETTO_FILE.matcher(fileName);
+        if (distribution.equals("corretto") && m.matches()) {
+            return m.group(1);
+        }
+        return distributionVersion.isEmpty() ? "0" : distributionVersion;
+    }
+
     private List<Pkg> packages(Platform platform, String extra, boolean fx) throws IOException {
         String query = "packages?operating_system=" + platform.os()
                 + "&architecture=" + platform.arch()
@@ -472,8 +532,10 @@ public final class FoojaySource {
                 + "&javafx_bundled=" + fx + "&" + extra;
         JsonNode root = Json.fetch(http, base.resolve(query));
         String preferred = platform.isWindows() ? "zip" : "tar.gz";
-        // one package per vendor + version, preferring the platform's usual archive type
+        // one package per vendor + version: the vendor's newest respin of it (see below), in the
+        // platform's usual archive type when there is a choice
         Map<String, Pkg> byKey = new LinkedHashMap<>();
+        Map<String, Version> respin = new HashMap<>();
         for (JsonNode n : root.path("result")) {
             if (platform.isLinux() && !Json.text(n, "lib_c_type").equals(platform.libc())) {
                 continue;
@@ -484,23 +546,33 @@ public final class FoojaySource {
             if (n.path("javafx_bundled").asBoolean() != fx) {
                 continue;
             }
-            if (!Version.isSafeText(Json.text(n, "java_version")) || !Vendor.isSafeName(Json.text(n, "distribution"))
+            String distribution = Json.text(n, "distribution");
+            String own = Json.text(n, "distribution_version");
+            own = Version.isSafeText(own) && Version.looksLikeVersion(own) ? own : "";
+            String version = version(distribution, Json.text(n, "java_version"), own);
+            if (!Version.isSafeText(version) || !Vendor.isSafeName(distribution)
                     || !Json.text(n, "id").matches("[A-Za-z0-9_-]{1,128}")
                     || !Json.text(n, "filename").matches("[A-Za-z0-9][A-Za-z0-9._+%-]{0,199}")
                     || !Set.of("tar.gz", "tgz", "zip").contains(Json.text(n, "archive_type"))) {
                 continue; // not text jkit can use as a folder name
             }
-            Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(Json.text(n, "distribution")),
-                    n.path("major_version").asInt(), Version.parse(Json.text(n, "java_version")),
+            Pkg pkg = new Pkg(Json.text(n, "id"), Vendor.fromFoojay(distribution),
+                    n.path("major_version").asInt(), Version.parse(version),
                     Json.text(n, "filename"), Json.text(n, "archive_type"), Json.text(n, "term_of_support"),
                     !n.path("directly_downloadable").isBoolean() || n.path("directly_downloadable").asBoolean());
             if (pkg.vendor().isRetired() || latestCorretto(pkg)) {
                 continue;
             }
+            // Corretto, Zulu, Liberica and others list a respin under the version it rebuilds
+            // (Corretto 11.0.20.8.1 and 11.0.20.9.1 are both 11.0.20): take the newest by the
+            // vendor's own number, not whichever foojay happens to list first
             String key = pkg.vendor().foojayName() + "|" + pkg.version().raw();
             Pkg existing = byKey.get(key);
-            if (existing == null || (!existing.archiveType().equals(preferred) && pkg.archiveType().equals(preferred))) {
+            Version number = Version.parse(respin(distribution, pkg.fileName(), own));
+            int newer = existing == null ? 1 : number.compareTo(respin.get(key));
+            if (newer > 0 || newer == 0 && !existing.archiveType().equals(preferred) && pkg.archiveType().equals(preferred)) {
                 byKey.put(key, pkg);
+                respin.put(key, number);
             }
         }
         return new ArrayList<>(byKey.values());

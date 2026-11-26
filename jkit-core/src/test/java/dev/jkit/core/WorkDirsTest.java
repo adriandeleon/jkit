@@ -42,6 +42,29 @@ class WorkDirsTest {
         assertThat(interrupted).doesNotExist();
     }
 
+    @Test
+    void anInterruptWaitsForAMoveIntoToolsAndDoesntReportItsFolder() throws Exception {
+        Path work = WorkDirs.create(tmp, "install-");
+        Path out = Files.createDirectories(work.resolve("out").resolve("jdk"));
+        Path tools = Files.createDirectories(tmp.resolve("tools"));
+        java.util.concurrent.CompletableFuture<java.util.List<Path>> deleted = new java.util.concurrent.CompletableFuture<>();
+        WorkDirs.moveIn(() -> {
+            // Ctrl-C meanwhile: its delete waits until the install is in tools/
+            Thread.ofPlatform().start(() -> deleted.complete(WorkDirs.deleteAll()));
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                throw new java.io.InterruptedIOException();
+            }
+            assertThat(deleted).isNotDone();
+            Files.move(out, tools.resolve("jdk"));
+        }, out);
+        // the work folder still goes, but the install is in place: not "nothing was installed"
+        assertThat(deleted.get()).isEmpty();
+        assertThat(work).doesNotExist();
+        assertThat(tools.resolve("jdk")).isDirectory();
+    }
+
     /** Another jkit, downloading: holds a work folder in {@code args[0]}, prints it, waits for stdin to close. */
     public static final class Holder {
         private Holder() { }
