@@ -202,7 +202,8 @@ public final class Store {
         return Boolean.parseBoolean(p.getProperty("verified", "false"));
     }
 
-    static void writeMarker(Path dir, Installed installed, String url, boolean verified) throws IOException {
+    /** Writes the install record that makes {@code dir} an install jkit lists (public for tests that fake installs). */
+    public static void writeMarker(Path dir, Installed installed, String url, boolean verified) throws IOException {
         writeMarker(dir, installed, url, verified, null);
     }
 

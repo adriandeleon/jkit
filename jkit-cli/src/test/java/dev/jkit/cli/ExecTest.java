@@ -46,9 +46,8 @@ class ExecTest {
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
-        Path path = Files.createDirectories(home.resolve("tools").resolve(tool).resolve(dir));
+        Path path = TestInstalls.install(home, tool, dir, properties);
         Files.createDirectories(path.resolve("bin"));
-        Files.writeString(path.resolve("jkit-install.properties"), "tool=" + tool + "\n" + properties + "fx=false\n");
         return path;
     }
 

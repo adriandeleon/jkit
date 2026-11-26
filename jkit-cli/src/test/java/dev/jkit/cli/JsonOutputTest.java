@@ -19,10 +19,7 @@ class JsonOutputTest {
     Path home;
 
     private Path install(String storeDir, String dirName, String properties) throws Exception {
-        Path dir = home.resolve("tools").resolve(storeDir).resolve(dirName);
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve("jkit-install.properties"), properties);
-        return dir;
+        return TestInstalls.install(home, storeDir, dirName, properties);
     }
 
     @Test
