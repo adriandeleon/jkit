@@ -117,14 +117,21 @@ public final class FoojaySource {
      * it out for some Temurin builds that have one, and a compromised foojay could leave it out on
      * purpose, or point the download somewhere else, to have a build installed on its own checksum:
      * the link is next to whatever download foojay names, and a signature from there must still be
-     * by the vendor's key.
+     * by the vendor's key. A download link with no file name to put .sig after is refused: without
+     * a signature such a build would install on foojay's checksum.
      * <p>
      * For other builds, the link foojay lists, https only: a listed link that isn't https is
      * refused for a vendor jkit has keys for, and dropped for others, whose links jkit never fetches.
      */
     static URI signature(JsonNode info, URI download, URI base, Pkg pkg) {
         if (vendorSigns(pkg.vendor(), pkg.version())) {
-            return nextTo(download);
+            URI next = nextTo(download);
+            if (next == null) {
+                throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " " + pkg.version()
+                        + " as " + Visible.of(download.toString()) + ", where jkit can't find its signature; refusing it",
+                        "try again later, or pick another vendor");
+            }
+            return next;
         }
         String sig = Json.text(info, "signature_uri");
         if (sig.isEmpty()) {
@@ -225,11 +232,19 @@ public final class FoojaySource {
         return download;
     }
 
-    /** {@code <download>.sig}: the file name with {@code .sig} added, on the same server. */
+    /**
+     * {@code <download>.sig}: the file name with {@code .sig} added, on the same server. Null when
+     * the link has no file name to add it to (no path, or one ending in /), or a query: the vendors
+     * jkit has keys for link their downloads by path alone, and adding .sig to the path of a link
+     * that names its file in the query asks for something else. A signature is then missing,
+     * which for these vendors refuses the install.
+     */
     static URI nextTo(URI download) {
-        String path = download.getRawPath() == null || download.getRawPath().isEmpty() ? "/" : download.getRawPath();
-        return URI.create(download.getScheme() + "://" + download.getRawAuthority() + path + ".sig"
-                + (download.getRawQuery() == null ? "" : "?" + download.getRawQuery()));
+        String path = download.getRawPath();
+        if (path == null || path.isEmpty() || path.endsWith("/") || download.getRawQuery() != null) {
+            return null;
+        }
+        return URI.create(download.getScheme() + "://" + download.getRawAuthority() + path + ".sig");
     }
 
     /**

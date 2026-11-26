@@ -99,10 +99,19 @@ class SourcesTest {
         }
         // the signature is looked for next to the download, on the vendor's server; a foojay that
         // lists another link, or a plain http one, doesn't change where jkit looks
-        assertThat(one("temurin", "21.0.13+9", info("https://github.com/adoptium/t/b.tar.gz?x=1", "")).signature())
-                .hasToString("https://github.com/adoptium/t/b.tar.gz.sig?x=1");
         assertThat(one("temurin", "21.0.13+9", info(temurin, "http://example.invalid/b.sig")).signature())
                 .hasToString(temurin + ".sig");
+        // a link with no file name to add .sig to, or one that names it in a query, has no
+        // signature jkit can find: refused, rather than installed on foojay's checksum
+        for (String odd : new String[] {"https://github.com/adoptium/t/b.tar.gz?x=1", "https://github.com/adoptium/t/",
+                "https://aka.ms/download-jdk/?file=microsoft-jdk-21.0.13.1-linux-x64.tar.gz"}) {
+            String vendor = odd.contains("aka.ms") ? "microsoft" : "temurin";
+            assertThatThrownBy(() -> one(vendor, vendor.equals("temurin") ? "21.0.13+9" : "21.0.13.1", info(odd, "")))
+                    .as(odd).isInstanceOf(JkitException.class)
+                    .hasMessageContaining("where jkit can't find its signature; refusing it");
+        }
+        assertThat(FoojaySource.nextTo(URI.create("https://aka.ms"))).isNull();
+        assertThat(FoojaySource.nextTo(URI.create("https://aka.ms/a/b.zip"))).hasToString("https://aka.ms/a/b.zip.sig");
     }
 
     @Test
