@@ -33,7 +33,7 @@ final class Fallback extends Charset {
             Map.entry('\u2713', "+"), // ✓
             Map.entry('\u2717', "x"), // ✗
             Map.entry('\u25CB', "o"), // ○
-            Map.entry('\u25CF', "*"), // ●
+            Map.entry('\u25CF', "@"), // ● (search's legend already uses * for the default vendor)
             Map.entry('\u2022', "*"), // •
             Map.entry('\u203E', "~"), // ‾
             Map.entry('\u00B7', "-"), // ·
