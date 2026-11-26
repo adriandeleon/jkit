@@ -32,17 +32,17 @@ __jkit_run() {
   if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi
 }
 jkit() {
-  local __jkit_env __jkit_rc __jkit_int=
+  local __jkit_env __jkit_rc
+  # Ctrl-C ends this function before its rm, so jkit removes the file itself then; a run killed
+  # outright (kill -9) leaves it, and the next run removes it here.
+  [ -n "${__jkit_last_env-}" ] && rm -f "$__jkit_last_env"
   __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
-  # With an INT trap, Ctrl-C ends jkit but not this function, so the file is always removed.
-  # Your own INT trap comes back afterwards: zsh restores it (local_traps), bash from trap -p.
-  if [ -n "${ZSH_VERSION-}" ]; then setopt local_options local_traps; else __jkit_int=$(trap -p INT); fi
-  trap : INT
+  __jkit_last_env=$__jkit_env
   JKIT_ENV_FILE="$__jkit_env" __jkit_run "$@"
   __jkit_rc=$?
-  if [ -n "$__jkit_int" ]; then eval "$__jkit_int"; elif [ -z "${ZSH_VERSION-}" ]; then trap - INT; fi
   # shellcheck source=/dev/null  # the environment changes jkit wrote just now
   [ -s "$__jkit_env" ] && . "$__jkit_env"
   rm -f "$__jkit_env"
+  __jkit_last_env=
   return $__jkit_rc
 }
