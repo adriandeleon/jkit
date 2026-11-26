@@ -32,13 +32,17 @@ public final class Archives {
     /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 1,000 files. */
     static final long MAX_UNPACKED = 3L << 30;
     static final int MAX_ENTRIES = 50_000;
-    /** {@link #MAX_ENTRIES}, lowered by tests. */
-    static int entryLimit = MAX_ENTRIES;
 
     /** What an archive may still unpack. */
     private static final class Budget {
+        final int entryLimit;
         long bytes = MAX_UNPACKED;
-        int entries = entryLimit;
+        int entries;
+
+        Budget(int entryLimit) {
+            this.entryLimit = entryLimit;
+            this.entries = entryLimit;
+        }
 
         void entry() {
             if (--entries < 0) {
@@ -70,16 +74,21 @@ public final class Archives {
     }
 
     public static void extract(Path archive, Path target, String archiveType) throws IOException {
+        extract(archive, target, archiveType, MAX_ENTRIES);
+    }
+
+    /** {@link #extract(Path, Path, String)} with another entry limit: tests don't build 50,000 entries. */
+    static void extract(Path archive, Path target, String archiveType, int entryLimit) throws IOException {
         Files.createDirectories(target);
         Path root = target.toAbsolutePath().normalize();
         switch (archiveType) {
             case "tar.gz", "tgz" -> {
                 ArchiveScan.tarGz(archive, entryLimit, MAX_UNPACKED);
-                extractTarGz(archive, root);
+                extractTarGz(archive, root, new Budget(entryLimit));
             }
             case "zip" -> {
                 ArchiveScan.zip(archive, entryLimit);
-                extractZip(archive, root);
+                extractZip(archive, root, new Budget(entryLimit));
             }
             default -> throw new IOException("unsupported archive type: " + archiveType);
         }
@@ -87,8 +96,9 @@ public final class Archives {
     }
 
     /**
-     * Takes away write access for other users from everything unpacked, folders included: the
-     * archive's modes are already masked, but folders follow the umask, which may be 000.
+     * Takes away write access for the group and other users from everything unpacked, folders
+     * included: the archive's modes are already masked, but folders follow the umask, which may be
+     * 002 or 000.
      */
     private static void closeToOthers(Path root) throws IOException {
         if (!POSIX) {
@@ -100,18 +110,17 @@ public final class Archives {
                     continue;
                 }
                 Set<PosixFilePermission> perms = Files.getPosixFilePermissions(p, LinkOption.NOFOLLOW_LINKS);
-                if (perms.remove(PosixFilePermission.OTHERS_WRITE)) {
+                if (perms.remove(PosixFilePermission.OTHERS_WRITE) | perms.remove(PosixFilePermission.GROUP_WRITE)) {
                     Files.setPosixFilePermissions(p, perms);
                 }
             }
         }
     }
 
-    private static void extractTarGz(Path archive, Path target) throws IOException {
+    private static void extractTarGz(Path archive, Path target, Budget budget) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(archive));
              // every gzip member, as ArchiveScan reads it (bgzip and pigz write several)
              TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw, true))) {
-            Budget budget = new Budget();
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
                 budget.entry();
@@ -149,9 +158,8 @@ public final class Archives {
         }
     }
 
-    private static void extractZip(Path archive, Path target) throws IOException {
+    private static void extractZip(Path archive, Path target, Budget budget) throws IOException {
         try (ZipFile zip = ZipFile.builder().setPath(archive).get()) {
-            Budget budget = new Budget();
             for (ZipArchiveEntry entry : Collections.list(zip.getEntries())) {
                 budget.entry();
                 Path out = safe(target, entry.getName());
@@ -182,7 +190,7 @@ public final class Archives {
         if (linkName == null || linkName.isEmpty()) {
             throw unsafe("archive symlink without a target: " + entryName);
         }
-        Path link = Path.of(linkName);
+        Path link = path(linkName, entryName);
         boolean named = false;
         boolean climbsAfterName = false;
         for (Path part : link) {
@@ -238,18 +246,31 @@ public final class Archives {
     }
 
     private static Path safe(Path target, String name) throws IOException {
-        Path out = target.resolve(name).normalize();
+        Path out = target.resolve(path(name, name)).normalize();
         if (!out.startsWith(target)) {
             throw unsafe("archive entry escapes the target folder: " + name);
         }
         return out;
     }
 
+    /**
+     * An entry name or link target as a path. A name this file system can't hold (a NUL byte, or
+     * on Windows a {@code :} or {@code *}) is the archive's fault, not a jkit bug.
+     */
+    private static Path path(String name, String entryName) {
+        try {
+            return Path.of(name);
+        } catch (java.nio.file.InvalidPathException e) {
+            throw unsafe("an entry name this system can't use: " + dev.jkit.model.Visible.of(entryName));
+        }
+    }
+
     private static void setMode(Path file, int mode) throws IOException {
         if (!POSIX || mode == 0) {
             return;
         }
-        mode &= 0775; // never writable by everyone, whatever the archive says
+        // never writable by anyone but the owner, whatever the archive says: these run from PATH
+        mode &= 0755;
         Set<PosixFilePermission> perms = EnumSet.noneOf(PosixFilePermission.class);
         PosixFilePermission[] order = {
             PosixFilePermission.OTHERS_EXECUTE, PosixFilePermission.OTHERS_WRITE, PosixFilePermission.OTHERS_READ,

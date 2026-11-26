@@ -195,11 +195,21 @@ public final class CachingHttp implements Http {
 
     @Override
     public void download(URI uri, Path target, Progress progress) throws IOException {
+        requireOnline();
+        delegate.download(uri, target, progress);
+    }
+
+    @Override
+    public void download(URI uri, Path target, Progress progress, long max) throws IOException {
+        requireOnline();
+        delegate.download(uri, target, progress, max);
+    }
+
+    private void requireOnline() {
         if (offline) {
             throw new dev.jkit.model.JkitException("--offline, so nothing can be downloaded",
                     "run the command without --offline");
         }
-        delegate.download(uri, target, progress);
     }
 
     private static String key(URI uri) {

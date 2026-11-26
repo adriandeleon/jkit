@@ -59,9 +59,8 @@ public final class Store {
     }
 
     private static Installed read(Tool tool, Path dir, Path marker) {
-        Properties p = new Properties();
         try {
-            p = load(marker);
+            Properties p = load(marker);
             String version = p.getProperty("version", "").trim();
             if (version.isEmpty()) {
                 return null;

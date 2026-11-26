@@ -106,6 +106,12 @@ public final class Installer {
                             + " check; nothing was installed");
                 }
                 String signedBy = signable ? checkSignature(artifact, archive, work, notes, signatureRequired) : null;
+                if (artifact.signature() == null && artifact.checksum() != null
+                        && Signatures.covers(artifact.tool(), artifact.vendor())) {
+                    // Temurin before mid-2022, Maven before 3.9.0: said, so the user knows what was checked
+                    notes.add("note: no signature jkit can check is published for " + artifact.label()
+                            + "; only its checksum was checked");
+                }
                 // a good signature by a built-in key is a stronger check than any checksum; one that
                 // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
                 // whoever can replace the download can usually replace its checksum too
@@ -125,8 +131,11 @@ public final class Installer {
                 Path toolHome = locateHome(out);
                 requireLinksInside(toolHome);
                 requireExecutable(storeTool, toolHome, artifact.label());
-                if (signedBy != null && artifact.checksum() == null && storeTool == Tool.JDK) {
-                    requireReleaseVersion(toolHome, artifact);
+                if (signedBy != null) {
+                    // a signature covers the file, not its name: any build the publisher signed would
+                    // pass, an older one included, and the checksum next to it may come from the same
+                    // server as the download. The unpacked tool must be the version asked for
+                    requireSignedVersion(storeTool, toolHome, artifact);
                 }
                 Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
                 dev.jkit.model.Perms.mkdirs(dest.getParent());
@@ -168,9 +177,9 @@ public final class Installer {
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
-            http.download(artifact.signature(), file, Http.Progress.NONE);
-            bytes = Files.size(file) > Signatures.MAX_SIGNATURE ? new byte[Signatures.MAX_SIGNATURE + 1]
-                    : Files.readAllBytes(file);
+            // stopped at the limit: a signature link that serves a JDK's worth of data isn't read whole
+            http.download(artifact.signature(), file, Http.Progress.NONE, Signatures.MAX_SIGNATURE);
+            bytes = Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
             String why = "couldn't fetch the signature of " + label + " ("
                     + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + ")";
@@ -361,23 +370,37 @@ public final class Installer {
         }
     }
 
+    /** The version check for a signed download of {@code tool}: see {@link #requireReleaseVersion}. */
+    static void requireSignedVersion(Tool tool, Path toolHome, Artifact artifact) {
+        switch (tool) {
+            case JDK, GRAALVM -> requireReleaseVersion(toolHome, artifact);
+            case MAVEN -> requireMavenVersion(toolHome, artifact);
+            case SBT -> requireSbtVersion(toolHome, artifact);
+            case GRADLE -> { } // Gradle publishes no signatures
+        }
+    }
+
     /**
-     * For a JDK checked by its signature alone (Corretto): the publisher's signature covers the
-     * file, not its name, so any build it signed would pass, an older one included. The unpacked
-     * JDK's {@code release} file must report the version jkit asked for. Corretto 8 has no
-     * {@code release} file; its {@code version.txt} says the same thing.
+     * For a signed JDK: the unpacked JDK's {@code release} file must report the version jkit asked
+     * for, every part of it (21.0.13.1 is a fix 21.0.13 lacks; the build number after + isn't in
+     * that file). Corretto 8 has no {@code release} file; its {@code version.txt} says the same thing.
      */
     static void requireReleaseVersion(Path jdkHome, Artifact artifact) {
         String found = ToolStates.releaseVersion(jdkHome);
         String compared = found == null ? null : dev.jkit.model.Version.fromLegacyJava(found);
+        // the parts after the third in version.txt (8.514.01.1) are Corretto's build and revision,
+        // which the version jkit asked for (8.0.514) doesn't have
+        int parts = Integer.MAX_VALUE;
         if (found == null) {
             found = correttoVersionTxt(jdkHome);
             compared = found == null ? null : fromCorrettoEight(found);
+            parts = 3;
         }
         dev.jkit.model.Version wanted = artifact.version();
         dev.jkit.model.Version got = compared == null ? null : dev.jkit.model.Version.parse(compared);
         boolean same = got != null && got.partCount() > 0;
-        for (int i = 0; same && i < 3; i++) {
+        int count = got == null ? 0 : Math.min(parts, Math.max(got.partCount(), wanted.partCount()));
+        for (int i = 0; same && i < count; i++) {
             same = got.part(i) == wanted.part(i);
         }
         if (!same) {
@@ -388,6 +411,65 @@ public final class Installer {
                     found == null ? "jkit can't tell which build it is: pick another version or vendor"
                             : "the source served a different build than it listed: try again later, or pick another vendor");
         }
+    }
+
+    /**
+     * For a signed Maven: its {@code lib/maven-core-<version>.jar} names the release, in every
+     * Maven from 3.0 to 4.
+     */
+    static void requireMavenVersion(Path mavenHome, Artifact artifact) {
+        String found = null;
+        try (Stream<Path> libs = Files.list(mavenHome.resolve("lib"))) {
+            found = libs.map(p -> p.getFileName().toString())
+                    .filter(n -> n.startsWith("maven-core-") && n.endsWith(".jar"))
+                    .map(n -> n.substring("maven-core-".length(), n.length() - ".jar".length()))
+                    .filter(dev.jkit.model.Version::isSafeText)
+                    .findFirst().orElse(null);
+        } catch (IOException | java.io.UncheckedIOException e) {
+            // found stays null
+        }
+        if (!artifact.version().raw().equals(found)) {
+            throw differentBuild(artifact, found == null ? null : "Maven " + found, "lib/maven-core-*.jar");
+        }
+    }
+
+    private static final java.util.regex.Pattern SBT_VERSION =
+            java.util.regex.Pattern.compile("sbt\\.version-read\\(sbt\\.version\\)\\[([^\\]\\s]{1,64})\\]");
+
+    /**
+     * For a signed sbt: the launcher's {@code sbt/sbt.boot.properties} names the sbt version it
+     * starts by default ({@code ${sbt.version-read(sbt.version)[1.10.7]}}), in every release from
+     * 1.3.0 to 2.x.
+     */
+    static void requireSbtVersion(Path sbtHome, Artifact artifact) {
+        String found = null;
+        Path launcher = sbtHome.resolve("bin").resolve("sbt-launch.jar");
+        if (Files.isRegularFile(launcher, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            try (java.util.zip.ZipFile jar = new java.util.zip.ZipFile(launcher.toFile())) {
+                java.util.zip.ZipEntry entry = jar.getEntry("sbt/sbt.boot.properties");
+                if (entry != null) {
+                    try (java.io.InputStream in = jar.getInputStream(entry)) {
+                        // a few hundred bytes; more is read no further
+                        String text = new String(in.readNBytes(64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+                        java.util.regex.Matcher m = SBT_VERSION.matcher(text);
+                        found = m.find() && dev.jkit.model.Version.isSafeText(m.group(1)) ? m.group(1) : null;
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                // found stays null
+            }
+        }
+        if (!artifact.version().raw().equals(found)) {
+            throw differentBuild(artifact, found == null ? null : "sbt " + found, "bin/sbt-launch.jar");
+        }
+    }
+
+    private static JkitException differentBuild(Artifact artifact, String found, String where) {
+        return new JkitException("the download for " + artifact.label() + " is signed, but it is "
+                + (found == null ? "a build that doesn't name its version in " + where : found)
+                + "; nothing was installed",
+                found == null ? "jkit can't tell which release it is: pick another version"
+                        : "the source served a different release than it listed: try again later, or pick another version");
     }
 
     /** The first line of Corretto's {@code version.txt}, e.g. {@code 8.514.01.1}; null when there is none. */

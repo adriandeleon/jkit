@@ -11,10 +11,6 @@ public final class Fs {
     private Fs() { }
 
     /**
-     * Deletes a folder tree without following symlinks or Windows junctions (which Java reports as
-     * folders, with isOther set): the link goes, what it points at stays. Missing folders are ignored.
-     */
-    /**
      * A path from an environment variable, or null when it is unset, blank or not a valid path.
      * One pair of surrounding double quotes is dropped: on Windows {@code JAVA_HOME="C:\\Program Files\\..."}
      * keeps the quotes, and {@code "} isn't allowed in a Windows path.
@@ -51,6 +47,10 @@ public final class Fs {
         }
     }
 
+    /**
+     * Deletes a folder tree without following symlinks or Windows junctions (which Java reports as
+     * folders, with isOther set): the link goes, what it points at stays. Missing folders are ignored.
+     */
     public static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return;

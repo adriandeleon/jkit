@@ -48,6 +48,53 @@ class HttpTest {
     }
 
     @Test
+    void proxyCredentialsArePercentDecodedOnly() {
+        // a + is a plus in a URL's user info, not a space as in a form
+        JdkHttp.ProxySpec plus = JdkHttp.ProxySpec.parse("http://a+b:p+w%2B%C3%A9@proxy:3128");
+        assertThat(plus.user()).isEqualTo("a+b");
+        assertThat(plus.password()).isEqualTo("p+w+é");
+        assertThat(JdkHttp.ProxySpec.parse("http://me:pässwörd@proxy:3128").password()).isEqualTo("pässwörd");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("http://me:100%@proxy:3128"))
+                .hasMessageContaining("must start an escape such as %40").hasMessageNotContaining("100%");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("http://me:a%zzb@proxy:3128"))
+                .hasMessageContaining("http://me:***@proxy:3128");
+    }
+
+    @Test
+    void aSmallFileIsCutOffAtItsLimit() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        HttpServer server = sizedServer(1 << 20, 0, calls);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1)) {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/x.sig");
+            assertThatThrownBy(() -> http.download(uri, tmp.resolve("sig"), Http.Progress.NONE, 64 * 1024))
+                    .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 64 KB for /x.sig");
+            http.download(uri, tmp.resolve("whole"), Http.Progress.NONE, 1 << 20);
+            assertThat(Files.size(tmp.resolve("whole"))).isEqualTo(1 << 20);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void theDefaultBoundedDownloadChecksTheSizeAfterwards() throws Exception {
+        Http fake = new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                Files.write(target, new byte[100]);
+            }
+        };
+        URI uri = URI.create("https://example.invalid/x.sig");
+        assertThatThrownBy(() -> fake.download(uri, tmp.resolve("a"), Http.Progress.NONE, 99))
+                .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 99 bytes");
+        fake.download(uri, tmp.resolve("b"), Http.Progress.NONE, 100);
+    }
+
+    @Test
     void badProxyFailsOnlyWhenTheNetworkIsUsed() {
         JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
         assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
@@ -150,9 +197,9 @@ class HttpTest {
         java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
         HttpServer server = sizedServer(8 << 20, 1, calls);
         try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
-            http.slowAfter = Duration.ofSeconds(1);
-            http.slowLeft = Duration.ofSeconds(5); // 8 MB at 40 KB/s: minutes
+            // 8 MB at 40 KB/s: minutes
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                    Duration.ofSeconds(5));
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("big");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/big"), target,
@@ -178,9 +225,8 @@ class HttpTest {
         java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
         HttpServer server = sizedServer(80 << 10, 1, calls); // 80 KB at 40 KB/s: two seconds
         try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
-            http.slowAfter = Duration.ofSeconds(1);
-            http.slowLeft = Duration.ofSeconds(30);
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                    Duration.ofSeconds(30));
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("small");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/small"), target,

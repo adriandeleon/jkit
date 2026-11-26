@@ -17,6 +17,24 @@ public interface Http {
     void download(URI uri, Path target, Progress progress) throws IOException;
 
     /**
+     * Like {@link #download}, for a small file (a signature): more than {@code max} bytes fails, and
+     * the download stops there rather than at the 2 GB a JDK may take.
+     */
+    default void download(URI uri, Path target, Progress progress, long max) throws IOException {
+        download(uri, target, progress);
+        if (java.nio.file.Files.size(target) > max) {
+            throw tooBig(uri, max);
+        }
+    }
+
+    /** More than {@code max} bytes came for {@code uri}. */
+    static dev.jkit.model.JkitException tooBig(URI uri, long max) {
+        String limit = max >= 1 << 20 ? (max >> 20) + " MB" : max >= 1 << 10 ? (max >> 10) + " KB" : max + " bytes";
+        return new dev.jkit.model.JkitException(uri.getHost() + " sent more than " + limit + " for " + uri.getPath()
+                + "; refusing it", "a broken or hostile server or mirror: check JKIT_SOURCES_*_URL and the network");
+    }
+
+    /**
      * Whether this client may not use the network. Sources then leave a separate checksum file
      * unfetched (the artifact has none): nothing is downloaded offline, so nothing needs checking,
      * and install, upgrade and sync can still tell what is installed or out of date.

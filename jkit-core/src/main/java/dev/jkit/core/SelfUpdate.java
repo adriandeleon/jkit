@@ -69,7 +69,10 @@ public final class SelfUpdate {
             }
             if (this == DEB_FILE) {
                 String file = "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
-                return "curl -fLo /tmp/" + file + " " + release.url(DEFAULT_BASE, file) + " && sudo apt install /tmp/" + file;
+                // a new folder of the user's own, not a fixed name in /tmp: another user could create
+                // that file first, writable by them, and swap in their own .deb before sudo apt reads it
+                return "d=$(mktemp -d) && curl -fLo \"$d/" + file + "\" " + release.url(DEFAULT_BASE, file)
+                        + " && sudo apt install \"$d/" + file + "\"";
             }
             return command;
         }
