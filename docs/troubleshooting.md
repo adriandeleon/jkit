@@ -36,7 +36,8 @@ whether the active JDK actually runs.
 The usual culprits:
 
 - **`JAVA_HOME` set in your shell profile** (`~/.bashrc`, `~/.profile`, `/etc/environment`): it wins
-  over jkit's choice. Remove the export.
+  over jkit's global version, for `java` on PATH too (the hook puts `$JAVA_HOME/bin` first instead
+  of jkit's). Remove the export.
 - **The hook loads before something else changes PATH** (SDKMAN, a distro's `java` alternatives):
   move the jkit line to the end of the startup file.
 - **No hook at all**: `jkit hook --install`, then open a new shell.

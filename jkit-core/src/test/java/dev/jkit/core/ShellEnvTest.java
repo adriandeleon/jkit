@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.jkit.model.Tool;
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ShellEnvTest {
     private final JkitHome home = new JkitHome(Path.of("/h/.jkit"));
@@ -83,6 +85,41 @@ class ShellEnvTest {
         Map<String, String> leave = ShellEnv.project(env, home, Map.of(), false, null);
         assertThat(leave).containsEntry("JAVA_HOME", "/opt/jdk").containsEntry("JKIT_USER_JDK", null);
         assertThat(leave.get("PATH")).isEqualTo("/usr/bin");
+    }
+
+    @Test
+    void theUsersOwnJavaHomeComesBackWithItsBinFirstOnPath(@TempDir Path tmp) throws Exception {
+        Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
+        String global = p("/h/.jkit/global/jdk/bin");
+        // the hook put the global bin on PATH before the user's JAVA_HOME was set
+        Map<String, String> env = new HashMap<>(Map.of("PATH", path(global, "/usr/bin"), "JAVA_HOME", mine.toString()));
+        apply(env, ShellEnv.project(env, home, Map.of(Tool.JDK, jdk21), false, "k"));
+        assertThat(env.get("PATH")).isEqualTo(path(bin(jdk21), global, "/usr/bin"));
+
+        Map<String, String> leave = ShellEnv.project(env, home, Map.of(), false, null);
+        assertThat(leave).containsEntry("JAVA_HOME", mine.toString());
+        // java is $JAVA_HOME/bin/java again; only jkit's entries went
+        assertThat(leave.get("PATH")).isEqualTo(path(bin(mine), "/usr/bin"));
+        apply(env, leave);
+
+        apply(env, ShellEnv.use(env, home, Tool.JDK, jdk17, false));
+        assertThat(env.get("PATH")).isEqualTo(path(bin(jdk17), bin(mine), "/usr/bin"));
+        Map<String, String> reset = ShellEnv.reset(env, home, Tool.JDK);
+        assertThat(reset).containsEntry("JAVA_HOME", mine.toString());
+        assertThat(reset.get("PATH")).isEqualTo(path(bin(mine), "/usr/bin")); // already there: not twice
+    }
+
+    @Test
+    void backToTheGlobalLinkPutsTheGlobalBinBack(@TempDir Path tmp) throws Exception {
+        JkitHome own = new JkitHome(tmp.resolve(".jkit"));
+        Files.createDirectories(own.global(Tool.JDK).getParent());
+        Files.createSymbolicLink(own.global(Tool.JDK), Files.createDirectories(tmp.resolve("jdk")));
+        Path jdk = Files.createDirectories(own.toolsRoot().resolve("jdk/21"));
+        Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin"));
+        apply(env, ShellEnv.use(env, own, Tool.JDK, jdk, false));
+        Map<String, String> reset = ShellEnv.reset(env, own, Tool.JDK);
+        assertThat(reset).containsEntry("JAVA_HOME", own.global(Tool.JDK).toString());
+        assertThat(reset.get("PATH")).isEqualTo(path(own.global(Tool.JDK).resolve("bin").toString(), "/usr/bin"));
     }
 
     @Test

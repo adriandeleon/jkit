@@ -108,6 +108,9 @@ when you leave, printing every variable they change. PowerShell doesn't switch o
   (`JKIT_USER_MAVEN`, ...) when a project or `jkit use` first replaces it. It comes back, instead of
   the global version, once neither applies any more (you leave the project, `jkit reset jdk`), and
   jkit says so each time. In a shell where jkit chose no JDK, `jkit reset jdk` changes nothing.
+  PATH follows: while your own `JAVA_HOME` applies, its `bin` comes first on PATH, not the global
+  JDK's (the hook does the same when it loads), so `java` and `JAVA_HOME` are the same JDK. jkit
+  removes only its own PATH entries (under `~/.jkit`), never one you added.
 
 ## Commands
 

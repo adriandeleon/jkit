@@ -45,6 +45,29 @@ class HooksTest {
         assertThat(out).contains(root.resolve("global/jdk/bin").toString());
     }
 
+    /** A JAVA_HOME of the user's own wins over the global JDK, so java on PATH is that one too. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashHookPutsTheUsersOwnJavaHomeOnPathInsteadOfTheGlobalOne() throws Exception {
+        Path root = tmp.resolve("home/.jkit");
+        Files.createDirectories(root.resolve("global"));
+        Files.createSymbolicLink(root.resolve("global/jdk"), Files.createDirectories(tmp.resolve("jdk")));
+        Path mine = Files.createDirectories(tmp.resolve("my-jdk/bin")).getParent();
+        Path script = tmp.resolve("hook.sh");
+        Files.writeString(script, "set -u\n" + Hooks.posix("bash", root) + "\nprintf '%s\\n' \"$JAVA_HOME\" \"$PATH\"\n");
+        ProcessBuilder pb = new ProcessBuilder("bash", "--noprofile", "--norc", script.toString())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("JAVA_HOME", mine.toString());
+        pb.environment().put("PATH", "/usr/bin:/bin");
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(out.lines().toList()).as(out).containsExactly(mine.toString(),
+                mine.resolve("bin") + ":" + root.resolve("global/maven/bin") + ":" + root.resolve("global/gradle/bin")
+                        + ":" + root.resolve("global/sbt/bin") + ":/usr/bin:/bin");
+    }
+
     private static void withoutToolHomes(ProcessBuilder pb) {
         for (String v : new String[] {"JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME", "SBT_HOME", "GRAALVM_HOME",
                 "PROMPT_COMMAND", "JKIT_PROJECT", "JKIT_ENV_FILE"}) {
