@@ -24,7 +24,8 @@ import java.util.Locale;
 
 /**
  * Caches {@link #get} responses as files for a fixed time (the version index). Downloads are
- * never cached. Offline mode serves any cached copy, however old.
+ * never cached. A lookup that fails online (the server down, a captive portal) falls back to a
+ * cached copy up to {@link #STALE_LIMIT} old. Offline mode serves any cached copy, however old.
  */
 public final class CachingHttp implements Http {
     private final Http delegate;
@@ -52,6 +53,11 @@ public final class CachingHttp implements Http {
         default void notStored(String message) { }
     }
 
+    /**
+     * The oldest cached answer that stands in for a lookup that failed (the server down, a captive
+     * portal). --offline uses any age: that is asked for.
+     */
+    static final Duration STALE_LIMIT = Duration.ofDays(7);
     /** Cached answers older than this are deleted when the cache is written to. */
     static final Duration MAX_AGE = Duration.ofDays(30);
     /** The most the cache keeps: the oldest answers go first (real ones are a few KB to 0.3 MB). */
@@ -72,10 +78,22 @@ public final class CachingHttp implements Http {
         this.listener = listener;
     }
 
-    /** The cached copy, however old, when the server is down or unreachable; else {@code failure}. */
+    /**
+     * The cached copy when the server is down or unreachable, if it is at most {@link #STALE_LIMIT}
+     * old; else {@code failure}, or for an older copy an error that says --offline uses it.
+     */
     private String staleOr(Path file, URI uri, String why, Exception failure) throws IOException {
         if (Files.isRegularFile(file)) {
             Duration age = Duration.between(Files.getLastModifiedTime(file).toInstant(), clock.instant());
+            if (age.compareTo(STALE_LIMIT) > 0) {
+                // An old list misses every update since, security fixes included, and a network
+                // that keeps jkit from the server would otherwise keep it on that list for good.
+                List<String> hints = new ArrayList<>(failure instanceof JkitException je && !je.hints().isEmpty()
+                        ? je.hints() : List.of("try again later"));
+                hints.add("or use the cached list from " + age.toDays() + " days ago on purpose: add --offline");
+                throw new JkitException(why + "; the cached version list is " + age.toDays()
+                        + " days old, too old to use in its place", hints.toArray(String[]::new));
+            }
             listener.stale(why + "; using the version list from "
                     + (age.toHours() > 0 ? age.toHours() + " h" : age.toMinutes() + " min") + " ago");
             return Files.readString(file);
