@@ -56,10 +56,33 @@ class ChangesTest {
 
     @Test
     void unsetIsReportedWhenTheVariableWasSet() {
-        Context ctx = context(Map.of("JKIT_GRAALVM_FOLLOWS_JDK", "1"));
+        Context ctx = context(Map.of("GRADLE_HOME", "/g"));
         Map<String, String> updates = new HashMap<>();
+        updates.put("GRADLE_HOME", null);
+        assertThat(print(new Changes(ctx).env(updates))).isEqualTo("  unset  GRADLE_HOME\n");
+    }
+
+    @Test
+    void jkitsOwnVariablesAreOnlyInTheJson() {
+        Context ctx = context(Map.of("JKIT_GRAALVM_FOLLOWS_JDK", "1", "PATH", "/usr/bin"));
+        Map<String, String> updates = new LinkedHashMap<>();
         updates.put("JKIT_GRAALVM_FOLLOWS_JDK", null);
-        assertThat(print(new Changes(ctx).env(updates))).isEqualTo("  unset  JKIT_GRAALVM_FOLLOWS_JDK\n");
+        updates.put("JKIT_PROJECT", "/p/jkit.toml:1795667886909");
+        updates.put("JKIT_PROJECT_JDK", "/j/tools/jdk/21");
+        updates.put("JAVA_HOME", "/j/tools/jdk/21");
+        updates.put("PATH", "/j/tools/jdk/21/bin" + File.pathSeparator + "/usr/bin");
+
+        Changes changes = new Changes(ctx).env(updates);
+
+        assertThat(print(changes)).isEqualTo("""
+                  set    JAVA_HOME=/j/tools/jdk/21
+                  PATH   + /j/tools/jdk/21/bin
+                """);
+        assertThat(changes.json()).hasSize(5);
+        assertThat(changes.isEmpty()).isFalse();
+        Map<String, String> onlyJkits = new HashMap<>();
+        onlyJkits.put("JKIT_GRAALVM_FOLLOWS_JDK", null);
+        assertThat(new Changes(ctx).env(onlyJkits).isEmpty()).isTrue();
     }
 
     @Test

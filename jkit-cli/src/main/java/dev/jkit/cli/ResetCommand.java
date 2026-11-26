@@ -86,7 +86,9 @@ final class ResetCommand implements Callable<Integer> {
         ctx.out.println("reset " + tool + " in this shell");
         Changes report = new Changes(ctx).env(changes);
         if (report.isEmpty()) {
-            report.note("nothing changed: this shell had no " + tool + " of its own");
+            // only jkit's own record of the choice went
+            report.note("its " + tool.homeVariable() + " and PATH stay as they were: the " + tool
+                    + " it goes back to is the one it had");
         }
         report.print(ctx.out);
         return 0;
