@@ -71,6 +71,7 @@ class StatusTest {
 
     @Test
     void projectPinNotAppliedSaysHowToUseIt() throws Exception {
+        env.put("JKIT_SHELL", "bash");
         Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\nmaven = \"4.0\"\nkotlin = \"2\"\n");
         env.put("JAVA_HOME", home.resolve("global/jdk").toString());
         String out = text();
@@ -99,9 +100,22 @@ class StatusTest {
     }
 
     @Test
-    void missingHookIsTheHintWhenTheGlobalIsNotApplied() throws Exception {
+    void missingHookIsSaidOnceWhenTheGlobalsAreNotApplied() throws Exception {
+        Files.createSymbolicLink(home.resolve("global/maven"), home.resolve("tools/maven/3.9.11"));
+        assertThat(text()).isEqualTo("""
+                jdk      -                       not set
+                maven    -                       not set
+                the global jdk, maven aren't applied: the jkit hook isn't loaded; load it in new shells: %s
+                """.formatted(Changes.HOOK_SETUP));
+    }
+
+    @Test
+    void anInstalledPinWithoutTheHookSaysHowToUseItNotSync() throws Exception {
+        // jkit sync can't change a shell without the hook: pointing there again would go in circles
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
         assertThat(text()).startsWith("jdk      -                       not set\n"
-                + "         the global jdk isn't applied: the jkit hook isn't loaded: " + Changes.HOOK_SETUP);
+                + "         jkit.toml wants jdk 21.0.9+10 temurin; this shell has none and no jkit hook to switch it: "
+                + "run one command with it: jkit exec -- <command>, or load it in new shells: " + Changes.HOOK_SETUP + "\n");
     }
 
     @Test
@@ -121,7 +135,7 @@ class StatusTest {
         assertThat(jdk.path("wanted").path("source").asText()).isEqualTo("project");
         assertThat(jdk.path("global").path("missing").asBoolean()).isFalse();
         assertThat(jdk.path("matches").asBoolean()).isFalse();
-        assertThat(jdk.path("hint").asText()).contains("jkit sync");
+        assertThat(jdk.path("hint").asText()).contains("jkit exec -- <command>");
         assertThat(doc.path("tools")).hasSize(5);
     }
 }
