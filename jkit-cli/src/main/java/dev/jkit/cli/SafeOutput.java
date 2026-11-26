@@ -20,9 +20,12 @@ final class SafeOutput extends FilterOutputStream {
         super(out);
     }
 
-    /** A print stream over {@code out} that writes through this filter, in {@code out}'s charset. */
+    /**
+     * A print stream over {@code out} that writes through this filter, in {@code out}'s charset,
+     * with ASCII stand-ins for what that charset can't hold ({@link Fallback}).
+     */
     static PrintStream wrap(PrintStream out) {
-        return new PrintStream(new SafeOutput(out), true, out.charset());
+        return new PrintStream(new SafeOutput(out), true, Fallback.of(out.charset(), false));
     }
 
     @Override
