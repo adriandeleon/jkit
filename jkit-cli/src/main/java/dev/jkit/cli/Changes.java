@@ -3,9 +3,12 @@ package dev.jkit.cli;
 import dev.jkit.core.Fs;
 import dev.jkit.core.JkitHome;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.ShellRc;
+import dev.jkit.model.Envs;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -19,24 +22,34 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Everything a command changed: variables of the calling shell, global links, folders it created
- * or deleted and files it wrote, plus what that means for this shell and new ones. Every command
- * that changes something reports it here, so nothing changes silently. Printed as indented lines
- * under the command's own message, and in JSON as {@code "changes"}: a list of
+ * Everything a command changed: variables of the calling shell, global links, folders created or
+ * deleted and files written, plus notes on what that means for this shell and new ones. Every
+ * command that changes something reports it here, so that nothing changes silently. Printed as
+ * indented lines under the command's own message, and in JSON as {@code "changes"}, a list of
  * {@code {kind, name, action, value}}.
  */
 final class Changes {
     /**
-     * {@code kind} env: {@code action} set, unset, add or remove (PATH entries); user-env: the same,
-     * for the user's own environment variables (Windows). link: set or remove.
-     * folder: create or delete. file: a cached version list or checksum, create or update
-     * ({@code value} is where its content came from), or a project file jkit wrote (no {@code value}).
+     * One change. The {@code kind}s and their {@code action}s:
+     * <ul>
+     *   <li>env: set, unset, or add/remove for PATH entries;</li>
+     *   <li>user-env: the same, for the user's persistent environment variables on Windows;</li>
+     *   <li>link: set or remove;</li>
+     *   <li>folder: create or delete;</li>
+     *   <li>file: create, update or delete. For a cached version list or checksum, {@code value} is
+     *       the URL its content came from; otherwise (a project file or shell startup file jkit
+     *       wrote, a deleted file) it is null.</li>
+     * </ul>
      */
     record Change(String kind, String name, String action, String value) { }
 
     private final Context ctx;
     private final List<Change> changes = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
+    /** A folder the command's own message names; "created" lines for it and its parents are skipped. */
+    private Path named;
+    /** Whether to skip the line about cached version lists and checksums. */
+    private boolean quietCache;
 
     Changes(Context ctx) {
         this.ctx = ctx;
@@ -56,7 +69,7 @@ final class Changes {
                 changes.add(new Change("env", name, "set", after));
             }
         }
-        // a *_HOME set outside jkit: say that jkit keeps it, and when it comes back
+        // When jkit saves or restores a *_HOME the user set themselves, say so.
         for (Tool t : Tool.values()) {
             String kept = ShellEnv.userVariable(t);
             if (!updates.containsKey(kept)) {
@@ -69,6 +82,25 @@ final class Changes {
                         + t + " leaves this shell");
             } else if (saved == null && was != null && Objects.equals(updates.get(t.homeVariable()), was)) {
                 note(t.homeVariable() + " is your own again: " + tilde(was));
+            }
+        }
+        // When jkit's choice goes away but the user changed *_HOME by hand after jkit set it, jkit
+        // leaves that value in place: say so, since it may surprise.
+        Map<String, String> after = Envs.copy(ctx.env);
+        updates.forEach((k, v) -> {
+            if (v == null) {
+                after.remove(k);
+            } else {
+                after.put(k, v);
+            }
+        });
+        for (Tool t : Tool.values()) {
+            if (!updates.containsKey(t.homeVariable()) && ShellEnv.changedByHand(ctx.env, t)
+                    && !ShellEnv.hasChoice(after, t)) {
+                String current = ctx.env.get(t.homeVariable());
+                note(current == null || current.isBlank()
+                        ? t.homeVariable() + " stays unset: you unset it after jkit set it"
+                        : t.homeVariable() + " stays as you set it after jkit did: " + tilde(current));
             }
         }
         return this;
@@ -110,8 +142,9 @@ final class Changes {
     }
 
     /**
-     * What the command wrote to disk on the side: the jkit home if it made it, and the files (version
-     * lists, checksums) the cache stored. Each is reported once, by whichever Changes asks first.
+     * Adds what the command wrote to disk along the way: the jkit home if it created it, and the
+     * version lists and checksums the cache stored. Each is reported once, by whichever Changes
+     * asks first.
      */
     Changes disk() {
         if (!ctx.homeExisted && !ctx.homeReported && Files.exists(ctx.home.root())) {
@@ -129,8 +162,8 @@ final class Changes {
     }
 
     /**
-     * A variable in the user's own environment (Windows, jkit env --install): {@code action} set,
-     * unset, add or remove (PATH entries), as for {@code env}.
+     * A variable in the user's persistent environment (Windows, jkit env --install); {@code action}
+     * is as for env.
      */
     Changes userEnv(String name, String action, String value) {
         changes.add(new Change("user-env", name, action, value));
@@ -144,17 +177,46 @@ final class Changes {
     }
 
     /**
-     * How to load the hook in new shells: hook --install can't edit a PowerShell profile, so on
-     * Windows the line to add by hand.
+     * How to load the hook in new shells. On Windows it is the line to add to the PowerShell
+     * profile by hand, since hook --install doesn't edit PowerShell profiles.
      */
     static final String HOOK_SETUP = File.separatorChar == '\\'
             ? "add to your PowerShell $PROFILE: jkit hook pwsh | Out-String | Invoke-Expression"
             : "jkit hook --install";
 
     /**
-     * The shell jkit runs in, by name for messages, when its hook can't switch on cd yet
-     * (shell.auto_switch); null when it can, or when the shell isn't known. Without a hook, a
-     * Windows shell counts as PowerShell, the only hook jkit has there.
+     * What to tell a user whose shell doesn't have the hook loaded. If the login shell's startup
+     * file already loads it (jkit hook --install ran, but this shell started before), opening a new
+     * shell is enough; otherwise they need to set it up.
+     */
+    static String hookHint(Context ctx) {
+        Path file = hookFile(ctx);
+        return file == null ? "load it in new shells: " + HOOK_SETUP
+                : tilde(file) + " loads it, so open a new shell";
+    }
+
+    /** The login shell's startup file if it loads the hook; null if it doesn't or that can't be told. */
+    private static Path hookFile(Context ctx) {
+        if (ctx.platform.isWindows()) {
+            return null; // jkit doesn't edit or inspect PowerShell profiles
+        }
+        try {
+            Path file = ShellRc.file(HookCommand.loginShell(ctx), ctx.env, HookCommand.userHome(ctx));
+            if (!Files.isRegularFile(file)) {
+                return null;
+            }
+            String text = Files.readString(file, HookCommand.charsetOf(file));
+            return ShellRc.hasBlock(text) || ShellRc.manualLine(text) > 0 ? file : null;
+        } catch (IOException | RuntimeException e) { // including JkitException: no login shell or home
+            return null;
+        }
+    }
+
+    /**
+     * The name of the shell jkit runs in, for messages, when that shell's hook has no support for
+     * switching versions on cd (shell.auto_switch). Null when it has, or when the shell isn't
+     * known. On Windows without the hook loaded, the shell is assumed to be PowerShell, the only
+     * shell jkit has a hook for there.
      */
     static String shellWithoutAutoSwitch(Context ctx) {
         String shell = ctx.env.get("JKIT_SHELL");
@@ -173,17 +235,32 @@ final class Changes {
         return this;
     }
 
+    /**
+     * For install, whose own message already names the new folder: skips the "created" lines for
+     * that folder and its parents (the jkit home, tools/), and the line about cached version lists.
+     * --json still lists them all.
+     */
+    Changes namedInMessage(Path folder) {
+        named = folder == null ? null : folder.toAbsolutePath().normalize();
+        quietCache = true;
+        return this;
+    }
+
     Changes note(String note) {
         notes.add(note);
         return this;
     }
 
     /**
-     * After the global link for {@code tool} moved: which variables follow it in new shells, and
-     * whether this shell picks it up, keeps its own choice, or is overridden by a variable set
-     * outside jkit.
+     * Notes what moving the global link for {@code tool} means: which variables follow it in new
+     * shells, and whether this shell picks it up, keeps its own choice, or is overridden by a
+     * variable set outside jkit.
+     *
+     * <p>In a hooked shell with no jkit choice for the tool and no *_HOME set, this also sets
+     * *_HOME to the global link right away, through the hook's env file. The hook sets it only
+     * when it loads, and after a first install there was nothing to link to at that time.
      */
-    Changes globalEffect(Tool tool) {
+    Changes globalEffect(Tool tool) throws IOException {
         JkitHome home = ctx.home;
         String link = tilde(home.global(tool));
         String var = tool.homeVariable();
@@ -197,10 +274,15 @@ final class Changes {
             note("for programs started outside PowerShell (cmd.exe, IDEs) too: jkit env --install");
         }
         String shellChoice = ctx.env.get(ShellEnv.stateVariable(tool));
+        String projectChoice = ctx.env.get(ShellEnv.projectVariable(tool));
         String current = ctx.env.get(var);
+        String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (shellChoice != null && !shellChoice.isBlank()) {
             note("this shell keeps its own " + tool + " (" + tilde(Path.of(shellChoice))
                     + "); to follow the global one: jkit reset " + tool);
+        } else if (projectChoice != null && !projectChoice.isBlank() && current != null && !current.isBlank()) {
+            note("this shell keeps the project's " + tool + " (" + tilde(Path.of(projectChoice))
+                    + ") while it is in the project");
         } else if (Fs.path(current) != null && Fs.path(current).toAbsolutePath().normalize()
                 .equals(home.global(tool).toAbsolutePath().normalize())) {
             note("this shell follows it already: " + var + "=" + link);
@@ -208,16 +290,28 @@ final class Changes {
             note("warning: " + var + "=" + current + " is set outside jkit and wins over the global " + tool
                     + "; remove it from your shell profile to use jkit's");
         } else if (ctx.env.get("JKIT_SHELL") == null) {
-            note("the jkit hook is not loaded in this shell, so nothing sets " + var
-                    + "; load it in new shells: " + HOOK_SETUP);
+            note("the jkit hook is not loaded in this shell, so nothing sets " + var + "; " + hookHint(ctx));
+        } else if (envFile != null && !ShellEnv.hasChoice(ctx.env, tool)) {
+            Map<String, String> updates = ShellEnv.global(ctx.env, home, tool);
+            ProjectShell.writeEnvFile(ctx, envFile, updates);
+            env(updates);
         } else {
-            note(var + " is not set in this shell yet; open a new shell, or: jkit reset " + tool);
+            note(var + " is not set in this shell; open a new shell, or: eval \"$(jkit env)\"");
         }
         return this;
     }
 
+    /**
+     * Whether nothing that other programs read changed. jkit's own JKIT_* variables don't count
+     * here, though they are still printed like every other change to the shell.
+     */
     boolean isEmpty() {
-        return changes.isEmpty();
+        return changes.stream().allMatch(Changes::bookkeeping);
+    }
+
+    /** Whether a change is to jkit's own bookkeeping variables (JKIT_PROJECT, JKIT_SHELL_JDK...). */
+    private static boolean bookkeeping(Change c) {
+        return c.kind().equals("env") && c.name().startsWith("JKIT_");
     }
 
     /** Indented lines: one per change (cached files folded into one line), then the notes. */
@@ -228,6 +322,13 @@ final class Changes {
         Set<String> hosts = new LinkedHashSet<>();
         Path index = ctx.home.index().toAbsolutePath();
         for (Change c : changes) {
+            if (named != null && c.kind().equals("folder") && c.action().equals("create")
+                    && named.startsWith(Path.of(c.name()).normalize())) {
+                continue; // the message names this folder, or one inside it
+            }
+            if (quietCache && c.kind().equals("file") && Path.of(c.name()).startsWith(index)) {
+                continue;
+            }
             if (c.kind().equals("file") && c.action().equals("delete") && Path.of(c.name()).startsWith(index)) {
                 listsDeleted++; // old cached lookups, folded into the cache line
                 continue;
@@ -298,7 +399,7 @@ final class Changes {
 
     /** Shortens the home folder to ~ for display. */
     static String tilde(String text) {
-        text = Visible.of(text); // a folder name can hold a newline or an RTL override
+        text = Visible.of(text); // a folder name can contain a newline or an RTL override character
         String userHome = System.getProperty("user.home");
         if (text == null || userHome == null || userHome.isEmpty()) {
             return text;

@@ -135,9 +135,13 @@ public final class ShellRc {
 
     /**
      * {@code text} without the block (and the blank line before it, if it added one). Every other
-     * byte stays as it was, the file's line endings included.
+     * byte stays as it was, the file's line endings included. Unchanged when a start marker has
+     * no end marker of its own ({@link #unterminatedStart}): where the block ends is a guess then.
      */
     public static Edit remove(String text) {
+        if (unterminatedStart(text) > 0) {
+            return new Edit(text, false);
+        }
         List<Lines.Line> lines = Lines.of(text);
         int start = -1;
         int end = -1;
@@ -189,14 +193,18 @@ public final class ShellRc {
     }
 
     /**
-     * The 1-based number of a start marker with no end marker after it (one deleted by hand), or 0.
-     * jkit then can't tell where its block ends, so it changes nothing.
+     * The 1-based number of a start marker with no end marker of its own (one deleted by hand), or
+     * 0: none after it, or another start marker before it. jkit then can't tell where its block
+     * ends, so it changes nothing.
      */
     public static int unterminatedStart(String text) {
         List<String> lines = text.lines().toList();
         int start = 0;
         for (int i = 0; i < lines.size(); i++) {
-            if (start == 0 && is(lines.get(i), START)) {
+            if (is(lines.get(i), START)) {
+                if (start > 0) {
+                    return start; // a second start before this one ended
+                }
                 start = i + 1;
             } else if (start > 0 && is(lines.get(i), END)) {
                 start = 0;
@@ -211,10 +219,6 @@ public final class ShellRc {
     }
 
     /**
-     * The 1-based number of a line outside jkit's block that loads the hook ({@code jkit hook}, not
-     * commented out), or 0: someone added it by hand, so jkit leaves it alone.
-     */
-    /**
      * Lines that load the hook: {@code eval "$(jkit hook bash)"}, {@code jkit hook fish | source},
      * {@code jkit hook pwsh | Invoke-Expression}, {@code source <(jkit hook zsh)}. Not an alias or a
      * function that merely mentions it ({@code alias jh='jkit hook bash'}).
@@ -225,6 +229,10 @@ public final class ShellRc {
                     + "|\\S*jkit\\s+hook\\b[^|#]*\\|\\s*(source|\\.|iex|Invoke-Expression|Out-String)"
                     + "|(source|\\.)\\s+<\\(\\s*\\S*jkit\\s+hook)");
 
+    /**
+     * The 1-based number of a line outside jkit's block that loads the hook ({@code jkit hook}, not
+     * commented out), or 0: someone added it by hand, so jkit leaves it alone.
+     */
     public static int manualLine(String text) {
         List<String> lines = text.lines().toList();
         boolean inBlock = false;

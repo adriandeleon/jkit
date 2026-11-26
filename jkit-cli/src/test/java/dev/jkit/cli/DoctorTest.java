@@ -125,6 +125,17 @@ class DoctorTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aTemporaryFileNextToALinkedStartupFileIsReported() throws Exception {
+        Path dotfiles = Files.createDirectories(tmp.resolve("user/dotfiles"));
+        Files.createSymbolicLink(tmp.resolve("user/.bashrc"), Files.writeString(dotfiles.resolve("bashrc"), ""));
+        Path left = Files.writeString(dotfiles.resolve(".bashrc.81.jkit-tmp"), "half");
+        assertThat(of(run(), "temp-files")).extracting(Finding::message)
+                // the link's target is found by its real path (on macOS, /var is a link to /private/var)
+                .containsExactly("a temporary file an interrupted jkit write left: " + Changes.tilde(left.toRealPath().toString()));
+    }
+
+    @Test
     void missingHookSaysWhatToAddForTheUsersShell() {
         env.remove("JKIT_SHELL");
         env.put("SHELL", "/usr/bin/zsh");
@@ -183,6 +194,37 @@ class DoctorTest {
         assertThat(store).extracting(Finding::message).containsExactly(
                 "unfinished install (no jkit-install.properties): " + half,
                 "2 KB left in " + home.resolve("tmp") + " by interrupted downloads");
+        // prune deletes what interrupted installs left and keeps a folder a running one uses; a
+        // file in tmp/ that no install made is named for rm
+        assertThat(store.get(1).fix()).startsWith("delete it: jkit prune (")
+                .endsWith("; the rest: rm -rf " + home.resolve("tmp/download.part"));
+        Files.delete(home.resolve("tmp/download.part"));
+        Files.write(Files.createDirectories(home.resolve("tmp/install-1")).resolve("jdk.tar.gz"), new byte[3000]);
+        assertThat(of(run(), "store").get(1).fix()).isEqualTo(
+                "delete it: jkit prune (which also removes builds a newer one replaced; --dry-run shows what)");
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aWorkFolderJkitCantTellIsInUseIsNamedWithItsAgeNotCountedAsLeftOver() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(!"root".equals(System.getProperty("user.name")));
+        // its lock file can't be locked (as on a file system without locks): maybe a running install
+        Path tmpDir = Files.createDirectories(home.resolve("tmp"));
+        Path old = Files.createDirectories(tmpDir.resolve("install-1"));
+        Path young = Files.createDirectories(tmpDir.resolve("install-2"));
+        for (Path p : List.of(old, young)) {
+            Files.setPosixFilePermissions(Files.createFile(p.resolve(".lock")), PosixFilePermissions.fromString("r--r--r--"));
+        }
+        java.time.Instant now = java.time.Instant.now();
+        Files.setLastModifiedTime(old, java.nio.file.attribute.FileTime.from(now.minus(java.time.Duration.ofDays(3))));
+        Files.setLastModifiedTime(young, java.nio.file.attribute.FileTime.from(now.minus(java.time.Duration.ofHours(2))));
+        List<Finding> store = of(run(), "store");
+        assertThat(store).extracting(Finding::level).containsExactly(Level.WARN, Level.INFO);
+        assertThat(store.get(0).message()).isEqualTo(old + " (3 days old): jkit can't tell whether an install is using it"
+                + " (this file system keeps no locks); probably left over");
+        assertThat(store.get(0).fix()).isEqualTo("when no jkit is running: rm -rf " + old);
+        assertThat(store.get(1).message()).startsWith(young + " (2 h old): jkit can't tell").doesNotContain("left over");
+        assertThat(old).isDirectory();
     }
 
     @Test

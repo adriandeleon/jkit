@@ -96,6 +96,16 @@ class HookInstallTest {
     }
 
     @Test
+    void aStrayStartMarkerBeforeTheBlockIsRefusedWithTheSameMessage() throws Exception {
+        String text = ShellRc.START + "\nalias ll='ls -l'\n" + String.join("\n", ShellRc.block("bash")) + "\n";
+        Path rc = Files.writeString(user.resolve(".bashrc"), text);
+        assertThatThrownBy(() -> HookCommand.uninstall(ctx(), "bash", user)).isInstanceOf(JkitException.class)
+                .hasMessageEndingWith("line 1 of " + Changes.tilde(rc.toString()) + " starts jkit's block ("
+                        + ShellRc.START + ") but no " + ShellRc.END + " line ends it; nothing changed");
+        assertThat(Files.readString(rc)).isEqualTo(text);
+    }
+
+    @Test
     void installAppendsToBashrcAndSaysWhatChanged() throws Exception {
         Path rc = user.resolve(".bashrc");
         Files.writeString(rc, "export EDITOR=vim\n");

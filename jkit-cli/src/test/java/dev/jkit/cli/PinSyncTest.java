@@ -194,7 +194,7 @@ class PinSyncTest {
         env.put("JKIT_ENV_FILE", envFile.toString());
         env.put("JKIT_SHELL", "bash");
         pin("jdk@21", null, false, false);
-        assertThat(output()).contains("to switch to a project's versions on cd: add auto_switch = true");
+        assertThat(output()).contains("to switch to a project's versions on cd: jkit config set shell.auto_switch true, then open a new shell");
         out.reset();
         env.put("JKIT_SHELL", "pwsh"); // PowerShell's hook can't switch on cd yet
         pin("jdk@21", null, false, false);

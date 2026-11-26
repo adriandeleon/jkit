@@ -1,0 +1,52 @@
+# jkit shell hook (fish)
+set -gx JKIT_SHELL fish
+set -l __jkit_g '/home/u/.jkit/global'
+for t in sbt gradle maven jdk
+  # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+  set -l v (string upper -- $t)_HOME
+  test $t = jdk; and set v JAVA_HOME
+  set -l h $$v
+  # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
+  test -n "$h"; and set h (string trim -r -c / -- "$h")
+  set -l b $__jkit_g/$t/bin
+  if test -n "$h"; and not contains -- "$h" $__jkit_g/$t; and test -d "$h/bin"
+    set b "$h/bin"
+  end
+  contains -- $b $PATH; or set -gx PATH $b $PATH
+end
+if not set -q JAVA_HOME; and test -e $__jkit_g/jdk; set -gx JAVA_HOME $__jkit_g/jdk; end
+if not set -q MAVEN_HOME; and test -e $__jkit_g/maven; set -gx MAVEN_HOME $__jkit_g/maven; end
+if not set -q GRADLE_HOME; and test -e $__jkit_g/gradle; set -gx GRADLE_HOME $__jkit_g/gradle; end
+if not set -q SBT_HOME; and test -e $__jkit_g/sbt; set -gx SBT_HOME $__jkit_g/sbt; end
+if not set -q GRAALVM_HOME; and test -e $__jkit_g/graalvm; set -gx GRAALVM_HOME $__jkit_g/graalvm; end
+set -e __jkit_g
+set -g __jkit_bin '/opt/jk it\'s $x/bin/jkit'
+set -g __jkit_root '/home/u/.jkit'
+function __jkit_run
+  if test -z "$__jkit_bin"; or not test -x "$__jkit_bin"
+    # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit
+    set -g __jkit_bin ''
+    for d in $PATH
+      if test (string sub -l (string length -- "$__jkit_root/") -- "$d/") != "$__jkit_root/"; and test -x $d/jkit
+        set -g __jkit_bin $d/jkit
+        break
+      end
+    end
+  end
+  if test -n "$__jkit_bin"
+    command $__jkit_bin $argv
+  else
+    echo "jkit: not found on PATH" >&2
+    return 127
+  end
+end
+function jkit
+  set -l envfile (mktemp)
+  set -lx JKIT_ENV_FILE $envfile
+  __jkit_run $argv
+  set -l rc $status
+  test -s $envfile; and source $envfile
+  rm -f $envfile
+  return $rc
+end

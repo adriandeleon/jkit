@@ -67,18 +67,25 @@ matters:
     2024), and they have no checksum: jkit says so, and installs one only with
     `--allow-unverified`. `jkit search` marks them ○, as it does builds with nothing to check.
   - JDK builds are found through the foojay API, and jkit trusts it as little as it can. It
-    doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: it looks for
-    the `.sig` next to the download whether or not foojay lists one (it leaves it out for some
-    builds that have one), and a signature link foojay lists over plain http is refused, not
-    ignored. It takes only builds foojay lists under the vendor and major version you asked for,
+    doesn't rely on foojay to say a Temurin, Microsoft or Corretto build is signed: for every
+    build these vendors sign, it looks for the `.sig` next to the download and doesn't read the
+    signature link foojay lists, if any (foojay leaves it out for some builds that have one). For a
+    Temurin build from before Adoptium signed, a signature link foojay lists is used if it is
+    HTTPS; over plain http it is refused, not ignored. It takes only builds foojay lists under the vendor and major version you asked for,
     so an answer can't call a Temurin build "Zulu", or a Temurin 21 build 17.0.3, to have it
     installed without the signature check. And a build of these three vendors must download from
-    the vendor's own server, or it is refused: Adoptium's GitHub releases (`github.com/adoptium/`),
-    `aka.ms`, and `corretto.aws` (or `d3pxv6yz143wms.cloudfront.net`, where Amazon still serves
-    its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
+    the vendor's own server, at a link of the vendor's own shape ending in the build's file name,
+    or it is refused: a release asset of Adoptium's `temurin<N>-binaries` repositories
+    (`github.com/adoptium/temurin<N>-binaries/releases/download/<tag>/<file>`; GitHub serves a
+    fork's commits from the original repository's other paths), `aka.ms/download-jdk/<file>`, and
+    `corretto.aws/downloads/resources/<version>/<file>` (or `d3pxv6yz143wms.cloudfront.net/<version>/<file>`,
+    where Amazon still serves its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
     names, and the redirects the vendor's server answers with are checked only to stay on HTTPS.
-    A foojay mirror (`JKIT_SOURCES_FOOJAY_URL`) must keep those links; one on this machine
-    (`http://localhost`) may serve the files itself.
+    A foojay mirror of your own (`JKIT_SOURCES_FOOJAY_URL`) may serve the builds these vendors
+    signed itself, with each `.sig` next to its file: the signature, which is still required, and
+    the version check after it are what make those safe, not the host. It must keep the vendor's
+    links for the builds they didn't sign (Temurin before July 2022). A mirror on this machine
+    (`http://localhost`) may serve those too.
   - What that leaves a compromised foojay: it can choose which build of the vendor and major you
     asked for is installed, an older one included (with no version given, also which major), and
     for a Temurin build from before July 2022 it supplies the checksum. Such a build still comes
@@ -205,3 +212,22 @@ gh attestation verify jkit-0.4.0-linux-x64.tar.gz --repo adriandeleon/jkit
 ```
 
 `jkit self-update` does steps 2 and 3 itself, with the key built into jkit.
+
+### Verifying a `.deb` or `.rpm`
+
+From 0.5.0, the `.deb` and `.rpm` are signed with the Vitrina repository's key (see
+[What jkit verifies](#what-jkit-verifies)). To check an `.rpm`:
+
+```bash
+sudo rpm --import https://vitrina-project.dev/vitrina.asc
+rpm -K jkit-*.rpm                           # digests signatures OK
+```
+
+`dnf` checks it the same way when it installs one once the key is imported. A `.deb` carries its
+signature as a `_gpgorigin` member, which `debsig-verify` checks; apt and dpkg don't check a
+downloaded `.deb`. Both are also listed in `SHA256SUMS`, so the steps above work for them too.
+
+### The SBOM
+
+Each release's CycloneDX SBOM is made from the Linux x64 build. The other builds compile in the
+same libraries; the macOS x64 binary is built with Liberica NIK instead of GraalVM CE.

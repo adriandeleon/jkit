@@ -34,7 +34,7 @@ import picocli.CommandLine.Parameters;
         "",
         "  jkit hook --install                 add it for your login shell ($SHELL)",
         "  jkit hook --install --auto-switch   and switch on cd",
-        "  eval \"$(jkit hook bash)\"           load it by hand (zsh alike)",
+        "  eval \"$(jkit hook bash)\"            load it by hand (zsh alike)",
         "  jkit hook fish | source             load it by hand in fish",
         "  jkit hook --uninstall               take it out again"})
 final class HookCommand implements Callable<Integer> {

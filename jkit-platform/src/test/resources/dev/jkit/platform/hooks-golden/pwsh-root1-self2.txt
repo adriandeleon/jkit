@@ -1,0 +1,89 @@
+# jkit shell hook (PowerShell)
+$env:JKIT_SHELL = 'pwsh'
+& {
+  # in a script block of its own, so variables of the same name in the profile ($t, $bin...) are untouched
+  $g = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit/global'
+  $sep = [IO.Path]::PathSeparator
+  foreach ($pair in @(@('sbt', 'SBT_HOME'), @('gradle', 'GRADLE_HOME'), @('maven', 'MAVEN_HOME'), @('jdk', 'JAVA_HOME'))) {
+    $bin = Join-Path (Join-Path $g $pair[0]) 'bin'
+    # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+    $own = [Environment]::GetEnvironmentVariable($pair[1])
+    # drop a trailing slash or backslash, so the entry is written as jkit writes it
+    if ($own) { $own = $own.TrimEnd('\', '/') }
+    if ($own -and $own -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
+      $bin = Join-Path $own 'bin'
+    }
+    if (($env:PATH -split [regex]::Escape($sep)) -notcontains $bin) { $env:PATH = $bin + $sep + $env:PATH }
+  }
+  foreach ($pair in @(@('JAVA_HOME', 'jdk'), @('MAVEN_HOME', 'maven'), @('GRADLE_HOME', 'gradle'), @('SBT_HOME', 'sbt'), @('GRAALVM_HOME', 'graalvm'))) {
+    $dir = Join-Path $g $pair[1]
+    if (-not [Environment]::GetEnvironmentVariable($pair[0]) -and (Test-Path $dir)) {
+      Set-Item -Path ("Env:" + $pair[0]) -Value $dir
+    }
+  }
+}
+$global:__jkit_bin = '/opt/jk it''s $x/bin/jkit'
+$global:__jkit_root = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit'
+function jkit {
+  # PowerShell drops the first bare -- from a function's arguments, and jkit exec needs it,
+  # so put it back where the command line has it. That is only safe when every word before
+  # it is exactly one argument; otherwise the arguments are passed on as they came.
+  $a = @($args)
+  $line = $MyInvocation.Line
+  $at = $MyInvocation.OffsetInLine
+  if ($line -and $line.Contains('--')) {
+    $call = [Management.Automation.Language.Parser]::ParseInput($line, [ref]$null, [ref]$null).Find({
+      param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.StartLineNumber -eq 1 -and $n.Extent.StartColumnNumber -eq $at
+    }, $true)
+    if ($call) {
+      $i = 0
+      foreach ($w in @($call.CommandElements | Select-Object -Skip 1)) {
+        if ($w -is [Management.Automation.Language.CommandParameterAst] -and $w.Extent.Text -eq '--') {
+          if ($i -le $a.Count) {
+            $l = New-Object Collections.Generic.List[object]
+            foreach ($x in $a) { $l.Add($x) }
+            $l.Insert($i, '--')
+            $a = $l.ToArray()
+          }
+          break
+        }
+        $one = ($w -is [Management.Automation.Language.StringConstantExpressionAst]) -or
+          ($w -is [Management.Automation.Language.ExpandableStringExpressionAst]) -or
+          ($w -is [Management.Automation.Language.VariableExpressionAst] -and -not $w.Splatted) -or
+          ($w -is [Management.Automation.Language.CommandParameterAst] -and -not $w.Argument)
+        if (-not $one) { break }
+        $i++
+      }
+    }
+  }
+  $envFile = Join-Path ([IO.Path]::GetTempPath()) ("jkit-env-" + [guid]::NewGuid() + ".ps1")
+  $env:JKIT_ENV_FILE = $envFile
+  try {
+    if (-not ($global:__jkit_bin -and (Test-Path -LiteralPath $global:__jkit_bin))) {
+      # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+      # skipping folders under jkit's root, where a tool's bin could hold some other jkit
+      $root = $global:__jkit_root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+      $global:__jkit_bin = Get-Command jkit -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1 -ExpandProperty Source
+    }
+    if ($global:__jkit_bin) {
+      & $global:__jkit_bin @a
+      $rc = $LASTEXITCODE
+    } else {
+      [Console]::Error.WriteLine('jkit: not found on PATH')
+      $rc = 127
+    }
+  } finally {
+    # also after Ctrl-C, so that a later jkit run outside this function doesn't write to the file
+    Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
+  }
+  # Run the file's text as a script block rather than dot-sourcing the file: the execution
+  # policy (Restricted by default in Windows PowerShell) blocks .ps1 files, and the changes
+  # jkit reported would then silently not reach this shell.
+  if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) {
+    . ([scriptblock]::Create([IO.File]::ReadAllText($envFile)))
+  }
+  Remove-Item $envFile -ErrorAction SilentlyContinue
+  $global:LASTEXITCODE = $rc
+}

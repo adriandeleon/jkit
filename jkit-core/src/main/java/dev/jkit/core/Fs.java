@@ -53,7 +53,11 @@ public final class Fs {
         }
     }
 
-    /** Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist. */
+    /**
+     * Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist.
+     * Each folder is made in one that exists, never with its parents: should Ctrl-C delete the
+     * copy halfway, the copy fails rather than making it again.
+     */
     public static void copyTree(Path from, Path to) throws IOException {
         try (var all = Files.walk(from)) {
             for (Path p : (Iterable<Path>) all::iterator) {
@@ -61,7 +65,7 @@ public final class Fs {
                 if (Files.isSymbolicLink(p)) {
                     Files.createSymbolicLink(target, Files.readSymbolicLink(p));
                 } else if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
-                    Files.createDirectories(target);
+                    Files.createDirectory(target);
                 } else {
                     Files.copy(p, target, StandardCopyOption.COPY_ATTRIBUTES,
                             LinkOption.NOFOLLOW_LINKS);

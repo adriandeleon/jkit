@@ -62,9 +62,11 @@ public final class Main implements Runnable {
     private static final Set<String> MACHINE_STDOUT = Set.of("env", "hook-env", "hook", "completion");
 
     public static void main(String[] args) {
-        // messages carry text from project files and the network: never raw escape sequences
+        // Messages can carry text from project files and the network, so control characters in
+        // them are shown escaped rather than sent to the terminal.
         System.setErr(SafeOutput.wrap(System.err));
-        // --json documents escape their own control characters (JsonOut); \xNN would break the JSON
+        // stdout gets the same treatment, except for shell code and --json documents: JsonOut
+        // escapes control characters itself, and an inserted \xNN would break the JSON.
         List<String> own = Arrays.asList(args);
         if (own.contains("--")) {
             own = own.subList(0, own.indexOf("--"));
@@ -73,15 +75,17 @@ public final class Main implements Runnable {
             System.setOut(SafeOutput.wrap(System.out));
         }
         if (!cwdExists()) {
-            // the folder was deleted under the shell: say so plainly instead of a stack trace
+            // The folder was deleted under the shell. Say so plainly instead of failing with a
+            // stack trace.
             if (args.length >= 1 && args[0].equals("hook-env")) {
-                System.exit(0); // nothing to switch; the next cd runs the hook again
+                System.exit(0); // nothing to switch to; the next cd runs the hook again
             }
             JkitException gone = new JkitException("the current folder no longer exists",
                     "cd to another folder, then run jkit again");
             printError(gone);
             if (own.contains(JsonOut.FLAG)) {
-                // written by hand: Jackson's setup reads system properties, which fail without a folder
+                // Written by hand because Jackson's setup reads system properties, which fail
+                // when the current folder is gone.
                 System.out.println("{\n  \"schemaVersion\" : " + JsonOut.SCHEMA_VERSION + ",\n  \"error\" : {\n"
                         + "    \"message\" : \"" + gone.getMessage() + "\",\n    \"hints\" : [ \"" + gone.hints().getFirst()
                         + "\" ],\n    \"exitCode\" : " + gone.exitCode() + "\n  }\n}");
@@ -89,7 +93,8 @@ public final class Main implements Runnable {
             System.exit(gone.exitCode());
         }
         if (args.length >= 1 && args.length <= 2 && args[0].equals("hook-env")) {
-            // the cd hook runs this on every directory change: skip building the whole command line
+            // The cd hook runs this on every directory change, so it skips building the whole
+            // picocli command line to start faster.
             HookEnvCommand hookEnv = new HookEnvCommand();
             hookEnv.shell = args.length == 2 ? args[1] : null;
             System.exit(hookEnv.call());
@@ -99,7 +104,8 @@ public final class Main implements Runnable {
         try {
             code = run(args);
         } catch (OutOfMemoryError | StackOverflowError e) {
-            // the HTTP and archive limits should prevent this; if not, still one line and one document
+            // The HTTP and archive size limits should prevent this. If it happens anyway, report it
+            // as one error line (and one JSON document) like any other error.
             String what = e instanceof OutOfMemoryError ? "out of memory" : "out of stack (a deeply nested input)";
             System.err.println("error: " + what);
             if (own.contains(JsonOut.FLAG)) {
@@ -108,33 +114,39 @@ public final class Main implements Runnable {
             }
             code = 1;
         }
+        Signals.awaitHandler();
         System.exit(code);
     }
 
     /**
-     * The message with the home folder shortened to ~, as the rest of jkit's output shows paths:
-     * only where a path starts (after a space, a parenthesis or the start), and only the whole folder.
+     * Shortens the home folder in {@code message} to ~, as the rest of jkit's output does. Only a
+     * whole folder name at the start of a path (after a space, a parenthesis or the start of the
+     * message) is replaced.
      */
     static String homeAsTilde(String message, String home) {
         if (message == null || home == null || home.isEmpty() || home.equals(File.separator)) {
             return message;
         }
         Pattern p = Pattern.compile("(^|[\\s(])" + Pattern.quote(home)
-                + "(?=[/\\\\\\s:;,)]|$)"); // either slash: Windows paths can come with /
+                + "(?=[/\\\\\\s:;,)]|$)"); // either slash, since Windows paths can be written with /
         return p.matcher(message).replaceAll(m -> Matcher.quoteReplacement(m.group(1) + "~"));
     }
 
     /**
-     * Ctrl-C (SIGINT), SIGTERM and SIGHUP stop jkit as before, but first delete the folder an
-     * install is downloading into. SIGTERM and SIGHUP then exit 143 and 129. After SIGINT jkit
-     * ends from the signal itself, which a shell shows as 130 too: a bash script running jkit
-     * stops on Ctrl-C only when its command died from SIGINT (as PID 1, and on Windows, it exits
-     * 130). jkit exec puts its own handlers in place while its command runs. A signal the shell
-     * set to be ignored (a background job's SIGINT) stays ignored.
+     * Makes Ctrl-C (SIGINT), SIGTERM and SIGHUP delete the folder an install is downloading into
+     * before jkit stops. SIGTERM and SIGHUP exit with 143 and 129. For SIGINT jkit re-raises the
+     * signal so that it dies from it: a bash script stops on Ctrl-C only when its command was
+     * killed by SIGINT, not when it merely exited 130. Where re-raising isn't possible (as PID 1,
+     * and on Windows) jkit exits 130. jkit exec installs its own handlers while its command runs.
+     * A signal the shell set to be ignored, such as SIGINT for a background job, stays ignored.
      */
     private static void cleanUpOnSignals() {
         for (String name : List.of("INT", "TERM", "HUP")) {
             List<Signals.Saved> saved = Signals.handle(() -> {
+                // Mark jkit as interrupted before deleting anything: the main thread may fail
+                // once its folder is gone, and must then leave the message and the exit code to
+                // this handler (see Signals.awaitHandler).
+                WorkDirs.interrupt();
                 List<Path> deleted = WorkDirs.deleteAll();
                 if (!deleted.isEmpty()) {
                     System.err.println();
@@ -142,7 +154,7 @@ public final class Main implements Runnable {
                             + Changes.tilde(deleted.getFirst().toString()));
                 }
                 if (name.equals("INT")) {
-                    Signals.raiseInt(System.getenv()); // where it can't: exit 130 below
+                    Signals.raiseInt(System.getenv()); // returns only where it can't; then exit 130 below
                 }
                 System.exit(128 + signalNumber(name));
             }, name);
@@ -170,14 +182,15 @@ public final class Main implements Runnable {
     }
 
     static int run(String... args) {
-        // only jkit's own arguments: everything after -- belongs to the command jkit exec runs
+        // Only look at jkit's own arguments: everything after -- belongs to the command jkit exec runs.
         List<String> all = Arrays.asList(args);
         List<String> list = all.contains("--") ? all.subList(0, all.indexOf("--")) : all;
         boolean json = list.contains(JsonOut.FLAG);
         CommandLine cli = new CommandLine(new Main());
-        // no colors: SafeOutput would print picocli's escape codes as text, and plain help reads fine
+        // No colors: SafeOutput would print picocli's escape codes as text.
         cli.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
         cli.setExecutionExceptionHandler((ex, cmd, parsed) -> {
+            Signals.awaitHandler(); // an error caused by Ctrl-C deleting the work folder isn't shown
             if (System.getenv("JKIT_DEBUG") != null) {
                 ex.printStackTrace();
             }
@@ -206,7 +219,7 @@ public final class Main implements Runnable {
         });
         if (json && (list.contains("-h") || list.contains("--help") || list.contains("help")
                 || list.contains("-V") || list.contains("--version"))) {
-            // help and version under --json: still one JSON document on stdout. Parse errors print
+            // With --json, help and version are wrapped in a JSON document too. Parse errors print
             // their own error document through the handler above.
             StringWriter text = new StringWriter();
             cli.setOut(new PrintWriter(text, true));
@@ -248,7 +261,7 @@ public final class Main implements Runnable {
     private static void printError(JkitException e) {
         System.err.println("error: " + homeAsTilde(Visible.of(Errors.capped(e.getMessage())),
                 System.getProperty("user.home")));
-        // hints keep full paths: they can be commands, where a quoted ~ isn't expanded
+        // Hints keep full paths because they can be commands to copy, and a quoted ~ isn't expanded.
         for (String hint : e.hints()) {
             System.err.println("  " + Visible.of(Errors.capped(hint)));
         }

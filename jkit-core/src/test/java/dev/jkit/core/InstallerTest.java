@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
@@ -127,12 +128,28 @@ class InstallerTest {
         assertThat(home.tmp()).isEmptyDirectory();
     }
 
+    /** Progress that counts its starting() calls in {@code started}. */
+    private static Http.Progress countingStarts(AtomicInteger started) {
+        return new Http.Progress() {
+            @Override
+            public void update(long done, long total) { }
+
+            @Override
+            public void starting() {
+                started.incrementAndGet();
+            }
+        };
+    }
+
     @Test
     void allowedUnverifiedASignatureJkitCantCheckInstallsUnverifiedWithAWarning() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
+        AtomicInteger started = new AtomicInteger();
+        Http.Progress progress = countingStarts(started);
         Installer.Result result = new Installer(home, withSignature(archive, "<html>".getBytes()))
-                .install(signed(sha256(archive)), Http.Progress.NONE);
+                .install(signed(sha256(archive)), progress);
+        assertThat(started).hasValue(1);
         assertThat(result.fresh()).isTrue();
         assertThat(result.verified()).isFalse();
         assertThat(Store.verified(result.installed().home())).isFalse();
@@ -256,6 +273,40 @@ class InstallerTest {
                 .install(corretto(), Http.Progress.NONE, true))
                 .hasMessageContaining("a newer jkit may know a new key: jkit self-update");
         assertThat(new Store(home).list(Tool.JDK)).isEmpty();
+    }
+
+    @Test
+    void aSignatureThatRefusesTheInstallDoesSoBeforeTheDownload() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] retired;
+        try (InputStream in = InstallerTest.class.getResourceAsStream("corretto-11.0.4.11.1.sig")) {
+            retired = in.readAllBytes();
+        }
+        // none published, junk, a retired key and another vendor's key: all known from the .sig alone
+        for (byte[] sig : new byte[][] {null, "<html>".getBytes(), retired, realTemurinSignature()}) {
+            java.util.List<URI> fetched = new java.util.ArrayList<>();
+            Http http = withSignature(archive, sig);
+            Http counting = new Http() {
+                @Override
+                public String get(URI uri) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public void download(URI uri, Path target, Progress progress) throws IOException {
+                    fetched.add(uri);
+                    http.download(uri, target, progress);
+                }
+            };
+            AtomicInteger started = new AtomicInteger();
+            Http.Progress progress = countingStarts(started);
+            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), progress, true))
+                    .isInstanceOf(Installer.SignatureRequired.class);
+            assertThat(fetched).as("only the signature").containsExactly(corretto().signature());
+            assertThat(started).as("no \"downloading\" before a refusal").hasValue(0);
+        }
+        assertThat(home.tmp()).isEmptyDirectory();
     }
 
     @Test

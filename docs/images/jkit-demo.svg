@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="907" height="577" viewBox="0 0 907 577" role="img" aria-label="Terminal: jkit install jdk@21, java -version, jkit pin jdk@21 and jkit status">
+<title>jkit install, pin and status in a terminal</title>
+<rect width="907" height="577" rx="10" fill="#12141D"/>
+<rect x="0.5" y="0.5" width="906" height="576" rx="10" fill="none" stroke="#2A2E3D"/>
+<circle cx="22" cy="17" r="6" fill="#3A3F52"/><circle cx="42" cy="17" r="6" fill="#3A3F52"/><circle cx="62" cy="17" r="6" fill="#3A3F52"/>
+<line x1="0" y1="34" x2="907" y2="34" stroke="#2A2E3D"/>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
+<text x="24" y="62"><tspan fill="#9AA2D4">$ </tspan><tspan fill="#43DEC5">jkit install jdk@21</tspan></text>
+<text x="24" y="81" fill="#E6E8F0">downloading jdk 21.0.13.1+2 temurin from github.com</text>
+<text x="24" y="100" fill="#AEB4C6">  100%  198 / 198 MB</text>
+<text x="24" y="119" fill="#E6E8F0">installed jdk 21.0.13.1+2 temurin → ~/.jkit/tools/jdk/21.0.13.1+2-temurin</text>
+<text x="24" y="138" fill="#AEB4C6">  link   ~/.jkit/global/jdk → ~/.jkit/tools/jdk/21.0.13.1+2-temurin</text>
+<text x="24" y="157" fill="#AEB4C6">  set    JAVA_HOME=~/.jkit/global/jdk</text>
+<text x="24" y="176" fill="#AEB4C6">  signature checked: signed by Adoptium (key 843C48A565F8F04B)</text>
+<text x="24" y="195" fill="#AEB4C6">  new shells with the jkit hook: JAVA_HOME=~/.jkit/global/jdk, PATH includes ~/.jkit/global/jdk/bin</text>
+<text x="24" y="214" fill="#AEB4C6">  it&#x27;s the default jdk now (the first one installed); to clear it: jkit reset jdk --global</text>
+<text x="24" y="252"><tspan fill="#9AA2D4">$ </tspan><tspan fill="#43DEC5">java -version</tspan></text>
+<text x="24" y="271" fill="#E6E8F0">openjdk version &quot;21.0.13.1&quot; 2026-11-17 LTS</text>
+<text x="24" y="290" fill="#E6E8F0">OpenJDK Runtime Environment Temurin-21.0.13.1+2 (build 21.0.13.1+2-LTS)</text>
+<text x="24" y="309" fill="#E6E8F0">OpenJDK 64-Bit Server VM Temurin-21.0.13.1+2 (build 21.0.13.1+2-LTS, mixed mode, sharing)</text>
+<text x="24" y="347"><tspan fill="#9AA2D4">$ </tspan><tspan fill="#43DEC5">jkit pin jdk@21</tspan></text>
+<text x="24" y="366" fill="#E6E8F0">pinned jdk 21 in ~/work/billing-api/jkit.toml</text>
+<text x="24" y="385" fill="#AEB4C6">  file   ~/work/billing-api/jkit.toml created</text>
+<text x="24" y="404" fill="#AEB4C6">  set    JKIT_PROJECT=~/work/billing-api/jkit.toml:1795673370331</text>
+<text x="24" y="423" fill="#AEB4C6">  set    JKIT_PROJECT_JDK=~/.jkit/tools/jdk/21.0.13.1+2-temurin</text>
+<text x="24" y="442" fill="#AEB4C6">  set    JAVA_HOME=~/.jkit/tools/jdk/21.0.13.1+2-temurin</text>
+<text x="24" y="461" fill="#AEB4C6">  PATH   + ~/.jkit/tools/jdk/21.0.13.1+2-temurin/bin</text>
+<text x="24" y="480" fill="#AEB4C6">  to switch to a project&#x27;s versions on cd: jkit config set shell.auto_switch true, then open a new shell</text>
+<text x="24" y="518"><tspan fill="#9AA2D4">$ </tspan><tspan fill="#43DEC5">jkit status</tspan></text>
+<text x="24" y="537" fill="#E6E8F0">jdk      21.0.13.1+2 temurin     project   jkit.toml (jdk 21)</text>
+<text x="24" y="556" fill="#E6E8F0">project: ~/work/billing-api (jkit.toml)</text>
+</g></svg>

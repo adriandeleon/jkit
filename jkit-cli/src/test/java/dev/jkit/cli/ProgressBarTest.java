@@ -20,6 +20,15 @@ class ProgressBarTest {
     }
 
     @Test
+    void itSaysWhatItDownloadsOnlyOnceTheDownloadStarts() {
+        ProgressBar bar = new ProgressBar(new PrintStream(out, true, StandardCharsets.UTF_8),
+                "downloading jdk 25 from example.com", false, () -> now);
+        assertThat(said()).isEmpty();
+        bar.starting();
+        assertThat(said()).isEqualTo("downloading jdk 25 from example.com\n");
+    }
+
+    @Test
     void withoutATerminalItPrintsEachQuarterAndWhenQuietTooLong() {
         ProgressBar bar = bar(false);
         long mb = 1 << 20;

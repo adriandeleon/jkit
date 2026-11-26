@@ -97,5 +97,12 @@ public interface Http {
 
         /** The download starts again, on a new connection, because of {@code why}. */
         default void restarting(String why) { }
+
+        /**
+         * Called once, just before the download starts, by the code that starts it. An install
+         * calls it only after the checks that need no download have passed, so whatever it prints
+         * ("downloading ...") never precedes a refusal.
+         */
+        default void starting() { }
     }
 }

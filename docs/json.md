@@ -215,6 +215,9 @@ Exit code 1 when any check has level `fail`, 0 otherwise; the document is printe
   `home`, `hook`, `binary`, `config`, `links`, `outside-vars`, `path-order`, `user-env`, `store`,
   `temp-files` (only when there are some), `project`, `index`, `java-runs`, and `network` (only
   with `--network`).
+- On a file system that keeps no locks (some NFS mounts), jkit can't tell whether a work folder in
+  `tmp/` belongs to an install running right now. `temp-files` then names each such folder with its
+  age, as `info`, or as `warn` once it is a day old and probably left over.
 - Messages and fixes are for people and may change; filter on `id` and `level`.
 
 ## `jkit search <tool>[@version] [vendor] --json`
@@ -432,7 +435,9 @@ global one, one this shell uses, or one the project here pins. `inUse` are such 
 running program uses them: `pid` and `command` (null when the OS doesn't say) name one, whose
 executable is in the build or whose arguments name a file in it (a Gradle daemon's classpath). A
 `jkit use` in another shell that runs nothing from the build can't be seen. `leftovers` are folders interrupted
-installs and removals left; `cache` the cached version lists older than 30 days. `bytes` is the
+installs and removals left; a work folder jkit can't tell is in use (see `temp-files` under
+`doctor`) is never removed and isn't listed, but named on stderr with its age. `cache` holds the
+cached version lists older than 30 days. `bytes` is the
 space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
 
 ## `jkit self-update [--check] --json`

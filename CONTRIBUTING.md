@@ -5,14 +5,19 @@ can agree on the approach before you write it.
 
 ## Build and test
 
-Needs JDK 25 (`jkit install jdk@25`); Maven comes through the wrapper, and the build stops early
-on an older JDK.
+Needs JDK 25 (`jkit install jdk@25`); Maven comes through the wrapper (its checksum is pinned in
+`.mvn/wrapper/maven-wrapper.properties`), and the build stops early on an older JDK or Maven.
 
 ```bash
 ./mvnw verify                                          # compile + unit tests
 GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative package -DskipTests
 # binary: jkit-cli/target/jkit
+GRAALVM_HOME=/path/to/graalvm-25 ./mvnw -Pnative,linux-packages package -DskipTests
+# jkit-cli/target/jkit_<version>_amd64.deb and jkit-<version>-<release>.x86_64.rpm
 ```
+
+The `.deb` and `.rpm` are built in pure Java (jdeb, rpm-builder), for the build machine's
+architecture.
 
 CI runs `./mvnw verify` on Linux, macOS and Windows for every pull request. A pull request that
 changes the build, the packaging or the native-image metadata also builds the native binaries; so
@@ -24,6 +29,18 @@ To try a build without touching your own `~/.jkit`, give it a home of its own:
 export JKIT_HOME="$(mktemp -d)"
 jkit-cli/target/jkit install jdk@21
 ```
+
+## Modules
+
+| Module | Contents |
+| --- | --- |
+| `jkit-model` | ToolSpec, Version, Vendor, Platform; no I/O |
+| `jkit-sources` | Http (+ cache), foojay, Gradle, Maven Central and sbt clients |
+| `jkit-core` | Store, Installer, Archives, Config, ShellEnv, project files |
+| `jkit-platform` | OsServices: links, shell hooks (Unix, Windows) |
+| `jkit-cli` | picocli commands and the native binary |
+
+Design notes for bigger features are in [docs/design/](docs/design/).
 
 ## Tests
 

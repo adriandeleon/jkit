@@ -155,4 +155,29 @@ class VersionTest {
         assertThat(Version.parse("8u472").part(2)).isEqualTo(472);
         assertThat(Version.parse("8u472").matches("8")).isTrue();
     }
+
+    @Test
+    void exactPreReleaseSpecMatchesOnlyThatTag() {
+        assertThat(Version.parse("4.0.0-rc-7").matches("4.0.0-rc-4")).isFalse();
+        assertThat(Version.parse("4.0.0-rc-4").matches("4.0.0-rc-4")).isTrue();
+        assertThat(Version.parse("4.0.0-rc-7").matches("4.0.0-alpha-10")).isFalse();
+        assertThat(Version.parse("8.10.2").matches("8.10-rc-1")).isFalse();
+        assertThat(Version.parse("26-ea+20").matches("26-ea")).isTrue();
+        assertThat(Version.parse("4.0.0-rc-7").matches("4")).isTrue(); // a plain prefix still matches
+    }
+
+    @Test
+    void preReleasesSortByNumberNotText() {
+        List<String> sorted = Stream.of("4.0.0-rc-2", "4.0.0-rc-10", "4.0.0-alpha-13", "4.0.0-alpha-9", "4.0.0-beta-1")
+                .map(Version::parse).sorted().map(Version::raw).toList();
+        assertThat(sorted).containsExactly("4.0.0-alpha-9", "4.0.0-alpha-13", "4.0.0-beta-1", "4.0.0-rc-2", "4.0.0-rc-10");
+        assertThat(Version.parse("9.0.0-milestone-10")).isGreaterThan(Version.parse("9.0.0-milestone-9"));
+    }
+
+    @Test
+    void missingComponentsCountAsZero() {
+        assertThat(Version.parse("21+35").matches("21.0.0")).isTrue();
+        assertThat(Version.parse("21+35").matches("21.0.1")).isFalse();
+        assertThat(Version.parse("21.0.5+11").matches("21.0")).isTrue();
+    }
 }

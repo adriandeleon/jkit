@@ -1,0 +1,43 @@
+# jkit shell hook (@SHELL@)
+export JKIT_SHELL=@SHELL@
+__jkit_g=@GLOBAL@
+for __jkit_t in sbt gradle maven jdk; do
+  # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
+  case $__jkit_t in sbt) __jkit_h=${SBT_HOME-} ;; gradle) __jkit_h=${GRADLE_HOME-} ;;
+    maven) __jkit_h=${MAVEN_HOME-} ;; *) __jkit_h=${JAVA_HOME-} ;; esac
+  # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
+  __jkit_h=${__jkit_h%/}
+  __jkit_b="$__jkit_g/$__jkit_t/bin"
+  case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
+  case ":$PATH:" in *":$__jkit_b:"*) ;; *) PATH="$__jkit_b:$PATH" ;; esac
+done
+export PATH
+[ -z "${JAVA_HOME-}" ] && [ -e "$__jkit_g/jdk" ] && export JAVA_HOME="$__jkit_g/jdk"
+[ -z "${MAVEN_HOME-}" ] && [ -e "$__jkit_g/maven" ] && export MAVEN_HOME="$__jkit_g/maven"
+[ -z "${GRADLE_HOME-}" ] && [ -e "$__jkit_g/gradle" ] && export GRADLE_HOME="$__jkit_g/gradle"
+[ -z "${SBT_HOME-}" ] && [ -e "$__jkit_g/sbt" ] && export SBT_HOME="$__jkit_g/sbt"
+[ -z "${GRAALVM_HOME-}" ] && [ -e "$__jkit_g/graalvm" ] && export GRAALVM_HOME="$__jkit_g/graalvm"
+unset __jkit_t __jkit_g __jkit_h __jkit_b
+__jkit_bin=@SELF@
+__jkit_root=@ROOT@
+__jkit_run() {
+  if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
+    # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit.
+    # The case patterns start with ( because bash 3.2 (macOS) ends $( ) at a pattern's lone ).
+    __jkit_bin=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
+      case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%s\n' "$__jkit_d/jkit"; break; fi ;; esac
+    done)
+  fi
+  if [ -n "$__jkit_bin" ]; then command "$__jkit_bin" "$@"; else echo "jkit: not found on PATH" >&2; return 127; fi
+}
+jkit() {
+  local __jkit_env __jkit_rc
+  __jkit_env="$(mktemp "${TMPDIR:-/tmp}/jkit-env.XXXXXX")" || return 1
+  JKIT_ENV_FILE="$__jkit_env" __jkit_run "$@"
+  __jkit_rc=$?
+  # shellcheck source=/dev/null  # the environment changes jkit wrote just now
+  [ -s "$__jkit_env" ] && . "$__jkit_env"
+  rm -f "$__jkit_env"
+  return $__jkit_rc
+}
