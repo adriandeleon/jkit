@@ -1,6 +1,12 @@
 package dev.jkit.model;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** The fixed set of tools jkit manages. */
 public enum Tool {
@@ -38,27 +44,33 @@ public enum Tool {
     /** The tool whose installs this tool uses. */
     public Tool storeTool() { return this == GRAALVM ? JDK : this; }
 
+    /** The tool {@code text} names ({@code java} and {@code mvn} too), or an error with hints. */
     public static Tool parse(String text) {
-        return switch (text.toLowerCase(Locale.ROOT)) {
+        return find(text).orElseThrow(() -> new JkitException("unknown tool '" + text + "'", unknownToolHints(text)));
+    }
+
+    /** The tool {@code text} names, as {@link #parse} reads it; empty when it names none. */
+    public static Optional<Tool> find(String text) {
+        return Optional.ofNullable(switch (text.toLowerCase(Locale.ROOT)) {
             case "jdk", "java" -> JDK;
             case "maven", "mvn" -> MAVEN;
             case "gradle" -> GRADLE;
             case "sbt" -> SBT;
             case "graalvm" -> GRAALVM;
-            default -> throw new JkitException("unknown tool '" + text + "'", unknownToolHints(text));
-        };
+            default -> null;
+        });
     }
 
     /** Vendors people type where the tool goes ({@code temurin@21}). */
-    private static final java.util.Set<String> VENDOR_WORDS = java.util.Set.of("temurin", "adoptium", "zulu", "corretto",
+    private static final Set<String> VENDOR_WORDS = Set.of("temurin", "adoptium", "zulu", "corretto",
             "liberica", "oracle", "openjdk", "microsoft", "sapmachine", "semeru", "dragonwell", "mandrel", "kona",
             "bisheng", "jetbrains", "redhat", "graalvm-ce");
 
     private static String[] unknownToolHints(String text) {
         String lower = text.toLowerCase(Locale.ROOT).trim();
-        java.util.List<String> names = java.util.List.of("jdk", "java", "maven", "mvn", "gradle", "sbt", "graalvm");
-        java.util.List<String> hints = new java.util.ArrayList<>();
-        java.util.regex.Matcher glued = java.util.regex.Pattern.compile("([a-z]+)-?(\\d[0-9.]*)").matcher(lower);
+        List<String> names = List.of("jdk", "java", "maven", "mvn", "gradle", "sbt", "graalvm");
+        List<String> hints = new ArrayList<>();
+        Matcher glued = Pattern.compile("([a-z]+)-?(\\d[0-9.]*)").matcher(lower);
         if (Version.looksLikeVersion(lower)) {
             hints.add("a version goes after the tool: jdk@" + lower);
         } else if (glued.matches() && names.contains(glued.group(1))) {

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import java.io.File;
 import java.nio.file.Files;
@@ -123,7 +124,7 @@ class EnvTest {
     void shellSyntaxAndJson() throws Exception {
         EnvCommand.Result result = compute(false);
         assertThat(ShellEnv.format(result.variables(), "fish")).startsWith("set -gx JAVA_HOME "
-                + dev.jkit.model.ShellQuote.quote("fish", home.resolve("global/jdk").toString()));
+                + ShellQuote.quote("fish", home.resolve("global/jdk").toString()));
         JsonNode doc = JSON.readTree(JsonOut.write(EnvCommand.json(result)));
         assertThat(doc.path("dir").asText()).isEqualTo(project.toString());
         assertThat(doc.path("project").isNull()).isTrue();

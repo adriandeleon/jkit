@@ -2,13 +2,16 @@ package dev.jkit.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.jkit.core.ProjectFile;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +41,7 @@ class HookEnvTest {
         env = new HashMap<>(Map.of("JKIT_HOME", home.toString(), "HOME", tmp.resolve("user").toString(),
                 "JKIT_JDK_VENDOR", "temurin", "JKIT_SHELL", "bash",
                 "JAVA_HOME", home.resolve("global/jdk").toString(),
-                "PATH", home.resolve("global/jdk/bin") + java.io.File.pathSeparator + "/usr/bin"));
+                "PATH", home.resolve("global/jdk/bin") + File.pathSeparator + "/usr/bin"));
     }
 
     private Path install(String tool, String dir, String properties) throws Exception {
@@ -69,7 +72,7 @@ class HookEnvTest {
 
     @Test
     void theFolderLeftIsFoundEvenWithSemicolonsInItsName() {
-        String sep = java.io.File.separator;
+        String sep = File.separator;
         String file = sep + "src" + sep + "a;b" + sep + "jkit.toml"; // no ":" in a Windows name
         assertThat(HookEnvCommand.appliedDir(file + ":1700000000000;" + sep + "x" + sep + ".sdkmanrc:5"))
                 .isEqualTo(Path.of(file).getParent().toString());
@@ -89,9 +92,36 @@ class HookEnvTest {
         cd(project);
         assertThat(env).containsEntry("JAVA_HOME", temurin21.toString())
                 .containsEntry("JKIT_PROJECT_JDK", temurin21.toString()).containsKey("JKIT_PROJECT");
-        assertThat(env.get("PATH")).startsWith(temurin21.resolve("bin") + java.io.File.pathSeparator);
+        assertThat(env.get("PATH")).startsWith(temurin21.resolve("bin") + File.pathSeparator);
         assertThat(said()).contains("jkit: using ").contains("jkit.toml: jdk 21.0.9+10 temurin")
                 .contains("set    JAVA_HOME=" + temurin21).contains("PATH   + " + temurin21.resolve("bin"));
+    }
+
+    /** JKIT_AUTO_SWITCH=0 exported in an open shell turns switching off there, from the next cd. */
+    @Test
+    void autoSwitchTurnedOffInThisShellChangesNothing() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
+        env.put("JKIT_AUTO_SWITCH", "0");
+        assertThat(cd(project)).isEmpty();
+        assertThat(said()).isEmpty();
+        assertThat(env).containsEntry("JAVA_HOME", home.resolve("global/jdk").toString());
+        env.put("JKIT_AUTO_SWITCH", "1");
+        cd(project);
+        assertThat(env).containsEntry("JAVA_HOME", temurin21.toString());
+    }
+
+    /** The no-op answer comes from the environment and the files found, before a Context is built. */
+    @Test
+    void nothingToDoNeedsOnlyTheEnvironment() throws Exception {
+        List<Path> none = List.of();
+        assertThat(HookEnvCommand.nothingToDo(Map.of(), none)).isTrue();
+        assertThat(HookEnvCommand.nothingToDo(Map.of("JKIT_PROJECT_JDK", temurin21.toString()), none)).isFalse(); // leaving
+        Path file = Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
+        List<Path> files = List.of(file);
+        assertThat(HookEnvCommand.nothingToDo(Map.of(), files)).isFalse(); // entering
+        assertThat(HookEnvCommand.nothingToDo(Map.of("JKIT_PROJECT", ProjectFile.key(files)), files)).isTrue();
+        assertThat(HookEnvCommand.nothingToDo(Map.of("JKIT_AUTO_SWITCH", "false"), files)).isTrue();
+        assertThat(HookEnvCommand.nothingToDo(Map.of("JKIT_AUTO_SWITCH", "bogus"), files)).isFalse();
     }
 
     @Test
@@ -125,6 +155,21 @@ class HookEnvTest {
         assertThat(said()).contains("jkit: left the project in").contains("back to the global versions")
                 .contains("unset  JKIT_PROJECT_JDK").contains("PATH   - " + temurin21.resolve("bin"));
         assertThat(cd(elsewhere)).isEmpty();
+    }
+
+    @Test
+    void aJavaHomeSetOutsideJkitComesBackOnLeavingAndThatIsSaid() throws Exception {
+        Files.writeString(project.resolve("jkit.toml"), "[tools]\njdk = \"21\"\n");
+        env.put("JAVA_HOME", "/opt/my-jdk");
+        cd(project);
+        assertThat(env).containsEntry("JAVA_HOME", temurin21.toString()).containsEntry("JKIT_USER_JDK", "/opt/my-jdk");
+        assertThat(said()).contains("set    JKIT_USER_JDK=/opt/my-jdk").contains("your own JAVA_HOME is kept in JKIT_USER_JDK");
+        cd(elsewhere);
+        assertThat(env).containsEntry("JAVA_HOME", "/opt/my-jdk").doesNotContainKey("JKIT_USER_JDK");
+        assertThat(env.get("PATH")).doesNotContain(temurin21.toString());
+        assertThat(said()).contains("left the project in").contains("jdk back to your own JAVA_HOME")
+                .doesNotContain("back to the global").contains("set    JAVA_HOME=/opt/my-jdk")
+                .contains("JAVA_HOME is your own again: /opt/my-jdk");
     }
 
     @Test
@@ -167,7 +212,7 @@ class HookEnvTest {
         env.put("JKIT_SHELL_JDK", zulu17.toString());
         env.put("JAVA_HOME", zulu17.toString());
         cd(project);
-        env.put("PATH", "/venv/bin" + java.io.File.pathSeparator + env.get("PATH"));
+        env.put("PATH", "/venv/bin" + File.pathSeparator + env.get("PATH"));
         cd(elsewhere);
         assertThat(said()).contains("maven back to the global version; this shell's own jdk stays");
         assertThat(env).containsEntry("JAVA_HOME", zulu17.toString()).doesNotContainKey("MAVEN_HOME");

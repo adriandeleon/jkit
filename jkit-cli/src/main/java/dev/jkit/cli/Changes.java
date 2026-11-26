@@ -1,10 +1,14 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.JkitHome;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Tool;
+import dev.jkit.model.Visible;
 import java.io.File;
 import java.io.PrintStream;
+import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,6 +56,21 @@ final class Changes {
                 changes.add(new Change("env", name, "set", after));
             }
         }
+        // a *_HOME set outside jkit: say that jkit keeps it, and when it comes back
+        for (Tool t : Tool.values()) {
+            String kept = ShellEnv.userVariable(t);
+            if (!updates.containsKey(kept)) {
+                continue;
+            }
+            String saved = updates.get(kept);
+            String was = ctx.env.get(kept);
+            if (saved != null && !saved.equals(was)) {
+                note("your own " + t.homeVariable() + " is kept in " + kept + ": it comes back when jkit's "
+                        + t + " leaves this shell");
+            } else if (saved == null && was != null && Objects.equals(updates.get(t.homeVariable()), was)) {
+                note(t.homeVariable() + " is your own again: " + tilde(was));
+            }
+        }
         return this;
     }
 
@@ -95,7 +114,7 @@ final class Changes {
      * lists, checksums) the cache stored. Each is reported once, by whichever Changes asks first.
      */
     Changes disk() {
-        if (!ctx.homeExisted && !ctx.homeReported && java.nio.file.Files.exists(ctx.home.root())) {
+        if (!ctx.homeExisted && !ctx.homeReported && Files.exists(ctx.home.root())) {
             changes.add(new Change("folder", ctx.home.root().toAbsolutePath().toString(), "create", null));
             ctx.homeReported = true;
         }
@@ -128,7 +147,7 @@ final class Changes {
      * How to load the hook in new shells: hook --install can't edit a PowerShell profile, so on
      * Windows the line to add by hand.
      */
-    static final String HOOK_SETUP = java.io.File.separatorChar == '\\'
+    static final String HOOK_SETUP = File.separatorChar == '\\'
             ? "add to your PowerShell $PROFILE: jkit hook pwsh | Out-String | Invoke-Expression"
             : "jkit hook --install";
 
@@ -182,7 +201,7 @@ final class Changes {
         if (shellChoice != null && !shellChoice.isBlank()) {
             note("this shell keeps its own " + tool + " (" + tilde(Path.of(shellChoice))
                     + "); to follow the global one: jkit reset " + tool);
-        } else if (dev.jkit.core.Fs.path(current) != null && dev.jkit.core.Fs.path(current).toAbsolutePath().normalize()
+        } else if (Fs.path(current) != null && Fs.path(current).toAbsolutePath().normalize()
                 .equals(home.global(tool).toAbsolutePath().normalize())) {
             note("this shell follows it already: " + var + "=" + link);
         } else if (current != null && !current.isBlank()) {
@@ -219,7 +238,7 @@ final class Changes {
                 } else {
                     listsUpdated++;
                 }
-                hosts.add(java.net.URI.create(c.value()).getHost());
+                hosts.add(URI.create(c.value()).getHost());
                 continue;
             }
             out.println("  " + switch (c.kind() + " " + c.action()) {
@@ -279,7 +298,7 @@ final class Changes {
 
     /** Shortens the home folder to ~ for display. */
     static String tilde(String text) {
-        text = dev.jkit.model.Visible.of(text); // a folder name can hold a newline or an RTL override
+        text = Visible.of(text); // a folder name can hold a newline or an RTL override
         String userHome = System.getProperty("user.home");
         if (text == null || userHome == null || userHome.isEmpty()) {
             return text;

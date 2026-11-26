@@ -1,48 +1,56 @@
 package dev.jkit.cli;
 
 import dev.jkit.core.Installed;
+import dev.jkit.core.Store;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
+import dev.jkit.model.Version;
 import dev.jkit.sources.FoojaySource;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.TreeSet;
+import picocli.CommandLine;
 
 /** Vendor and installed-version rules shared by install, use and remove. */
 final class Resolve {
     private Resolve() { }
 
     /**
-     * Whether two paths name the same folder: equal as written, or the same file on disk. Windows
-     * reads a junction back with long names (runneradmin) where jkit was given short ones (RUNNER~1),
-     * so comparing the text alone says a global link points elsewhere when it doesn't.
-     */
-    static boolean same(java.nio.file.Path a, java.nio.file.Path b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        if (a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize())) {
-            return true;
-        }
-        try {
-            return java.nio.file.Files.exists(a) && java.nio.file.Files.exists(b) && java.nio.file.Files.isSameFile(a, b);
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    /**
      * {@code jdk@lts} as a feature release: online, the newest GA LTS foojay lists; offline (use,
      * exec, remove, upgrade), the newest LTS release installed. Any other spec is returned as is.
      */
     static ToolSpec lts(Context ctx, ToolSpec spec, boolean online) throws Exception {
+        return lts(ctx, spec, online, null, false);
+    }
+
+    /**
+     * {@link #lts(Context, ToolSpec, boolean)}; online with a {@code vendor}, the newest LTS release
+     * that vendor has a GA build of for this platform (and {@code fx}): a vendor that hasn't
+     * shipped the newest LTS yet gets its own newest, not an install that can't work.
+     */
+    static ToolSpec lts(Context ctx, ToolSpec spec, boolean online, Vendor vendor, boolean fx) throws Exception {
         if (spec == null || !spec.isLts()) {
             return spec;
         }
+        if (online && vendor != null) {
+            // one request, cached and the same that install makes for a version-less spec
+            Integer major = newestLts(ctx.foojay().newestPerVendorAndMajor(ctx.platform, fx), vendor);
+            if (major == null) {
+                throw new JkitException(vendor + " has no LTS " + spec.tool() + (fx ? " with JavaFX" : "")
+                        + " build for " + ctx.platform, "see what it has: jkit search " + spec.tool().id() + " "
+                        + vendor.name() + (fx ? " --fx" : ""));
+            }
+            return new ToolSpec(spec.tool(), String.valueOf(major));
+        }
         if (online) {
-            for (dev.jkit.sources.FoojaySource.Major m : ctx.foojay().majors()) {
+            for (FoojaySource.Major m : ctx.foojay().majors()) {
                 if (m.isLts()) {
                     return new ToolSpec(spec.tool(), String.valueOf(m.major()));
                 }
@@ -50,6 +58,22 @@ final class Resolve {
             throw new JkitException("foojay lists no LTS release");
         }
         return lts(ctx, spec, null, false);
+    }
+
+    /**
+     * The newest LTS major among {@code vendor}'s GA builds, by foojay's term of support (the
+     * usual LTS majors when it gives none); null when it has none.
+     */
+    static Integer newestLts(List<FoojaySource.Pkg> builds, Vendor vendor) {
+        Integer newest = null;
+        for (FoojaySource.Pkg p : builds) {
+            String term = p.termOfSupport() == null ? "" : p.termOfSupport();
+            boolean lts = term.isEmpty() ? ToolSpec.isLtsMajor(p.major()) : term.equalsIgnoreCase("lts");
+            if (p.vendor().equals(vendor) && lts && !p.version().isPreRelease() && (newest == null || p.major() > newest)) {
+                newest = p.major();
+            }
+        }
+        return newest;
     }
 
     /**
@@ -61,11 +85,11 @@ final class Resolve {
         if (spec == null || !spec.isLts()) {
             return spec;
         }
-        java.util.TreeSet<Integer> majors = new java.util.TreeSet<>(java.util.Comparator.reverseOrder());
-        for (dev.jkit.core.Installed i : ctx.store.list(spec.tool().storeTool())) {
-            int major = JsonOut.major(i.tool(), i.version());
+        TreeSet<Integer> majors = new TreeSet<>(Comparator.reverseOrder());
+        for (Installed i : ctx.store.list(spec.tool().storeTool())) {
+            int major = i.major();
             boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
-            if (ToolSpec.isLtsMajor(major) && (spec.tool() != dev.jkit.model.Tool.GRAALVM || graal)) {
+            if (ToolSpec.isLtsMajor(major) && (spec.tool() != Tool.GRAALVM || graal)) {
                 majors.add(major);
             }
         }
@@ -90,8 +114,8 @@ final class Resolve {
         Tool tool = spec.tool();
         if (!tool.hasVendors()) {
             if (typed != null) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, tool + " has no vendors; drop '" + typed + "'",
-                        dev.jkit.model.Version.looksLikeVersion(typed)
+                throw new JkitException(CommandLine.ExitCode.USAGE, tool + " has no vendors; drop '" + typed + "'",
+                        Version.looksLikeVersion(typed)
                                 ? "a version goes after @, not a space: " + tool + "@" + typed.trim()
                                 : "e.g. jkit install " + tool + "@<version>");
             }
@@ -99,7 +123,7 @@ final class Resolve {
         }
         Vendor vendor = typed == null ? ctx.config.defaultVendor(tool) : Vendor.of(typed);
         if (tool == Tool.GRAALVM && !vendor.isGraalVmBased()) {
-            throw new JkitException(typed != null ? picocli.CommandLine.ExitCode.USAGE : JkitException.GENERAL,
+            throw new JkitException(typed != null ? CommandLine.ExitCode.USAGE : JkitException.GENERAL,
                     vendor + " is not GraalVM-based",
                     "graalvm vendors: " + Vendor.graalVmVendorList());
         }
@@ -147,7 +171,7 @@ final class Resolve {
         String vendorText = (fx ? " with JavaFX" : "") + (vendor == null ? ""
                 : typedVendor == null ? " from " + vendor + " (default vendor)" : " " + vendor);
         String install = "jkit install " + spec + (typedVendor == null ? "" : " " + typedVendor) + (fx ? " --fx" : "");
-        List<String> hints = new java.util.ArrayList<>();
+        List<String> hints = new ArrayList<>();
         String unreleased = unreleased(ctx, spec);
         if (unreleased != null) {
             hints.add(unreleased);
@@ -177,7 +201,7 @@ final class Resolve {
      */
     static String unreleased(Context ctx, ToolSpec spec) {
         if ((spec.tool() != Tool.JDK && spec.tool() != Tool.GRAALVM) || spec.version() == null
-                || !dev.jkit.model.Version.looksLikeVersion(spec.version())) {
+                || !Version.looksLikeVersion(spec.version())) {
             return null;
         }
         FoojaySource cached = ctx.cachedFoojay();
@@ -206,10 +230,10 @@ final class Resolve {
      * still there: a jkit remove running at the same time must not leave the link on a deleted folder.
      */
     @SuppressWarnings("try")
-    static void pointGlobal(Context ctx, java.nio.file.Path link, java.nio.file.Path target) throws Exception {
+    static void pointGlobal(Context ctx, Path link, Path target) throws Exception {
         try (AutoCloseable lock = ctx.store.linkLock()) {
-            if (!java.nio.file.Files.isRegularFile(target.resolve(dev.jkit.core.Store.MARKER),
-                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            if (!Files.isRegularFile(target.resolve(Store.MARKER),
+                    LinkOption.NOFOLLOW_LINKS)) {
                 throw new JkitException(Changes.tilde(target.toString()) + " was removed by another jkit meanwhile",
                         "nothing changed; install it again, or pick another version");
             }

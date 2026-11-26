@@ -13,7 +13,12 @@ public record ToolSpec(Tool tool, String version) {
         return LTS.equals(version);
     }
 
-    /** Long-term-support feature releases: 8, 11, then every fourth from 17 (17, 21, 25, 29, …). */
+    /**
+     * Long-term-support feature releases by Oracle's current cadence: 8, 11, then every fourth from
+     * 17 (17, 21, 25, 29, …). Only the offline fallback: online, {@code jdk@lts} is what foojay marks
+     * as LTS; this formula picks among installed releases when there is no network, and would need
+     * updating if the cadence changes.
+     */
     public static boolean isLtsMajor(int major) {
         return major == 8 || major == 11 || (major >= 17 && (major - 17) % 4 == 0);
     }

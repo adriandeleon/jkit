@@ -1,12 +1,16 @@
 package dev.jkit.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -85,10 +89,42 @@ class HooksTest {
         assertThat(Files.readAllLines(log)).containsExactly("hook-env bash", "hook-env bash");
     }
 
+    /** zsh, where installed: hook-env runs on cd in the shell itself, not in a $( ) subshell. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void zshAutoSwitchSkipsSubshells() throws Exception {
+        Path zsh = Stream.of("/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh")
+                .map(Path::of).filter(Files::isExecutable).findFirst().orElse(null);
+        assumeTrue(zsh != null, "zsh isn't installed");
+        Path root = tmp.resolve("home/.jkit");
+        Path bin = Files.createDirectories(tmp.resolve("bin"));
+        Path log = tmp.resolve("calls.log");
+        Path fake = bin.resolve("jkit");
+        Files.writeString(fake, "#!/bin/sh\necho \"$* ${PWD##*/}\" >> '" + log + "'\nexit 0\n");
+        fake.toFile().setExecutable(true);
+        Path a = Files.createDirectories(tmp.resolve("a"));
+        Path b = Files.createDirectories(tmp.resolve("b"));
+        Path script = tmp.resolve("hook.zsh");
+        Files.writeString(script, Hooks.posix("zsh", root) + Hooks.autoSwitch("zsh")
+                + "cd '" + a + "'\nx=$(cd '" + b + "'; pwd)\n( cd '" + b + "' )\n");
+        ProcessBuilder pb = new ProcessBuilder(zsh.toString(), "-f", script.toString()).directory(tmp.toFile())
+                .redirectErrorStream(true);
+        withoutToolHomes(pb);
+        pb.environment().put("PATH", bin + ":" + pb.environment().get("PATH"));
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(p.exitValue()).as(out).isZero();
+        // once as the hook loads, once for the cd; neither subshell's cd
+        assertThat(Files.readAllLines(log)).containsExactly("hook-env zsh " + tmp.getFileName(), "hook-env zsh a");
+    }
+
     @Test
     void autoSwitchHooksForZshAndFishAndNoneForPowerShell() {
         assertThat(Hooks.autoSwitch("zsh")).contains("add-zsh-hook chpwd __jkit_hook_env")
-                .contains("__jkit_run hook-env zsh");
+                .contains("__jkit_run hook-env zsh")
+                // not in a prompt theme's $( ) subshell, where what it prints lands in the prompt
+                .contains("[[ $ZSH_SUBSHELL -eq 0 ]] || return 0");
         assertThat(Hooks.autoSwitch("fish")).contains("--on-variable PWD").contains("__jkit_run hook-env fish | source");
         assertThat(Hooks.autoSwitch("pwsh")).isNull();
     }
@@ -192,7 +228,7 @@ class HooksTest {
                 $s = 'exec', '--', 'x'; jkit @s
                 jkit use jdk@17; "home: $env:JAVA_HOME"
                 """;
-        String encoded = java.util.Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         int ran = 0;
         for (String shell : new String[] {"powershell", "pwsh"}) {
             ProcessBuilder pb = new ProcessBuilder(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
@@ -201,7 +237,7 @@ class HooksTest {
             Process p;
             try {
                 p = pb.start();
-            } catch (java.io.IOException notInstalled) {
+            } catch (IOException notInstalled) {
                 continue;
             }
             ran++;
@@ -216,6 +252,6 @@ class HooksTest {
                     "home: " + (windows ? "C:\\x\\jdk17" : "/x/jdk17"));
             assertThat(out).as(shell).doesNotContain("-- --");
         }
-        org.junit.jupiter.api.Assumptions.assumeTrue(ran > 0, "no PowerShell on this machine");
+        assumeTrue(ran > 0, "no PowerShell on this machine");
     }
 }

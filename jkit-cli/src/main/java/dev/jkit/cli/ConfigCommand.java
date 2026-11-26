@@ -1,23 +1,28 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.AtomicFile;
 import dev.jkit.core.Config;
 import dev.jkit.core.Config.Setting;
 import dev.jkit.core.ConfigWriter;
 import dev.jkit.core.ProjectFile;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Suggest;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import org.tomlj.TomlParseResult;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Parameters;
@@ -63,7 +68,7 @@ final class ConfigCommand implements Callable<Integer> {
         }
         try {
             TomlParseResult toml = ProjectFile.parseToml(file, ProjectFile.text(file));
-            Map<String, Object> values = new java.util.HashMap<>();
+            Map<String, Object> values = new HashMap<>();
             for (Setting s : Setting.values()) {
                 Object v = toml.hasErrors() ? null : toml.get(s.key());
                 if (v != null) {
@@ -121,7 +126,7 @@ final class ConfigCommand implements Callable<Integer> {
             List<String> keys = Arrays.stream(Setting.values()).map(Setting::key).toList();
             String guess = Suggest.closest(key, keys);
             // a bad argument, like an unknown vendor in config set jdk.vendor
-            throw new JkitException(picocli.CommandLine.ExitCode.USAGE, "unknown setting '" + key + "'",
+            throw new JkitException(CommandLine.ExitCode.USAGE, "unknown setting '" + key + "'",
                     guess != null ? "did you mean " + guess + "?" : "settings: " + String.join(", ", keys));
         }
         return s;
@@ -189,7 +194,7 @@ final class ConfigCommand implements Callable<Integer> {
 
         @Override
         public Integer call() throws Exception {
-            return run(Context.forConfigEdit(dev.jkit.model.Envs.system(), System.out, false));
+            return run(Context.forConfigEdit(Envs.system(), System.out, false));
         }
 
         int run(Context ctx) throws Exception {
@@ -225,7 +230,7 @@ final class ConfigCommand implements Callable<Integer> {
 
         @Override
         public Integer call() throws Exception {
-            return run(Context.forConfigEdit(dev.jkit.model.Envs.system(), System.out, true));
+            return run(Context.forConfigEdit(Envs.system(), System.out, true));
         }
 
         int run(Context ctx) throws Exception {
@@ -266,10 +271,8 @@ final class ConfigCommand implements Callable<Integer> {
             return false;
         }
         HookCommand.createParent(ctx, config, report);
-        if (!exists) {
-            Files.createFile(config, dev.jkit.model.Perms.file());
-        }
-        Files.writeString(config, edit.text());
+        // all at once, through a dotfile manager's link; a new file is 644 whatever the umask
+        AtomicFile.write(config, edit.text(), StandardCharsets.UTF_8, true);
         report.file(config, !exists);
         return true;
     }
@@ -282,12 +285,12 @@ final class ConfigCommand implements Callable<Integer> {
         if (s.isSwitch()) {
             Boolean on = Config.parseSwitch(value);
             if (on == null) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, s.key() + " must be true or false, not '" + value + "'");
+                throw new JkitException(CommandLine.ExitCode.USAGE, s.key() + " must be true or false, not '" + value + "'");
             }
             return on.toString();
         }
         Vendor vendor = Vendor.of(value);
-        JkitException notAVendor = new JkitException(picocli.CommandLine.ExitCode.USAGE, "'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
+        JkitException notAVendor = new JkitException(CommandLine.ExitCode.USAGE, "'" + value + "' isn't a vendor name", "see the vendors: jkit search jdk");
         if (value.isBlank()) {
             throw notAVendor;
         }
@@ -299,7 +302,7 @@ final class ConfigCommand implements Callable<Integer> {
                 throw notAVendor;
             }
             if (!vendor.isGraalVmBased()) {
-                throw new JkitException(picocli.CommandLine.ExitCode.USAGE, vendor.name() + " doesn't include native-image, so it can't be the GraalVM vendor",
+                throw new JkitException(CommandLine.ExitCode.USAGE, vendor.name() + " doesn't include native-image, so it can't be the GraalVM vendor",
                         "GraalVM vendors: " + Vendor.graalVmVendorList());
             }
             return vendor.name();
@@ -321,7 +324,7 @@ final class ConfigCommand implements Callable<Integer> {
 
     /** When the change takes effect, said in the terms of what it changes. */
     private static void after(Context ctx, Setting s, Changes report) {
-        Config now = Config.load(ctx.home, java.util.Map.of());
+        Config now = Config.load(ctx.home, Map.of());
         switch (s) {
             case JDK_VENDOR -> report.note("jdk@… without a vendor now means " + now.jdkVendor()
                     + "; installed JDKs and the global default are unchanged");
@@ -336,7 +339,8 @@ final class ConfigCommand implements Callable<Integer> {
                     : now.autoSwitch()
                     ? "new shells switch to a project's versions on cd (with the hook: " + Changes.HOOK_SETUP
                             + "); this shell doesn't until you open a new one"
-                    : "new shells no longer switch on cd; this shell still does until you open a new one");
+                    : "new shells no longer switch on cd; this shell still does until you open a new one"
+                            + " (or: export " + Config.AUTO_SWITCH_ENV + "=0)");
         }
     }
 

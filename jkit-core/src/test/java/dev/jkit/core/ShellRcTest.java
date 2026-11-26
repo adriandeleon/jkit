@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.jkit.model.JkitException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class ShellRcTest {
     private static final Path HOME = Path.of("/home/u");
@@ -73,14 +78,37 @@ class ShellRcTest {
         assertThat(ShellRc.manualLine("jkit hook pwsh | Out-String | Invoke-Expression\n")).isEqualTo(1);
     }
 
+    /** bash and zsh read a \r\n block's lines as "fi\r": the block is \n in any file, the rest stays as it was. */
     @Test
-    void keepsWindowsLineEndings() {
-        String added = ShellRc.add("a\r\n", "bash").text();
-        assertThat(added).startsWith("a\r\n\r\n" + ShellRc.START + "\r\n").doesNotContain("\n" + ShellRc.END + "\n");
-        assertThat(ShellRc.remove(added).text()).isEqualTo("a\r\n");
+    void theBlockIsAlwaysLfAndRemoveKeepsTheFileByteForByte() {
+        String rc = "a\r\nb\r\n";
+        String added = ShellRc.add(rc, "bash").text();
+        assertThat(added).startsWith(rc + "\n" + ShellRc.START + "\n").endsWith(ShellRc.END + "\n");
+        assertThat(added.substring(rc.length())).doesNotContain("\r");
+        assertThat(ShellRc.remove(added).text()).isEqualTo(rc);
+
+        // the user's unterminated last line gets the file's own line ending
+        assertThat(ShellRc.add("a\r\nb", "zsh").text()).startsWith("a\r\nb\r\n\n" + ShellRc.START + "\n");
+
+        // a block between mixed lines (and one an editor turned into \r\n) comes out leaving the rest as is
+        String mixed = "x\r\ny\n" + String.join("\r\n", ShellRc.block("bash")) + "\r\nz\r\n\tw  \n";
+        assertThat(ShellRc.remove(mixed).text()).isEqualTo("x\r\ny\nz\r\n\tw  \n");
+        // no line ending at the end of the file: nothing is added
+        assertThat(ShellRc.remove("a\n" + String.join("\n", ShellRc.block("bash")) + "\nb").text()).isEqualTo("a\nb");
     }
 
-    @org.junit.jupiter.api.io.TempDir
+    /** The block added to a \r\n file runs under bash. */
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void bashRunsTheBlockAddedToACrlfFile() throws Exception {
+        Path self = Files.createDirectories(tmp.resolve("crlf")).resolve("jkit");
+        Files.writeString(self, "#!/bin/sh\necho 'echo loaded'\n");
+        self.toFile().setExecutable(true);
+        String rc = ShellRc.add("# a comment\r\n", "bash", self.toString(), tmp.resolve(".jkit")).text();
+        assertThat(runBash(rc, "/usr/bin:/bin")).isEqualTo("loaded");
+    }
+
+    @TempDir
     Path tmp;
 
     /**
@@ -88,31 +116,31 @@ class ShellRcTest {
      * path gone, the first jkit on PATH outside jkit's own folder.
      */
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void theBlockRunsJkitByPathAndSkipsToolFolders() throws Exception {
         Path root = tmp.resolve("o'b home/.jkit");
-        Path tool = java.nio.file.Files.createDirectories(root.resolve("tools/jdk/21/bin"));
-        Path other = java.nio.file.Files.createDirectories(tmp.resolve("usr bin"));
-        Path self = java.nio.file.Files.createDirectories(tmp.resolve("self")).resolve("jkit");
+        Path tool = Files.createDirectories(root.resolve("tools/jdk/21/bin"));
+        Path other = Files.createDirectories(tmp.resolve("usr bin"));
+        Path self = Files.createDirectories(tmp.resolve("self")).resolve("jkit");
         for (Path p : new Path[] {tool.resolve("jkit"), other.resolve("jkit"), self}) {
-            java.nio.file.Files.writeString(p, "#!/bin/sh\necho 'echo " + p.getParent().getFileName() + "'\n");
+            Files.writeString(p, "#!/bin/sh\necho 'echo " + p.getParent().getFileName() + "'\n");
             p.toFile().setExecutable(true);
         }
         String path = tool + ":" + other + ":/usr/bin:/bin";
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("self");
-        java.nio.file.Files.delete(self);
+        Files.delete(self);
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEqualTo("usr bin");
-        java.nio.file.Files.delete(other.resolve("jkit"));
+        Files.delete(other.resolve("jkit"));
         assertThat(runBash(String.join("\n", ShellRc.block("bash", self.toString(), root)), path)).isEmpty();
     }
 
     private String runBash(String script, String path) throws Exception {
         Path file = tmp.resolve("rc.sh");
-        java.nio.file.Files.writeString(file, script + "\n");
+        Files.writeString(file, script + "\n");
         ProcessBuilder pb = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", file.toString()).redirectErrorStream(true);
         pb.environment().put("PATH", path);
         Process p = pb.start();
-        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         assertThat(p.waitFor()).as(out).isZero();
         return out;
     }

@@ -1,6 +1,8 @@
 package dev.jkit.cli;
 
 import dev.jkit.model.JkitException;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.Callable;
 import picocli.AutoComplete;
 import picocli.CommandLine;
@@ -36,8 +38,8 @@ final class CompletionCommand implements Callable<Integer> {
 
     static final class CompletionShells implements Iterable<String> {
         @Override
-        public java.util.Iterator<String> iterator() {
-            return java.util.List.of("bash", "zsh").iterator();
+        public Iterator<String> iterator() {
+            return List.of("bash", "zsh").iterator();
         }
     }
 }

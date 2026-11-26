@@ -1,5 +1,6 @@
 package dev.jkit.model;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -8,11 +9,19 @@ import java.util.regex.Pattern;
 
 /**
  * A version such as {@code 21.0.13+9}, {@code 3.9.11} or {@code 4.0.0-rc-7}: numeric components,
- * an optional pre-release suffix and an optional build number after {@code +}.
+ * an optional pre-release suffix and an optional build number after {@code +}. Pre-releases
+ * ({@code -ea}, {@code -alpha-N}, {@code -beta-N}, {@code -rc-N}/{@code -RCN}, {@code -MN},
+ * {@code -milestone-N}, {@code -SNAPSHOT}, {@code -dev}, {@code -preview}, {@code -pre},
+ * {@code -nightly}) sort before the release with the same numbers.
  */
 public final class Version implements Comparable<Version> {
+    /**
+     * A pre-release marker: a whole piece of the version between {@code .}, {@code -}, {@code +} and
+     * {@code _}, so {@code -rc-7}, {@code -RC1}, {@code -M1} and {@code -ea} count but a build label
+     * such as {@code +11-src1} doesn't.
+     */
     private static final Pattern PRE = Pattern.compile(
-            ".*(-ea|alpha|beta|-rc|rc-?\\d|-m\\d|milestone|snapshot).*");
+            "\\d*(ea|alpha|beta|rc|milestone|snapshot|dev|preview|pre|nightly)\\d*|m\\d+");
 
     private final String raw;
     private final int[] parts;
@@ -29,8 +38,8 @@ public final class Version implements Comparable<Version> {
         this.suffix = suffix;
     }
 
-    private static final java.util.regex.Pattern SAFE_TEXT =
-            java.util.regex.Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}");
+    private static final Pattern SAFE_TEXT =
+            Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}");
 
     /**
      * Whether a version from a source is plain enough to become a folder name, a PATH entry and a
@@ -45,7 +54,7 @@ public final class Version implements Comparable<Version> {
     public static Version parse(String raw) {
         String text = raw.trim();
         String lower = text.toLowerCase(Locale.ROOT);
-        boolean pre = PRE.matcher(lower).matches();
+        boolean pre = isPreReleaseText(lower);
         String core = text;
         String buildText = "";
         int plus = text.indexOf('+');
@@ -62,6 +71,15 @@ public final class Version implements Comparable<Version> {
             core = core.substring(0, dash);
         }
         return new Version(text, numbers(core), numbers(buildText), pre, pre ? suffix : "");
+    }
+
+    private static boolean isPreReleaseText(String lower) {
+        for (String piece : lower.split("[.\\-+_]")) {
+            if (PRE.matcher(piece).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -179,8 +197,8 @@ public final class Version implements Comparable<Version> {
                 while (ej < b.length() && Character.isDigit(b.charAt(ej))) {
                     ej++;
                 }
-                java.math.BigInteger na = new java.math.BigInteger(a.substring(i, ei));
-                java.math.BigInteger nb = new java.math.BigInteger(b.substring(j, ej));
+                BigInteger na = new BigInteger(a.substring(i, ei));
+                BigInteger nb = new BigInteger(b.substring(j, ej));
                 int c = na.compareTo(nb);
                 if (c != 0) {
                     return c;

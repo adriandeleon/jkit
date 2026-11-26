@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -73,7 +74,7 @@ final class WindowsUserEnv implements UserEnv {
     @Override
     public String systemPath() throws IOException {
         if (systemPath == null) {
-            read(java.util.List.of());
+            read(List.of());
         }
         return systemPath;
     }

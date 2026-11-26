@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -111,7 +112,7 @@ class UserEnvSetupTest {
                 .containsEntry("Path", "C:\\tools").doesNotContainKey("GRADLE_HOME");
         assertThat(printed(report)).contains("user   JAVA_HOME removed").contains("user   PATH - ");
         current.putAll(writes);
-        current.values().removeIf(java.util.Objects::isNull);
+        current.values().removeIf(Objects::isNull);
         assertThat(UserEnvSetup.uninstall(home, current, new Changes(ctx))).isEmpty();
     }
 

@@ -1,12 +1,14 @@
 package dev.jkit.core;
 
+import dev.jkit.model.Envs;
+import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +17,9 @@ import java.util.Map;
  * Computes the variables a shell-level {@code jkit use}, {@code jkit reset} or {@code jkit sync}
  * changes. The shell wrapper sources the result. jkit remembers each shell choice in
  * {@code JKIT_SHELL_<TOOL>} and each install applied from a project file in
- * {@code JKIT_PROJECT_<TOOL>}; a shell choice wins over a project's. It only ever removes PATH
+ * {@code JKIT_PROJECT_<TOOL>}; a shell choice wins over a project's. A *_HOME the user set
+ * outside jkit is kept in {@code JKIT_USER_<TOOL>} the first time jkit replaces it, and comes back
+ * (instead of the global version) once neither applies any more. It only ever removes PATH
  * entries under tools/, so it never touches anything the user added.
  */
 public final class ShellEnv {
@@ -32,6 +36,14 @@ public final class ShellEnv {
         return "JKIT_SHELL_" + tool.name();
     }
 
+    /**
+     * Where this shell keeps the *_HOME it had before jkit first replaced it, when that was set
+     * outside jkit (not the global link the hook sets): it comes back when jkit's choice goes.
+     */
+    public static String userVariable(Tool tool) {
+        return "JKIT_USER_" + tool.name();
+    }
+
     /** Where this shell remembers the install a project file chose for {@code tool}. */
     public static String projectVariable(Tool tool) {
         return "JKIT_PROJECT_" + tool.name();
@@ -44,13 +56,13 @@ public final class ShellEnv {
         active.put(tool, toolHome.toString());
         Map<String, String> out = new LinkedHashMap<>();
         out.put(stateVariable(tool), toolHome.toString());
-        out.put(tool.homeVariable(), toolHome.toString());
+        setHome(env, home, out, tool, toolHome.toString());
         if (tool == Tool.JDK && !active.containsKey(Tool.GRAALVM)) {
             if (jdkIsGraalVm) {
-                out.put(Tool.GRAALVM.homeVariable(), toolHome.toString());
+                setHome(env, home, out, Tool.GRAALVM, toolHome.toString());
                 out.put(GRAALVM_FOLLOWS, "1");
             } else if (env.containsKey(GRAALVM_FOLLOWS)) {
-                out.put(Tool.GRAALVM.homeVariable(), globalOrNull(home, Tool.GRAALVM));
+                back(env, home, out, Tool.GRAALVM);
                 out.put(GRAALVM_FOLLOWS, null);
             }
         }
@@ -72,19 +84,23 @@ public final class ShellEnv {
      */
     public static Map<String, String> reset(Map<String, String> env, JkitHome home, Tool tool,
                                             boolean projectJdkIsGraalVm) {
-        Map<String, String> after = dev.jkit.model.Envs.copy(env);
+        Map<String, String> after = Envs.copy(env);
         after.remove(stateVariable(tool));
         Map<Tool, String> active = active(after);
         String project = blankToNull(env.get(projectVariable(tool)));
         Map<String, String> out = new LinkedHashMap<>();
         out.put(stateVariable(tool), null);
-        out.put(tool.homeVariable(), project != null ? project : globalOrNull(home, tool));
+        if (project != null) {
+            setHome(env, home, out, tool, project);
+        } else {
+            back(env, home, out, tool);
+        }
         if (tool == Tool.JDK && !active.containsKey(Tool.GRAALVM)) {
             if (project != null && projectJdkIsGraalVm) {
-                out.put(Tool.GRAALVM.homeVariable(), project);
+                setHome(env, home, out, Tool.GRAALVM, project);
                 out.put(GRAALVM_FOLLOWS, "1");
             } else if (env.containsKey(GRAALVM_FOLLOWS)) {
-                out.put(Tool.GRAALVM.homeVariable(), globalOrNull(home, Tool.GRAALVM));
+                back(env, home, out, Tool.GRAALVM);
                 out.put(GRAALVM_FOLLOWS, null);
             }
         }
@@ -118,7 +134,7 @@ public final class ShellEnv {
         if (recordKey && (projectKey != null || env.containsKey(PROJECT))) {
             out.put(PROJECT, projectKey);
         }
-        Map<String, String> after = dev.jkit.model.Envs.copy(env);
+        Map<String, String> after = Envs.copy(env);
         for (Tool t : Tool.values()) {
             boolean shellChoice = blankToNull(env.get(stateVariable(t))) != null;
             if (homes.containsKey(t)) {
@@ -126,13 +142,13 @@ public final class ShellEnv {
                 out.put(projectVariable(t), value);
                 after.put(projectVariable(t), value);
                 if (!shellChoice) {
-                    out.put(t.homeVariable(), value);
+                    setHome(env, home, out, t, value);
                 }
             } else if (env.containsKey(projectVariable(t))) {
                 out.put(projectVariable(t), null);
                 after.remove(projectVariable(t));
                 if (!shellChoice) {
-                    out.put(t.homeVariable(), globalOrNull(home, t));
+                    back(env, home, out, t);
                 }
             }
         }
@@ -144,10 +160,10 @@ public final class ShellEnv {
                     out.put(GRAALVM_FOLLOWS, null);
                 }
             } else if (homes.containsKey(Tool.JDK) && jdkIsGraalVm) {
-                out.put(Tool.GRAALVM.homeVariable(), homes.get(Tool.JDK).toString());
+                setHome(env, home, out, Tool.GRAALVM, homes.get(Tool.JDK).toString());
                 out.put(GRAALVM_FOLLOWS, "1");
             } else if (env.containsKey(GRAALVM_FOLLOWS)) {
-                out.put(Tool.GRAALVM.homeVariable(), globalOrNull(home, Tool.GRAALVM));
+                back(env, home, out, Tool.GRAALVM);
                 out.put(GRAALVM_FOLLOWS, null);
             }
         }
@@ -201,6 +217,46 @@ public final class ShellEnv {
         return active;
     }
 
+    /**
+     * Sets {@code tool}'s *_HOME to {@code value}. The first time jkit replaces one the user set
+     * outside jkit (no jkit choice applies to it yet, and it isn't the global link the hook sets),
+     * that value is kept in {@link #userVariable} so {@link #back} can give it back.
+     */
+    private static void setHome(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool,
+                                String value) {
+        String current = blankToNull(env.get(tool.homeVariable()));
+        boolean jkits = blankToNull(env.get(stateVariable(tool))) != null
+                || blankToNull(env.get(projectVariable(tool))) != null
+                || tool == Tool.GRAALVM && env.containsKey(GRAALVM_FOLLOWS)
+                || env.containsKey(userVariable(tool));
+        if (current != null && !jkits && !out.containsKey(userVariable(tool)) && !isGlobal(current, home, tool)) {
+            out.put(userVariable(tool), current);
+        }
+        out.put(tool.homeVariable(), value);
+    }
+
+    /**
+     * Takes jkit's choice for {@code tool} away: its *_HOME goes back to the user's own value if
+     * {@link #setHome} kept one, else to the global link (unset when there is none).
+     */
+    private static void back(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool) {
+        String own = blankToNull(env.get(userVariable(tool)));
+        if (own != null) {
+            out.put(tool.homeVariable(), own);
+            out.put(userVariable(tool), null);
+        } else {
+            if (env.containsKey(userVariable(tool))) {
+                out.put(userVariable(tool), null);
+            }
+            out.put(tool.homeVariable(), globalOrNull(home, tool));
+        }
+    }
+
+    private static boolean isGlobal(String value, JkitHome home, Tool tool) {
+        Path path = Fs.path(value);
+        return path != null && path.toAbsolutePath().normalize().equals(home.global(tool).toAbsolutePath().normalize());
+    }
+
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
     }
@@ -233,7 +289,7 @@ public final class ShellEnv {
     static boolean underTools(String entry, JkitHome home) {
         try {
             return Path.of(entry).toAbsolutePath().normalize().startsWith(home.toolsRoot());
-        } catch (java.nio.file.InvalidPathException e) {
+        } catch (InvalidPathException e) {
             return false;
         }
     }
@@ -256,6 +312,6 @@ public final class ShellEnv {
     }
 
     private static String quote(String shell, String value) {
-        return dev.jkit.model.ShellQuote.quote(shell, value);
+        return ShellQuote.quote(shell, value);
     }
 }

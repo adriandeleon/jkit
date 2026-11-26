@@ -1,9 +1,11 @@
 package dev.jkit.core;
 
 import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 
 /**
  * Who owns a file, by number: a container user with no passwd entry ({@code docker run -u 1001},
@@ -11,18 +13,11 @@ import java.nio.file.Path;
  * folder. Root may own things too: a Dockerfile installs as root, then runs as another user.
  */
 public final class Owners {
-    private static final boolean POSIX =
-            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final boolean UNIX_VIEW =
-            java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("unix");
+            FileSystems.getDefault().supportedFileAttributeViews().contains("unix");
     private static Integer myUid;
 
     private Owners() { }
-
-    /** Whether files have POSIX owners and permissions here (not on Windows). */
-    public static boolean posix() {
-        return POSIX;
-    }
 
     /**
      * This process's uid, or -1 where it can't be read: on Linux {@code /proc/self} belongs to it;
@@ -72,7 +67,7 @@ public final class Owners {
 
     /** Writable by every user. Follows links. */
     public static boolean othersWritable(Path path) throws IOException {
-        return Files.getPosixFilePermissions(path).contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE);
+        return Files.getPosixFilePermissions(path).contains(PosixFilePermission.OTHERS_WRITE);
     }
 
     /**

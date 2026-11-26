@@ -3,6 +3,7 @@ package dev.jkit.core;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.Tool;
 import java.nio.file.Path;
+import java.util.Locale;
 
 /**
  * Where one tool comes from in a shell: what jkit would pick ({@link #wanted}) and what the
@@ -37,7 +38,7 @@ public record ToolState(Tool tool, Path shellChoice, PinnedTool pin, Installed p
         NONE;
 
         public String id() {
-            return name().toLowerCase(java.util.Locale.ROOT);
+            return name().toLowerCase(Locale.ROOT);
         }
     }
 

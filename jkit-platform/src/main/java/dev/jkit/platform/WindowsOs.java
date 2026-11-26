@@ -7,12 +7,15 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.Objects;
 
 /**
  * Windows: directory junctions, which need no admin rights or Developer Mode. Java has no API to
  * create one, so this runs {@code cmd /c mklink /J}. A junction whose target is gone can't be
  * read back through Java, so each one has a {@code .<name>.target} file beside it naming its
- * target. Untested in the prototype (built on Linux).
+ * target. ci.yml runs the JVM tests on Windows Server 2025, and release.yml builds the native
+ * {@code jkit.exe} there and smoke-tests it (the read-only commands, a Maven install, the
+ * PowerShell hook); linking and unlinking a junction itself has no test of its own yet.
  */
 final class WindowsOs implements OsServices {
 
@@ -86,8 +89,8 @@ final class WindowsOs implements OsServices {
      */
     private static void mklink(Path link, Path target) throws IOException {
         // the full path: a bare "cmd" is looked up in the current folder first on Windows
-        String systemRoot = java.util.Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
-        String cmd = java.nio.file.Path.of(systemRoot, "System32", "cmd.exe").toString();
+        String systemRoot = Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
+        String cmd = Path.of(systemRoot, "System32", "cmd.exe").toString();
         ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/s", "/c",
                 "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
         pb.environment().put("JKIT_LINK", link.toString());

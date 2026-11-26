@@ -18,12 +18,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and all. `jkit env --uninstall` removes only what it set. `jkit doctor` says whether it's set
   up, and warns about a `java` in the system `PATH`, which comes first; `jkit use … --global`
   says whether programs outside PowerShell follow it.
+- **`jkit prune` keeps builds a running program uses**, such as a JVM, an IDE or a Gradle daemon,
+  and says which process; `--json` lists them as `inUse`. A `jkit use` in another shell that runs
+  nothing from the build still can't be seen.
+- `CONTRIBUTING.md` and issue and pull request templates. The README says why you might pick jkit
+  over SDKMAN, mise or asdf (and what it doesn't do), and which hosts jkit contacts, and when: no
+  telemetry, no background update checks.
 
 ### Changed
 
+- **Temurin and Microsoft JDKs are always checked against the vendor's OpenPGP signature**, the
+  `.sig` the vendor publishes next to the download, whether or not foojay lists one. Some current
+  Temurin builds (21.0.13+9, 25.0.5+8) installed on foojay's checksum alone. Temurin builds from
+  before Adoptium started signing (before 8u342, 11.0.16, 17.0.4, 18.0.2) install on their
+  checksum, and jkit says only the checksum was checked.
+- **A signed build must be the version asked for.** After a good signature, jkit checks every part
+  of a JDK's version, and now Maven's (`lib/maven-core-<version>.jar`) and sbt's too, so a build the
+  publisher signed for another version is refused.
+- **`jkit install jdk@lts <vendor>`** (and `pin`, and `search` with a vendor) picks that vendor's
+  newest LTS release, not the newest LTS of any vendor.
+- **`~/.bashrc`, `~/.zshrc`, fish's file, `config.toml` and `jkit.toml` are written atomically**,
+  keeping their permissions; a symlinked startup file stays a symlink.
+- **`export JKIT_AUTO_SWITCH=0` stops switching on `cd` in a shell that's already open**, and the
+  `cd` hook does less work when nothing changes.
+- Unpacked JDKs, Maven, Gradle and sbt are no longer group-writable.
+- Signature files are downloaded with a 64 KB limit, not up to 2 GB and checked afterwards.
+- `jkit self-update` for a `.deb` installed from a file prints a command that downloads into a
+  private `mktemp -d` folder instead of a fixed `/tmp` name.
+- Building jkit on a JDK older than 25, or a Maven older than the wrapper's, stops at once with a
+  clear message.
 - **Ctrl-C stops an install or self-update cleanly.** Ctrl-C, SIGTERM or SIGHUP during a download
-  deletes the partial file, says so, and exits 130, 143 or 129. A SIGINT the shell set to be
-  ignored (a background job) stays ignored.
+  deletes the partial file, says so, and then ends jkit by that signal (Windows: exit 130), so a
+  shell script running jkit stops too. A SIGINT the shell set to be ignored (a background job)
+  stays ignored.
 - **Slow downloads start again.** A download that, 30 seconds in, would take more than 10 more
   minutes reconnects once, so a slow CDN edge no longer holds an install for a quarter of an hour.
 - **Progress in CI logs.** Without a terminal, download progress is a line at each quarter and at
@@ -35,6 +62,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`jkit hook --install` no longer breaks bash or zsh when the startup file has Windows (CRLF)
+  line endings**: the block is always LF. `--uninstall` removes only the block and leaves every
+  other byte as it was; `jkit pin` and `unpin` keep `jkit.toml`'s line endings too.
+- **A `JAVA_HOME` (or other `*_HOME`) you set yourself is no longer lost** when a project or
+  `jkit use` overrides it: jkit keeps it in `JKIT_USER_<TOOL>`, says so, and gives it back when
+  you leave the project or run `jkit reset`.
+- **`jkit exec`: Ctrl-C stops the shell script it runs in.** A command ended by SIGINT, SIGTERM or
+  SIGHUP now ends jkit by the same signal, and a Ctrl-C right as the command starts no longer
+  leaves it running.
+- **zsh: the `cd` hook no longer runs in `$( )` subshells**, so prompt themes don't show jkit
+  messages.
+- Versions with `-dev`, `-preview`, `-pre` or `-nightly` count as pre-releases, and a build label
+  such as `+11-src1` no longer makes a version one.
+- An archive entry name the file system can't hold gives the "unsafe to unpack" error instead of
+  an unexpected error.
+- Proxy passwords in `HTTPS_PROXY` or `JKIT_NETWORK_PROXY` keep a literal `+`.
 - **`jkit use`, `reset`, `pin` and `sync` change a Windows PowerShell shell again.** The PowerShell
   hook applied their changes by running a script file, which Windows PowerShell's default
   execution policy blocks, so jkit reported changes the shell never got. It no longer runs a file.

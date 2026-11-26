@@ -1,17 +1,24 @@
 package dev.jkit.core;
 
+import dev.jkit.model.Perms;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /** Reads what is installed under tools/. Each install carries a jkit-install.properties file. */
@@ -59,9 +66,8 @@ public final class Store {
     }
 
     private static Installed read(Tool tool, Path dir, Path marker) {
-        Properties p = new Properties();
         try {
-            p = load(marker);
+            Properties p = load(marker);
             String version = p.getProperty("version", "").trim();
             if (version.isEmpty()) {
                 return null;
@@ -108,10 +114,10 @@ public final class Store {
 
     private AutoCloseable lock(Path file, String waiting) throws IOException {
         home.create();
-        java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file,
-                java.util.Set.of(java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE),
-                dev.jkit.model.Perms.file());
-        java.nio.channels.FileLock lock;
+        FileChannel channel = FileChannel.open(file,
+                Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE),
+                Perms.file());
+        FileLock lock;
         try {
             lock = channel.tryLock();
             if (lock == null) {
@@ -122,7 +128,7 @@ public final class Store {
             channel.close();
             throw e;
         }
-        java.nio.channels.FileLock held = lock;
+        FileLock held = lock;
         return () -> {
             try (channel) {
                 held.release();
@@ -171,9 +177,9 @@ public final class Store {
         Path marker = dir.resolve(MARKER);
         // never through a link: an archive could ship one at this name pointing at a file of its own
         Files.deleteIfExists(marker);
-        try (var out = java.nio.channels.Channels.newOutputStream(Files.newByteChannel(marker,
-                java.util.Set.of(java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE),
-                dev.jkit.model.Perms.file()))) {
+        try (var out = Channels.newOutputStream(Files.newByteChannel(marker,
+                Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+                Perms.file()))) {
             p.store(out, "written by jkit");
         }
     }
@@ -183,7 +189,7 @@ public final class Store {
 
     /** Reads a marker: a regular file of its own, not a link, and small. */
     static Properties load(Path marker) throws IOException {
-        var attrs = Files.readAttributes(marker, java.nio.file.attribute.BasicFileAttributes.class,
+        var attrs = Files.readAttributes(marker, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
         if (!attrs.isRegularFile() || attrs.size() > MAX_MARKER) {
             throw new IOException(marker + " is not jkit's install record");

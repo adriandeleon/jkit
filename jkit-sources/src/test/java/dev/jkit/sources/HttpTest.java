@@ -8,6 +8,7 @@ import dev.jkit.model.JkitException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,8 +19,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -48,6 +52,53 @@ class HttpTest {
     }
 
     @Test
+    void proxyCredentialsArePercentDecodedOnly() {
+        // a + is a plus in a URL's user info, not a space as in a form
+        JdkHttp.ProxySpec plus = JdkHttp.ProxySpec.parse("http://a+b:p+w%2B%C3%A9@proxy:3128");
+        assertThat(plus.user()).isEqualTo("a+b");
+        assertThat(plus.password()).isEqualTo("p+w+é");
+        assertThat(JdkHttp.ProxySpec.parse("http://me:pässwörd@proxy:3128").password()).isEqualTo("pässwörd");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("http://me:100%@proxy:3128"))
+                .hasMessageContaining("must start an escape such as %40").hasMessageNotContaining("100%");
+        assertThatThrownBy(() -> JdkHttp.ProxySpec.parse("http://me:a%zzb@proxy:3128"))
+                .hasMessageContaining("http://me:***@proxy:3128");
+    }
+
+    @Test
+    void aSmallFileIsCutOffAtItsLimit() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = sizedServer(1 << 20, 0, calls);
+        try (JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1)) {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/x.sig");
+            assertThatThrownBy(() -> http.download(uri, tmp.resolve("sig"), Http.Progress.NONE, 64 * 1024))
+                    .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 64 KB for /x.sig");
+            http.download(uri, tmp.resolve("whole"), Http.Progress.NONE, 1 << 20);
+            assertThat(Files.size(tmp.resolve("whole"))).isEqualTo(1 << 20);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void theDefaultBoundedDownloadChecksTheSizeAfterwards() throws Exception {
+        Http fake = new Http() {
+            @Override
+            public String get(URI uri) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void download(URI uri, Path target, Progress progress) throws IOException {
+                Files.write(target, new byte[100]);
+            }
+        };
+        URI uri = URI.create("https://example.invalid/x.sig");
+        assertThatThrownBy(() -> fake.download(uri, tmp.resolve("a"), Http.Progress.NONE, 99))
+                .isInstanceOf(JkitException.class).hasMessageContaining("sent more than 99 bytes");
+        fake.download(uri, tmp.resolve("b"), Http.Progress.NONE, 100);
+    }
+
+    @Test
     void badProxyFailsOnlyWhenTheNetworkIsUsed() {
         JdkHttp http = new JdkHttp(Map.of("HTTPS_PROXY", "proxy.corp:abc")); // must not throw here
         assertThatThrownBy(() -> http.get(URI.create("https://example.invalid/")))
@@ -70,14 +121,14 @@ class HttpTest {
     @Test
     void aMirrorOnThisMachineNeverGoesThroughTheProxy() {
         JdkHttp.NoProxySelector s = new JdkHttp.NoProxySelector(InetSocketAddress.createUnresolved("proxy", 3128), null);
-        assertThat(s.select(URI.create("http://localhost:8080/m/")).getFirst()).isEqualTo(java.net.Proxy.NO_PROXY);
-        assertThat(s.select(URI.create("http://127.0.0.1:8080/m/")).getFirst()).isEqualTo(java.net.Proxy.NO_PROXY);
-        assertThat(s.select(URI.create("https://repo.maven.apache.org/")).getFirst()).isNotEqualTo(java.net.Proxy.NO_PROXY);
+        assertThat(s.select(URI.create("http://localhost:8080/m/")).getFirst()).isEqualTo(Proxy.NO_PROXY);
+        assertThat(s.select(URI.create("http://127.0.0.1:8080/m/")).getFirst()).isEqualTo(Proxy.NO_PROXY);
+        assertThat(s.select(URI.create("https://repo.maven.apache.org/")).getFirst()).isNotEqualTo(Proxy.NO_PROXY);
     }
 
     @Test
     void eachRedirectIsCheckedBeforeItIsFollowed() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger elsewhere = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger elsewhere = new AtomicInteger();
         HttpServer other = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         other.createContext("/", exchange -> {
             elsewhere.incrementAndGet();
@@ -108,7 +159,7 @@ class HttpTest {
             JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
             String base = "http://127.0.0.1:" + server.getAddress().getPort();
             assertThatThrownBy(() -> http.get(URI.create(base + "/plain")))
-                    .isInstanceOf(dev.jkit.model.JkitException.class).hasMessageContaining("refusing a redirect");
+                    .isInstanceOf(JkitException.class).hasMessageContaining("refusing a redirect");
             assertThat(elsewhere.get()).isZero();
             assertThat(http.get(URI.create(base + "/ok"))).isEqualTo("fine");
         } finally {
@@ -118,14 +169,14 @@ class HttpTest {
     }
 
     /** Serves {@code size} bytes: slowly (a few KB per 100 ms) to the first {@code slowRequests} requests. */
-    private static HttpServer sizedServer(int size, int slowRequests, java.util.concurrent.atomic.AtomicInteger calls)
+    private static HttpServer sizedServer(int size, int slowRequests, AtomicInteger calls)
             throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.setExecutor(Executors.newCachedThreadPool());
         server.createContext("/", exchange -> {
             boolean slow = calls.incrementAndGet() <= slowRequests;
             byte[] body = new byte[size];
-            java.util.Arrays.fill(body, (byte) 'x');
+            Arrays.fill(body, (byte) 'x');
             exchange.sendResponseHeaders(200, size);
             try (OutputStream out = exchange.getResponseBody()) {
                 if (!slow) {
@@ -147,12 +198,12 @@ class HttpTest {
 
     @Test
     void aFarTooSlowDownloadStartsAgainOnceOnANewConnection() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         HttpServer server = sizedServer(8 << 20, 1, calls);
         try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
-            http.slowAfter = Duration.ofSeconds(1);
-            http.slowLeft = Duration.ofSeconds(5); // 8 MB at 40 KB/s: minutes
+            // 8 MB at 40 KB/s: minutes
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                    Duration.ofSeconds(5));
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("big");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/big"), target,
@@ -175,12 +226,11 @@ class HttpTest {
 
     @Test
     void aDownloadThatIsSlowButWillFinishSoonIsLeftAlone() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         HttpServer server = sizedServer(80 << 10, 1, calls); // 80 KB at 40 KB/s: two seconds
         try {
-            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1);
-            http.slowAfter = Duration.ofSeconds(1);
-            http.slowLeft = Duration.ofSeconds(30);
+            JdkHttp http = new JdkHttp(Map.of(), "jkit/test", Duration.ofSeconds(5), 1, Duration.ofSeconds(1),
+                    Duration.ofSeconds(30));
             List<String> restarts = new ArrayList<>();
             Path target = tmp.resolve("small");
             http.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/small"), target,
@@ -231,9 +281,9 @@ class HttpTest {
     @Test
     void aServerThatNeverAnswersIsNotAskedAgain() throws Exception {
         // header waits per redirect, times three tries, once added up to about 18 minutes
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        server.setExecutor(Executors.newCachedThreadPool());
         server.createContext("/", exchange -> {
             calls.incrementAndGet();
             try {

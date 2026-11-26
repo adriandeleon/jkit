@@ -2,7 +2,11 @@ package dev.jkit.cli;
 
 import dev.jkit.core.Fs;
 import dev.jkit.core.SelfUpdate;
+import dev.jkit.core.Signatures;
+import dev.jkit.core.WorkDirs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -11,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
@@ -31,7 +36,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
     JsonOut.Flag json = new JsonOut.Flag();
 
     /** How SHA256SUMS.asc is checked: jkit's release key; tests sign with their own. */
-    SelfUpdate.SumsCheck sumsCheck = dev.jkit.core.Signatures::verifyRelease;
+    SelfUpdate.SumsCheck sumsCheck = Signatures::verifyRelease;
 
     @Override
     public Integer call() throws Exception {
@@ -40,7 +45,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
     }
 
     /** This running jkit binary, links resolved; refuses when jkit runs on a JVM (a development build). */
-    static Path self() throws java.io.IOException {
+    static Path self() throws IOException {
         String command = ProcessHandle.current().info().command().orElse(null);
         if (System.getProperty("org.graalvm.nativeimage.imagecode") == null || command == null) {
             throw new JkitException("self-update replaces the jkit binary, but this jkit runs on a JVM"
@@ -91,7 +96,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
                         + " until the next self-update deletes it");
             } else if (!olds.isEmpty()) {
                 report.note("the old files (" + olds.stream().map(o -> o.getFileName().toString())
-                        .collect(java.util.stream.Collectors.joining(", ")) + ") stay in "
+                        .collect(Collectors.joining(", ")) + ") stay in "
                         + Changes.tilde(binary.getParent().toString()) + " until the next self-update deletes them");
             }
         }
@@ -120,9 +125,9 @@ final class SelfUpdateCommand implements Callable<Integer> {
             throws Exception {
         // under the install lock: an install clears tmp/install-* folders that no one holds
         try (AutoCloseable lock = ctx.store.lock()) {
-            dev.jkit.model.Perms.mkdirs(ctx.home.tmp());
+            Perms.mkdirs(ctx.home.tmp());
             Path work = Files.createTempDirectory(ctx.home.tmp(), "install-self-");
-            dev.jkit.core.WorkDirs.add(work);
+            WorkDirs.add(work);
             try {
                 Path fresh = SelfUpdate.fetch(ctx.http(), base, latest, ctx.platform, work, new ProgressBar(ctx.err));
                 List<Path> olds = new ArrayList<>();
@@ -138,7 +143,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
                 Path old;
                 try {
                     old = SelfUpdate.replace(fresh, binary, ctx.platform.isWindows());
-                } catch (java.io.IOException | JkitException e) {
+                } catch (IOException | JkitException e) {
                     if (olds.isEmpty()) {
                         throw e;
                     }
@@ -156,10 +161,10 @@ final class SelfUpdateCommand implements Callable<Integer> {
             } finally {
                 try {
                     Fs.deleteRecursively(work);
-                } catch (java.io.IOException e) {
+                } catch (IOException e) {
                     // a leftover in tmp/ is cleaned up by the next install or jkit prune
                 } finally {
-                    dev.jkit.core.WorkDirs.remove(work);
+                    WorkDirs.remove(work);
                 }
             }
         }

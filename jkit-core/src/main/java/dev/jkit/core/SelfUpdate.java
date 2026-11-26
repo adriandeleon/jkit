@@ -3,17 +3,21 @@ package dev.jkit.core;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Platform;
 import dev.jkit.model.Version;
+import dev.jkit.model.Visible;
 import dev.jkit.sources.Http;
+import dev.jkit.sources.HttpStatusException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
@@ -69,7 +73,10 @@ public final class SelfUpdate {
             }
             if (this == DEB_FILE) {
                 String file = "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
-                return "curl -fLo /tmp/" + file + " " + release.url(DEFAULT_BASE, file) + " && sudo apt install /tmp/" + file;
+                // a new folder of the user's own, not a fixed name in /tmp: another user could create
+                // that file first, writable by them, and swap in their own .deb before sudo apt reads it
+                return "d=$(mktemp -d) && curl -fLo \"$d/" + file + "\" " + release.url(DEFAULT_BASE, file)
+                        + " && sudo apt install \"$d/" + file + "\"";
             }
             return command;
         }
@@ -107,17 +114,17 @@ public final class SelfUpdate {
         try {
             signature = http.getFresh(release.url(base, "SHA256SUMS.asc"));
         } catch (IOException | JkitException e) {
-            if (e instanceof dev.jkit.sources.HttpStatusException status && status.status() == 404) {
+            if (e instanceof HttpStatusException status && status.status() == 404) {
                 // releases before 0.4.0 have none, and waiting won't make one appear
                 throw new JkitException("jkit " + release.version() + " has no signed SHA256SUMS (no SHA256SUMS.asc"
                         + " on its release page), so jkit can't check it; nothing was changed", hint);
             }
             throw new JkitException("couldn't fetch the signature of " + what + " ("
-                    + dev.jkit.model.Visible.of(String.valueOf(e.getMessage())) + "); nothing was changed",
+                    + Visible.of(String.valueOf(e.getMessage())) + "); nothing was changed",
                     "try again later", "or " + hint);
         }
-        Signatures.Result result = check.verify(sums.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Signatures.Result result = check.verify(sums.getBytes(StandardCharsets.UTF_8),
+                signature.getBytes(StandardCharsets.UTF_8));
         if (result.outcome() != Signatures.Outcome.GOOD) {
             throw new JkitException(what + " isn't signed by jkit's release key (" + result.detail()
                     + "); nothing was changed", hint);
@@ -209,12 +216,12 @@ public final class SelfUpdate {
                     + " at its top; nothing was changed");
         }
         if (!platform.isWindows()) {
-            Files.setPosixFilePermissions(binary, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+            Files.setPosixFilePermissions(binary, PosixFilePermissions.fromString("rwxr-xr-x"));
         }
         String says = runVersion(binary);
         if (!says.equals("jkit " + release.version().raw())) {
             throw new JkitException("the new jkit binary doesn't run here (jkit --version said: "
-                    + dev.jkit.model.Visible.of(says.isEmpty() ? "nothing" : says) + "); nothing was changed",
+                    + Visible.of(says.isEmpty() ? "nothing" : says) + "); nothing was changed",
                     "Linux builds need glibc 2.34 or newer; macOS builds need macOS 15 or newer");
         }
         return binary;
@@ -234,10 +241,10 @@ public final class SelfUpdate {
                 return "";
             }
             byte[] head;
-            try (java.io.InputStream in = Files.newInputStream(said)) {
+            try (InputStream in = Files.newInputStream(said)) {
                 head = in.readNBytes(4096);
             }
-            return new String(head, java.nio.charset.StandardCharsets.UTF_8).lines().findFirst().orElse("").strip();
+            return new String(head, StandardCharsets.UTF_8).lines().findFirst().orElse("").strip();
         } catch (IOException e) {
             return "";
         } catch (InterruptedException e) {

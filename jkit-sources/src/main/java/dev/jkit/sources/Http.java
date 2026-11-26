@@ -1,7 +1,9 @@
 package dev.jkit.sources;
 
+import dev.jkit.model.JkitException;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** The only way jkit talks to the network, so tests can replace it. */
@@ -15,6 +17,24 @@ public interface Http {
     }
 
     void download(URI uri, Path target, Progress progress) throws IOException;
+
+    /**
+     * Like {@link #download}, for a small file (a signature): more than {@code max} bytes fails, and
+     * the download stops there rather than at the 2 GB a JDK may take.
+     */
+    default void download(URI uri, Path target, Progress progress, long max) throws IOException {
+        download(uri, target, progress);
+        if (Files.size(target) > max) {
+            throw tooBig(uri, max);
+        }
+    }
+
+    /** More than {@code max} bytes came for {@code uri}. */
+    static JkitException tooBig(URI uri, long max) {
+        String limit = max >= 1 << 20 ? (max >> 20) + " MB" : max >= 1 << 10 ? (max >> 10) + " KB" : max + " bytes";
+        return new JkitException(uri.getHost() + " sent more than " + limit + " for " + uri.getPath()
+                + "; refusing it", "a broken or hostile server or mirror: check JKIT_SOURCES_*_URL and the network");
+    }
 
     /**
      * Whether this client may not use the network. Sources then leave a separate checksum file
@@ -35,12 +55,12 @@ public interface Http {
         try {
             uri = URI.create(text.strip());
         } catch (IllegalArgumentException e) {
-            throw new dev.jkit.model.JkitException("the source sent an invalid address for " + what);
+            throw new JkitException("the source sent an invalid address for " + what);
         }
         // plain http to this machine only from a mirror on this machine: a remote source must not
         // send jkit to local services
         if (!"https".equalsIgnoreCase(uri.getScheme()) && "https".equalsIgnoreCase(source.getScheme())) {
-            throw new dev.jkit.model.JkitException("refusing " + what + " over " + uri.getScheme() + " from "
+            throw new JkitException("refusing " + what + " over " + uri.getScheme() + " from "
                     + source.getHost() + ": " + uri, "jkit only downloads tools and checksums over https");
         }
         return requireSecure(uri);
@@ -52,7 +72,7 @@ public interface Http {
      */
     static URI requireSecure(URI uri) {
         if (!isSecure(uri)) {
-            throw new dev.jkit.model.JkitException("refusing to download over " + uri.getScheme() + ": " + uri,
+            throw new JkitException("refusing to download over " + uri.getScheme() + ": " + uri,
                     "jkit only downloads tools and checksums over https");
         }
         return uri;

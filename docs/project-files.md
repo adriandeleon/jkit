@@ -102,6 +102,12 @@ when you leave, printing every variable they change. PowerShell doesn't switch o
 - bash switches when the next prompt is drawn, so `cd app && java -version` on one line still runs
   the old JDK. In scripts and one-liners, use `jkit exec -- java -version` instead.
 - Editing the project file takes effect on the next `cd`, `jkit sync` or `jkit pin`.
+- A change to `auto_switch` in `config.toml` applies to new shells. To stop switching in a shell
+  that is already open, `export JKIT_AUTO_SWITCH=0` there (`set -gx JKIT_AUTO_SWITCH 0` in fish).
+- A `JAVA_HOME` (or other `*_HOME`) you set yourself, outside jkit, is kept in `JKIT_USER_JDK`
+  (`JKIT_USER_MAVEN`, ...) when a project or `jkit use` first replaces it. It comes back, instead of
+  the global version, once neither applies any more (you leave the project, `jkit reset jdk`), and
+  jkit says so each time.
 
 ## Commands
 

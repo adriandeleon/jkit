@@ -2,11 +2,15 @@ package dev.jkit.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.jkit.core.ShellEnv;
+import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
 import dev.jkit.model.Tool;
+import dev.jkit.model.ToolSpec;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -64,7 +68,7 @@ class ExecTest {
     void aWordThatIsNoToolOrVendorIsAUsageError() {
         // "graalvm" right after a JDK is Oracle GraalVM, the vendor, as in jkit use jdk@21 graalvm
         assertThat(ExecCommand.choices(List.of("jdk@21", "graalvm")))
-                .containsExactly(new ExecCommand.Choice(dev.jkit.model.ToolSpec.parse("jdk@21"), "graalvm"));
+                .containsExactly(new ExecCommand.Choice(ToolSpec.parse("jdk@21"), "graalvm"));
         assertThatThrownBy(() -> ExecCommand.choices(List.of("mvn", "test")))
                 .isInstanceOf(JkitException.class).hasMessageContaining("vendor for maven");
         assertThatThrownBy(() -> ExecCommand.choices(List.of("./build.sh")))
@@ -131,7 +135,7 @@ class ExecTest {
         // Windows names it "Path"; System.getenv() is case-sensitive, so jkit reads it through Envs
         env.remove("PATH");
         env.put("Path", "/usr/bin");
-        env = dev.jkit.model.Envs.of(env, true);
+        env = Envs.of(env, true);
         ExecCommand.Plan plan = plan("jdk@21");
         assertThat(plan.variables().get("PATH")).endsWith(File.pathSeparator + "/usr/bin");
         Map<String, String> child = ExecCommand.childEnv(env, plan);
@@ -166,5 +170,44 @@ class ExecTest {
         assertThatThrownBy(() -> ExecCommand.executable("no-such-command-jkit", path, project))
                 .isInstanceOf(JkitException.class)
                 .satisfies(e -> assertThat(((JkitException) e).exitCode()).isEqualTo(127));
+    }
+
+    @Test
+    void anExitCodeFromASignalNamesItOnUnixOnly() {
+        assertThat(Signals.endedBy(130, false)).isEqualTo("INT");
+        assertThat(Signals.endedBy(143, false)).isEqualTo("TERM");
+        assertThat(Signals.endedBy(129, false)).isEqualTo("HUP");
+        assertThat(Signals.endedBy(1, false)).isNull();
+        assertThat(Signals.endedBy(137, false)).isNull(); // KILL: jkit only passes on what a shell acts on
+        assertThat(Signals.endedBy(130, true)).isNull();
+    }
+
+    /**
+     * Runs jkit exec in a JVM of its own under perl, which reports the signal that ended it (Java
+     * can't tell a death by SIGINT from exit code 130): a bash script stops on Ctrl-C only on the first.
+     */
+    private String endedBy(String script) throws Exception {
+        Path perl = Path.of("/usr/bin/perl");
+        assumeTrue(Files.isExecutable(perl), "no perl to tell how a process ended");
+        String jvm = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        ProcessBuilder pb = new ProcessBuilder(perl.toString(), "-e", "system(@ARGV); print(($? & 127) . ' ' . ($? >> 8))",
+                jvm, "-cp", System.getProperty("java.class.path"), "dev.jkit.cli.Main", "exec", "--no-project", "--",
+                "/bin/sh", "-c", script).directory(project.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
+        pb.environment().put("JKIT_HOME", home.toString());
+        pb.environment().put("HOME", tmp.resolve("user").toString());
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+        p.waitFor();
+        return out;
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aCommandEndedByASignalEndsJkitWithTheSameSignal() throws Exception {
+        // the command isn't left ignoring SIGINT, and jkit ends from it too (signal 2, no exit code)
+        assertThat(endedBy("kill -INT $$; echo survived")).isEqualTo("2 0");
+        assertThat(endedBy("kill -TERM $$")).isEqualTo("15 0");
+        // an exit code is passed on as it is
+        assertThat(endedBy("exit 3")).isEqualTo("0 3");
     }
 }

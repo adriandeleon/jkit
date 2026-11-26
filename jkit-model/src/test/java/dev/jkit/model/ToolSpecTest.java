@@ -3,6 +3,7 @@ package dev.jkit.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ToolSpecTest {
@@ -17,11 +18,22 @@ class ToolSpecTest {
     }
 
     @Test
+    void findLooksAToolUpWithoutThrowing() {
+        assertThat(Tool.find("Java")).contains(Tool.JDK);
+        assertThat(Tool.find("mvn")).contains(Tool.MAVEN);
+        assertThat(Tool.find("graalvm")).contains(Tool.GRAALVM);
+        assertThat(Tool.find("zulu")).isEmpty();
+        assertThat(Tool.find("")).isEmpty();
+        assertThat(Tool.parse("SBT")).isEqualTo(Tool.SBT);
+        assertThatThrownBy(() -> Tool.parse("zulu")).isInstanceOf(JkitException.class).hasMessage("unknown tool 'zulu'");
+    }
+
+    @Test
     void ltsIsAJdkWord() {
         assertThat(ToolSpec.parse("jdk@LTS").isLts()).isTrue();
         assertThat(ToolSpec.parse("graalvm@lts").isLts()).isTrue();
         assertThatThrownBy(() -> ToolSpec.parse("maven@lts")).hasMessageContaining("only JDKs have LTS releases");
-        assertThat(java.util.stream.IntStream.rangeClosed(8, 30).filter(ToolSpec::isLtsMajor).boxed().toList())
+        assertThat(IntStream.rangeClosed(8, 30).filter(ToolSpec::isLtsMajor).boxed().toList())
                 .containsExactly(8, 11, 17, 21, 25, 29);
     }
 

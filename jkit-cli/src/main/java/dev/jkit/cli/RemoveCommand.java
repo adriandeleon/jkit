@@ -2,19 +2,27 @@ package dev.jkit.cli;
 
 import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
+import dev.jkit.core.ShellEnv;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolStates;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.Perms;
+import dev.jkit.model.ShellQuote;
 import dev.jkit.model.Tool;
 import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -42,7 +50,7 @@ final class RemoveCommand implements Callable<Integer> {
     @Option(names = "--force", description = "Remove even if global or active in this shell.")
     boolean force;
 
-    @picocli.CommandLine.Mixin
+    @CommandLine.Mixin
     JsonOut.Flag json = new JsonOut.Flag();
 
     @Override
@@ -109,7 +117,7 @@ final class RemoveCommand implements Callable<Integer> {
             }
         }
         if (json.json) {
-            java.util.Map<String, Object> doc = JsonOut.document();
+            Map<String, Object> doc = JsonOut.document();
             doc.put("removed", removed);
             doc.put("changes", changes);
             ctx.out.println(JsonOut.write(doc));
@@ -118,17 +126,17 @@ final class RemoveCommand implements Callable<Integer> {
     }
 
     /** Removes one install and its global links; prints and returns what changed. */
-    static Changes remove(Context ctx, Installed i, ToolStates.Result here, java.io.PrintStream say)
+    static Changes remove(Context ctx, Installed i, ToolStates.Result here, PrintStream say)
             throws IOException {
         Changes removedLinks = new Changes(ctx);
-        dev.jkit.model.Perms.mkdirs(ctx.home.tmp());
+        Perms.mkdirs(ctx.home.tmp());
         Path trashDir = Files.createTempDirectory(ctx.home.tmp(), "remove-");
         Path trash = trashDir.resolve(i.id());
         try {
             // one rename first: if anything holds the folder open (Windows), nothing is touched
             try {
                 Files.move(i.home(), trash, StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException crossDisk) {
+            } catch (AtomicMoveNotSupportedException crossDisk) {
                 // tools/ on another disk than tmp/: set it aside next to itself instead
                 Files.deleteIfExists(trashDir);
                 trashDir = Files.createTempDirectory(i.home().getParent(), ".remove-");
@@ -137,9 +145,9 @@ final class RemoveCommand implements Callable<Integer> {
             }
         } catch (IOException e) {
             Files.deleteIfExists(trashDir);
-            if (e instanceof java.nio.file.AccessDeniedException && !ctx.platform.isWindows()) {
+            if (e instanceof AccessDeniedException && !ctx.platform.isWindows()) {
                 throw new JkitException("permission denied moving " + i.home(),
-                        "check the folder's owner: ls -ld " + dev.jkit.model.ShellQuote.quote("bash", i.home().getParent().toString()));
+                        "check the folder's owner: ls -ld " + ShellQuote.quote("bash", i.home().getParent().toString()));
             }
             throw new JkitException("can't remove " + i.tool() + " " + i.label() + ": " + e.getMessage(),
                     ctx.platform.isWindows()
@@ -166,19 +174,19 @@ final class RemoveCommand implements Callable<Integer> {
                     why.hints().toArray(String[]::new)), removedLinks.json());
         }
         for (Tool t : Tool.values()) {
-            String shell = ctx.env.get(dev.jkit.core.ShellEnv.stateVariable(t));
-            if (t.storeTool() == i.tool() && shell != null && Resolve.same(dev.jkit.core.Fs.path(shell), i.home())) {
+            String shell = ctx.env.get(ShellEnv.stateVariable(t));
+            if (t.storeTool() == i.tool() && shell != null && Fs.same(Fs.path(shell), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder: jkit reset " + t);
             }
-            String project = ctx.env.get(dev.jkit.core.ShellEnv.projectVariable(t));
+            String project = ctx.env.get(ShellEnv.projectVariable(t));
             if (t.storeTool() == i.tool() && (shell == null || shell.isBlank()) && project != null
-                    && Resolve.same(dev.jkit.core.Fs.path(project), i.home())) {
+                    && Fs.same(Fs.path(project), i.home())) {
                 removedLinks.note("this shell's " + t.homeVariable() + " still points at the removed folder "
                         + "(applied from a project file): jkit sync to install it again, or jkit reset " + t);
             }
         }
         for (ToolState s : here.tools()) {
-            if (s.pinInstall() != null && Resolve.same(s.pinInstall().home(), i.home())) {
+            if (s.pinInstall() != null && Fs.same(s.pinInstall().home(), i.home())) {
                 removedLinks.note("warning: " + here.project().map(p -> p.source()).orElse("the project file")
                         + " here pins " + StatusCommand.pinText(s.pin()) + ", which this was: jkit sync installs it again");
             }
@@ -193,7 +201,7 @@ final class RemoveCommand implements Callable<Integer> {
         for (Tool t : Tool.values()) {
             Path link = ctx.home.global(t);
             Path target = ctx.os.readLink(link);
-            if (t.storeTool() == i.tool() && Resolve.same(target, i.home())) {
+            if (t.storeTool() == i.tool() && Fs.same(target, i.home())) {
                 ctx.os.removeLink(link);
                 removedLinks.link(link, null);
                 removedLinks.note("warning: there is no global " + t + " any more");

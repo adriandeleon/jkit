@@ -9,14 +9,20 @@ import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
 import dev.jkit.sources.Http;
+import dev.jkit.sources.HttpStatusException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class InstallerTest {
@@ -66,7 +72,7 @@ class InstallerTest {
                 if (!uri.getPath().endsWith(".sig") && !uri.getPath().endsWith(".asc")) {
                     Files.copy(file, target);
                 } else if (signature == null) {
-                    throw new dev.jkit.sources.HttpStatusException(404, uri);
+                    throw new HttpStatusException(404, uri);
                 } else {
                     Files.write(target, signature);
                 }
@@ -146,9 +152,9 @@ class InstallerTest {
     /** A Maven-shaped zip: apache-maven-{@code version}/bin/mvn. */
     private static Path mavenZip(Path dir, String version) throws IOException {
         Path zip = dir.resolve("apache-maven-" + version + "-bin.zip");
-        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
-            out.putNextEntry(new java.util.zip.ZipEntry("apache-maven-" + version + "/bin/mvn"));
-            out.write("#!/bin/sh\necho fake maven\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry("apache-maven-" + version + "/bin/mvn"));
+            out.write("#!/bin/sh\necho fake maven\n".getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
         }
         return zip;
@@ -181,9 +187,9 @@ class InstallerTest {
     @Test
     void anSbtSignatureThatCantBeFetchedInstallsWithAWarning() throws Exception {
         Path zip = tmp.resolve("sbt-1.10.7.zip");
-        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
-            out.putNextEntry(new java.util.zip.ZipEntry("sbt/bin/sbt"));
-            out.write("#!/bin/sh\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry("sbt/bin/sbt"));
+            out.write("#!/bin/sh\n".getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
         }
         JkitHome home = new JkitHome(tmp.resolve("home"));
@@ -227,10 +233,26 @@ class InstallerTest {
     }
 
     @Test
-    void aJdkCheckedOnlyByItsSignatureMustBeTheVersionAskedFor() throws Exception {
+    void aSignedJdkMustBeTheVersionAskedFor() throws Exception {
         Path jdk = Files.createDirectories(tmp.resolve("jdk"));
-        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13\"\nIMPLEMENTOR=\"Amazon.com Inc.\"\n");
-        Installer.requireReleaseVersion(jdk, corretto()); // 21.0.13.1+2 is Corretto's name for 21.0.13
+        // what amazon-corretto-21.0.13.1.2-linux-x64.tar.gz says
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13.1\"\nIMPLEMENTOR=\"Amazon.com Inc.\"\n");
+        Installer.requireReleaseVersion(jdk, corretto());
+
+        // every part counts: 21.0.13 is signed too, but lacks the fixes of 21.0.13.1
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13\"\n");
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
+                .hasMessageContaining("is signed, but it is JDK 21.0.13; nothing was installed");
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13.1\"\n");
+        assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, signed("x")))
+                .hasMessageContaining("jdk 21.0.13+9 temurin is signed, but it is JDK 21.0.13.1");
+        // a .0 is no difference, nor is the build number, which the release file doesn't carry
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.13.0\"\n");
+        Installer.requireReleaseVersion(jdk, signed("x"));
+        Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"17\"\n");
+        Installer.requireReleaseVersion(jdk, new Artifact(Tool.JDK, Version.parse("17+35"), Vendor.of("temurin"),
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", "x", false,
+                URI.create("https://example.invalid/jdk.tar.gz.sig")));
 
         Files.writeString(jdk.resolve("release"), "JAVA_VERSION=\"21.0.5\"\n");
         assertThatThrownBy(() -> Installer.requireReleaseVersion(jdk, corretto()))
@@ -303,12 +325,83 @@ class InstallerTest {
     }
 
     @Test
-    void noSignatureListedMeansNoCheckAndNoNote() throws Exception {
+    void aBuildOfASigningVendorWithNoSignatureSaysOnlyItsChecksumWasChecked() throws Exception {
+        // a Temurin build from before Adoptium signed them: the checksum is the check, and the user is told
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Installer.Result result = new Installer(home, serving(archive)).install(artifact(sha256(archive)), Http.Progress.NONE);
-        assertThat(result.notes()).isEmpty();
+        assertThat(result.verified()).isTrue();
         assertThat(result.signedBy()).isNull();
+        assertThat(result.notes()).containsExactly("note: no signature jkit can check is published for"
+                + " jdk 21.0.13+9 temurin; only its checksum was checked");
+    }
+
+    @Test
+    void aVendorJkitHasNoKeysForGetsNoNote() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        Artifact zulu = new Artifact(Tool.JDK, Version.parse("21.0.13+9"), Vendor.of("zulu"),
+                URI.create("https://example.invalid/jdk.tar.gz"), "jdk.tar.gz", "tar.gz", "sha256", sha256(archive), false);
+        Installer.Result result = new Installer(home, serving(archive)).install(zulu, Http.Progress.NONE);
+        assertThat(result.verified()).isTrue();
+        assertThat(result.notes()).isEmpty();
+    }
+
+    @Test
+    void aSignedMavenMustBeTheVersionAskedFor() throws Exception {
+        Path maven = Files.createDirectories(tmp.resolve("apache-maven-3.9.11/lib"));
+        Files.writeString(maven.resolve("maven-core-3.9.11.jar"), "jar");
+        Path zip = tmp.resolve("apache-maven-3.9.11-bin.zip");
+        Installer.requireMavenVersion(maven.getParent(), tool(Tool.MAVEN, "3.9.11", zip, "x"));
+        assertThatThrownBy(() -> Installer.requireMavenVersion(maven.getParent(), tool(Tool.MAVEN, "3.9.12", zip, "x")))
+                .hasMessageContaining("maven 3.9.12 is signed, but it is Maven 3.9.11; nothing was installed");
+        // Maven 4 names its core the same way
+        Files.move(maven.resolve("maven-core-3.9.11.jar"), maven.resolve("maven-core-4.0.0-rc-4.jar"));
+        Installer.requireMavenVersion(maven.getParent(), tool(Tool.MAVEN, "4.0.0-rc-4", zip, "x"));
+        Files.delete(maven.resolve("maven-core-4.0.0-rc-4.jar"));
+        assertThatThrownBy(() -> Installer.requireMavenVersion(maven.getParent(), tool(Tool.MAVEN, "4.0.0-rc-4", zip, "x")))
+                .hasMessageContaining("a build that doesn't name its version in lib/maven-core-*.jar");
+    }
+
+    /** An sbt install whose launcher names {@code version}, as sbt-launch.jar's sbt.boot.properties does. */
+    private Path sbtHome(String version) throws IOException {
+        Path bin = Files.createDirectories(tmp.resolve("sbt-" + version + "/bin"));
+        try (ZipOutputStream out = new ZipOutputStream(
+                Files.newOutputStream(bin.resolve("sbt-launch.jar")))) {
+            out.putNextEntry(new ZipEntry("sbt/sbt.boot.properties"));
+            out.write(("[scala]\n  version: ${sbt.scala.version-auto}\n\n[app]\n  org: ${sbt.organization-org.scala-sbt}\n"
+                    + "  name: sbt\n  version: ${sbt.version-read(sbt.version)[" + version + "]}\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        return bin.getParent();
+    }
+
+    @Test
+    void aSignedSbtMustBeTheVersionAskedFor() throws Exception {
+        Path zip = tmp.resolve("sbt.zip");
+        Installer.requireSbtVersion(sbtHome("1.10.7"), tool(Tool.SBT, "1.10.7", zip, "x"));
+        Installer.requireSbtVersion(sbtHome("2.0.0-RC2"), tool(Tool.SBT, "2.0.0-RC2", zip, "x"));
+        assertThatThrownBy(() -> Installer.requireSbtVersion(sbtHome("1.10.6"), tool(Tool.SBT, "1.10.7", zip, "x")))
+                .hasMessageContaining("sbt 1.10.7 is signed, but it is sbt 1.10.6; nothing was installed");
+        Path none = Files.createDirectories(tmp.resolve("none/bin"));
+        assertThatThrownBy(() -> Installer.requireSbtVersion(none.getParent(), tool(Tool.SBT, "1.10.7", zip, "x")))
+                .hasMessageContaining("doesn't name its version in bin/sbt-launch.jar");
+        Files.writeString(none.resolve("sbt-launch.jar"), "not a jar");
+        assertThatThrownBy(() -> Installer.requireSbtVersion(none.getParent(), tool(Tool.SBT, "1.10.7", zip, "x")))
+                .hasMessageContaining("doesn't name its version in bin/sbt-launch.jar");
+    }
+
+    @Test
+    void anOversizedSignatureIsNotReadWhole() throws Exception {
+        Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
+        JkitHome home = new JkitHome(tmp.resolve("home"));
+        byte[] huge = new byte[Signatures.MAX_SIGNATURE + 1];
+        assertThatThrownBy(() -> new Installer(home, withSignature(archive, huge))
+                .install(signed(sha256(archive)), Http.Progress.NONE, true))
+                .isInstanceOf(Installer.SignatureRequired.class)
+                .hasMessageContaining("couldn't fetch the signature of jdk 21.0.13+9 temurin")
+                .hasMessageContaining("sent more than 64 KB");
     }
 
     @Test
@@ -385,7 +478,7 @@ class InstallerTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void aLinkThatClimbsOutOfContentsHomeIsRefused() throws Exception {
         // inside the archive's top folder, so Archives allows it, but outside the part jkit installs
         Path home = Files.createDirectories(tmp.resolve("jdk/Contents/Home"));
@@ -399,7 +492,7 @@ class InstallerTest {
     }
 
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    @DisabledOnOs(OS.WINDOWS)
     void theInstallRecordIsNeverWrittenOrReadThroughALink() throws Exception {
         Path dir = Files.createDirectories(tmp.resolve("tools/jdk/21-temurin"));
         Path decoy = Files.writeString(tmp.resolve("decoy.properties"), "version=99\nverified=true\n");

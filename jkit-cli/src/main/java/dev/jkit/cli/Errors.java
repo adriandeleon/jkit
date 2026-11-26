@@ -3,11 +3,18 @@ package dev.jkit.cli;
 import dev.jkit.model.JkitException;
 import dev.jkit.sources.HttpStatusException;
 import dev.jkit.sources.NetworkException;
+import java.io.File;
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import javax.net.ssl.SSLException;
 
 /** Turns low-level failures into messages that say what happened and what to try. */
@@ -35,7 +42,7 @@ final class Errors {
             return network(n.uri().getHost(), n.getCause());
         }
         if (ex instanceof AccessDeniedException a) {
-            return new JkitException("permission denied: " + a.getFile(), java.io.File.separatorChar == '\\'
+            return new JkitException("permission denied: " + a.getFile(), File.separatorChar == '\\'
                     ? "something may have the file open (an antivirus scan, an IDE, a Gradle daemon): wait a moment, "
                             + "then run this again"
                     : "check the folder's owner, or set JKIT_HOME to a folder you can write");
@@ -43,14 +50,14 @@ final class Errors {
         if (ex instanceof NoSuchFileException f) {
             return new JkitException("file not found: " + f.getFile());
         }
-        if (ex instanceof java.nio.file.DirectoryNotEmptyException || ex instanceof java.nio.file.FileAlreadyExistsException
-                || ex instanceof java.nio.file.NotDirectoryException) {
-            java.nio.file.FileSystemException f = (java.nio.file.FileSystemException) ex;
+        if (ex instanceof DirectoryNotEmptyException || ex instanceof FileAlreadyExistsException
+                || ex instanceof NotDirectoryException) {
+            FileSystemException f = (FileSystemException) ex;
             return new JkitException("something else is in the way at " + f.getFile()
                     + (f.getOtherFile() == null ? "" : " (or " + f.getOtherFile() + ")"),
                     "move it aside, then run this again");
         }
-        if (ex instanceof java.io.IOException io && !(ex instanceof java.nio.charset.CharacterCodingException)) {
+        if (ex instanceof IOException io && !(ex instanceof CharacterCodingException)) {
             // disk full, read-only file system, file too large, a folder where a link should be:
             // this machine's trouble, not a jkit bug
             String message = io.getMessage() == null ? io.getClass().getSimpleName() : io.getMessage();

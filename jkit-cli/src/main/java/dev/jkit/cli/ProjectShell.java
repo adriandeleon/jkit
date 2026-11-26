@@ -1,5 +1,7 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.AtomicFile;
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
@@ -9,9 +11,13 @@ import dev.jkit.model.JkitException;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -47,17 +53,15 @@ final class ProjectShell {
         String shell = ctx.env.getOrDefault("JKIT_SHELL", "bash");
         String text = ShellEnv.format(changes, shell);
         boolean pwsh = shell.equals("pwsh") || shell.equals("powershell");
-        Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, java.nio.charset.StandardCharsets.UTF_8);
+        Files.writeString(Path.of(envFile), pwsh ? "\uFEFF" + text : text, StandardCharsets.UTF_8);
     }
 
-    /** Writes a project file without following a link put there since {@link #target} checked. */
+    /**
+     * Writes a project file all at once (644 when new, whatever the umask), never through a link:
+     * one put there since {@link #target} checked is replaced, and what it points at left alone.
+     */
     static void write(Path file, String text) throws IOException {
-        if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            Files.createFile(file, dev.jkit.model.Perms.file()); // 644 whatever the umask
-        }
-        Files.writeString(file, text, java.nio.charset.StandardCharsets.UTF_8, java.nio.file.LinkOption.NOFOLLOW_LINKS,
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
-                java.nio.file.StandardOpenOption.WRITE);
+        AtomicFile.write(file, text, StandardCharsets.UTF_8, false);
     }
 
     private static Path targetName(Context ctx, Path cwd, boolean here, String retry) {
@@ -68,7 +72,7 @@ final class ProjectShell {
         }
         String named = ctx.env.get(ProjectFile.OVERRIDE);
         boolean absentOverride = named != null && !named.isBlank() && !Files.exists(
-                cwd.resolve(named).toAbsolutePath().normalize(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                cwd.resolve(named).toAbsolutePath().normalize(), LinkOption.NOFOLLOW_LINKS);
         // an absolute override that doesn't exist yet is an error for reading, but it's the file to create
         Optional<ProjectSpec> found = absentOverride ? Optional.empty() : ProjectFile.find(cwd, ctx.env);
         if (found.isEmpty()) {
@@ -148,7 +152,7 @@ final class ProjectShell {
      * @param changes  variables to set (value) or unset (null), including {@link ShellEnv#PROJECT}
      */
     record Plan(Optional<ProjectSpec> project, Map<Tool, Installed> applied, boolean missing,
-                Map<String, String> changes, java.util.List<String> notes) {
+                Map<String, String> changes, List<String> notes) {
         boolean applies() {
             return !applied.isEmpty();
         }
@@ -165,7 +169,7 @@ final class ProjectShell {
         String file = states.project().map(ProjectSpec::source).orElse("the project file");
         Map<Tool, Installed> applied = new EnumMap<>(Tool.class);
         Map<Tool, Path> homes = new EnumMap<>(Tool.class);
-        java.util.List<String> notes = new java.util.ArrayList<>();
+        List<String> notes = new ArrayList<>();
         boolean missing = false;
         for (ToolState s : states.tools()) {
             if (s.pin() == null) {
@@ -178,7 +182,7 @@ final class ProjectShell {
             }
             applied.put(s.tool(), s.pinInstall());
             homes.put(s.tool(), s.pinInstall().home());
-            if (s.shellChoice() != null && !same(s.shellChoice(), s.pinInstall().home())) {
+            if (s.shellChoice() != null && !Fs.same(s.shellChoice(), s.pinInstall().home())) {
                 notes.add("this shell chose its own " + s.tool() + " with jkit use, which wins over " + file
                         + ": jkit reset " + s.tool() + " to follow " + file);
             }
@@ -196,18 +200,10 @@ final class ProjectShell {
             return null;
         }
         for (Installed i : ctx.store.list(tool.storeTool())) {
-            if (same(i.home(), home)) {
+            if (Fs.same(i.home(), home)) {
                 return i;
             }
         }
         return null;
-    }
-
-    private static boolean same(Path a, Path b) {
-        try {
-            return a.toRealPath().equals(b.toRealPath());
-        } catch (IOException e) {
-            return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
-        }
     }
 }

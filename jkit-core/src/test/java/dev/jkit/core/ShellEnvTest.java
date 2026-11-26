@@ -6,6 +6,7 @@ import dev.jkit.model.Tool;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +41,66 @@ class ShellEnvTest {
         assertThat(second.get("PATH")).isEqualTo(path(bin(jdk21), p("/h/.jkit/global/jdk/bin"), "/usr/bin"));
     }
 
+    /** Applies {@code changes} to {@code env}, as the shell would. */
+    private static void apply(Map<String, String> env, Map<String, String> changes) {
+        changes.forEach((k, v) -> {
+            if (v == null) {
+                env.remove(k);
+            } else {
+                env.put(k, v);
+            }
+        });
+    }
+
+    @Test
+    void aJavaHomeSetOutsideJkitIsKeptAndComesBackOnReset() {
+        Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin", "JAVA_HOME", "/usr/lib/jvm/mine"));
+        Map<String, String> use = ShellEnv.use(env, home, Tool.JDK, jdk17, false);
+        assertThat(use).containsEntry("JKIT_USER_JDK", "/usr/lib/jvm/mine").containsEntry("JAVA_HOME", jdk17.toString());
+        apply(env, use);
+
+        // a second jkit use doesn't take jkit's own value for the user's
+        Map<String, String> again = ShellEnv.use(env, home, Tool.JDK, jdk21, false);
+        assertThat(again).doesNotContainKey("JKIT_USER_JDK");
+        apply(env, again);
+
+        Map<String, String> reset = ShellEnv.reset(env, home, Tool.JDK);
+        assertThat(reset).containsEntry("JAVA_HOME", "/usr/lib/jvm/mine").containsEntry("JKIT_USER_JDK", null);
+        assertThat(reset.get("PATH")).isEqualTo("/usr/bin");
+    }
+
+    @Test
+    void aProjectKeepsTheUsersJavaHomeUntilItLeavesAndAShellChoiceInBetweenChangesNothing() {
+        Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin", "JAVA_HOME", "/opt/jdk", "MAVEN_HOME", ""));
+        Map<String, String> enter = ShellEnv.project(env, home, Map.of(Tool.JDK, jdk21), false, "k");
+        assertThat(enter).containsEntry("JKIT_USER_JDK", "/opt/jdk").doesNotContainKey("JKIT_USER_MAVEN");
+        apply(env, enter);
+        apply(env, ShellEnv.use(env, home, Tool.JDK, jdk17, false));
+        assertThat(env).containsEntry("JKIT_USER_JDK", "/opt/jdk");
+        apply(env, ShellEnv.reset(env, home, Tool.JDK)); // the project's applies again
+        assertThat(env).containsEntry("JAVA_HOME", jdk21.toString()).containsEntry("JKIT_USER_JDK", "/opt/jdk");
+
+        Map<String, String> leave = ShellEnv.project(env, home, Map.of(), false, null);
+        assertThat(leave).containsEntry("JAVA_HOME", "/opt/jdk").containsEntry("JKIT_USER_JDK", null);
+        assertThat(leave.get("PATH")).isEqualTo("/usr/bin");
+    }
+
+    @Test
+    void theGlobalLinkTheHookSetsIsNotTheUsersOwn() {
+        Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin", "JAVA_HOME", p("/h/.jkit/global/jdk")));
+        assertThat(ShellEnv.use(env, home, Tool.JDK, jdk17, false)).doesNotContainKey("JKIT_USER_JDK");
+    }
+
+    @Test
+    void aGraalVmHomeSetOutsideJkitComesBackWhenTheJdkStopsBeingGraalVm() {
+        Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin", "GRAALVM_HOME", "/opt/graal"));
+        Map<String, String> use = ShellEnv.use(env, home, Tool.JDK, jdk21, true);
+        assertThat(use).containsEntry("GRAALVM_HOME", jdk21.toString()).containsEntry("JKIT_USER_GRAALVM", "/opt/graal");
+        apply(env, use);
+        Map<String, String> other = ShellEnv.use(env, home, Tool.JDK, jdk17, false);
+        assertThat(other).containsEntry("GRAALVM_HOME", "/opt/graal").containsEntry("JKIT_USER_GRAALVM", null);
+    }
+
     @Test
     void graalVmJdkAlsoSetsGraalVmHomeUnlessTheSlotIsSet() {
         Map<String, String> env = new HashMap<>(Map.of("PATH", "/usr/bin"));
@@ -68,7 +129,7 @@ class ShellEnvTest {
 
     @Test
     void quotesForEachShell() {
-        Map<String, String> changes = new java.util.LinkedHashMap<>();
+        Map<String, String> changes = new LinkedHashMap<>();
         changes.put("JAVA_HOME", "/it's here");
         changes.put("OLD", null);
         assertThat(ShellEnv.format(changes, "bash")).isEqualTo("export JAVA_HOME='/it'\\''s here'\nunset OLD\n");

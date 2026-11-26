@@ -3,17 +3,16 @@ package dev.jkit.core;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 
 public final class Fs {
     private Fs() { }
 
-    /**
-     * Deletes a folder tree without following symlinks or Windows junctions (which Java reports as
-     * folders, with isOther set): the link goes, what it points at stays. Missing folders are ignored.
-     */
     /**
      * A path from an environment variable, or null when it is unset, blank or not a valid path.
      * One pair of surrounding double quotes is dropped: on Windows {@code JAVA_HOME="C:\\Program Files\\..."}
@@ -29,30 +28,54 @@ public final class Fs {
         }
         try {
             return Path.of(v);
-        } catch (java.nio.file.InvalidPathException e) {
+        } catch (InvalidPathException e) {
             return null;
+        }
+    }
+
+    /**
+     * Whether two paths name the same folder: equal as written, or the same file on disk, links
+     * followed (the global link and its target are the same install). Windows reads a junction back
+     * with long names (runneradmin) where jkit was given short ones (RUNNER~1), so comparing the
+     * text alone says a global link points elsewhere when it doesn't.
+     */
+    public static boolean same(Path a, Path b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize())) {
+            return true;
+        }
+        try {
+            return Files.exists(a) && Files.exists(b) && Files.isSameFile(a, b);
+        } catch (IOException e) {
+            return false;
         }
     }
 
     /** Copies a folder tree, links as links, keeping file permissions. {@code to} must not exist. */
     public static void copyTree(Path from, Path to) throws IOException {
-        try (var all = java.nio.file.Files.walk(from)) {
+        try (var all = Files.walk(from)) {
             for (Path p : (Iterable<Path>) all::iterator) {
                 Path target = to.resolve(from.relativize(p).toString());
-                if (java.nio.file.Files.isSymbolicLink(p)) {
-                    java.nio.file.Files.createSymbolicLink(target, java.nio.file.Files.readSymbolicLink(p));
-                } else if (java.nio.file.Files.isDirectory(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                    java.nio.file.Files.createDirectories(target);
+                if (Files.isSymbolicLink(p)) {
+                    Files.createSymbolicLink(target, Files.readSymbolicLink(p));
+                } else if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(target);
                 } else {
-                    java.nio.file.Files.copy(p, target, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES,
-                            java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                    Files.copy(p, target, StandardCopyOption.COPY_ATTRIBUTES,
+                            LinkOption.NOFOLLOW_LINKS);
                 }
             }
         }
     }
 
+    /**
+     * Deletes a folder tree without following symlinks or Windows junctions (which Java reports as
+     * folders, with isOther set): the link goes, what it points at stays. Missing folders are ignored.
+     */
     public static void deleteRecursively(Path dir) throws IOException {
-        if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
         Files.walkFileTree(dir, new SimpleFileVisitor<>() {

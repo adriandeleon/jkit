@@ -1,5 +1,6 @@
 package dev.jkit.cli;
 
+import dev.jkit.core.Fs;
 import dev.jkit.core.Installed;
 import dev.jkit.core.ToolState;
 import dev.jkit.core.ToolState.Source;
@@ -7,6 +8,7 @@ import dev.jkit.core.ToolStates;
 import dev.jkit.model.PinnedTool;
 import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
+import dev.jkit.model.Vendor;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -120,7 +122,7 @@ final class StatusCommand implements Callable<Integer> {
         }
         if (s.matches()) {
             return s.source() == Source.SHELL && s.pin() != null && s.pinInstall() != null
-                    && !Resolve.same(s.pinInstall().home(), s.shellChoice())
+                    && !Fs.same(s.pinInstall().home(), s.shellChoice())
                     ? projectFile(result) + " wants " + pinText(s.pin()) + "; this shell chose another with jkit use"
                             + ", to follow it: jkit reset " + tool
                     : null;
@@ -153,7 +155,7 @@ final class StatusCommand implements Callable<Integer> {
     private static String installedHint(Context ctx, Tool tool) throws Exception {
         List<Installed> installed = ctx.store.list(tool);
         // the default vendor's newest when there is one, like jkit use without a vendor would pick
-        dev.jkit.model.Vendor preferred = tool.hasVendors() ? ctx.config.defaultVendor(tool) : null;
+        Vendor preferred = tool.hasVendors() ? ctx.config.defaultVendor(tool) : null;
         Installed newest = installed.stream().filter(i -> preferred != null && preferred.equals(i.vendor())
                 && (tool != Tool.JDK || !(i.vendor() != null && i.vendor().isGraalVmBased())))
                 .findFirst().orElse(installed.getFirst());
@@ -170,7 +172,7 @@ final class StatusCommand implements Callable<Integer> {
                 + (pin.vendor() == null ? "" : " " + pin.vendor().name()) + (pin.fx() ? " fx" : "");
     }
 
-    private static String useCommand(Tool tool, Installed i, boolean global) {
+    static String useCommand(Tool tool, Installed i, boolean global) {
         return "jkit use " + tool + "@" + i.version().raw() + (i.vendor() == null ? "" : " " + i.vendor().name())
                 + (i.fx() ? " --fx" : "") + (global ? " --global" : "");
     }

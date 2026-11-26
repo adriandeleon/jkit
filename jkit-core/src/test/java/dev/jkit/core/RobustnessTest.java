@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.EnumMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -76,16 +77,16 @@ class RobustnessTest {
         JkitHome home = new JkitHome(tmp.resolve("home"));
         Files.createDirectories(home.root());
         String toml = "[jdk]\nvendor = \"zulu\"\n";
-        byte[] utf8 = toml.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] utf8 = toml.getBytes(StandardCharsets.UTF_8);
         byte[] withBom = new byte[utf8.length + 3];
         withBom[0] = (byte) 0xef;
         withBom[1] = (byte) 0xbb;
         withBom[2] = (byte) 0xbf;
         System.arraycopy(utf8, 0, withBom, 3, utf8.length);
         Files.write(home.config(), withBom);
-        assertThat(Config.load(home, Map.of()).defaultVendor(dev.jkit.model.Tool.JDK).name()).isEqualTo("zulu");
-        Files.writeString(home.config(), "﻿" + toml, java.nio.charset.StandardCharsets.UTF_16LE);
-        assertThat(Config.load(home, Map.of()).defaultVendor(dev.jkit.model.Tool.JDK).name()).isEqualTo("zulu");
+        assertThat(Config.load(home, Map.of()).defaultVendor(Tool.JDK).name()).isEqualTo("zulu");
+        Files.writeString(home.config(), "﻿" + toml, StandardCharsets.UTF_16LE);
+        assertThat(Config.load(home, Map.of()).defaultVendor(Tool.JDK).name()).isEqualTo("zulu");
     }
 
     @Test
@@ -186,7 +187,7 @@ class RobustnessTest {
         String keep = tmp.resolve("home/tools-old/bin").toString();
         String drop = tmp.resolve("home/tools/jdk/21/bin").toString();
         Map<String, String> env = Map.of("PATH", String.join(File.pathSeparator, drop, keep));
-        String path = ShellEnv.path(env, home, new java.util.EnumMap<>(Tool.class));
+        String path = ShellEnv.path(env, home, new EnumMap<>(Tool.class));
         assertThat(path).isEqualTo(keep);
     }
 
