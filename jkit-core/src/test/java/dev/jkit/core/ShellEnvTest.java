@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -85,6 +86,17 @@ class ShellEnvTest {
         Map<String, String> leave = ShellEnv.project(env, home, Map.of(), false, null);
         assertThat(leave).containsEntry("JAVA_HOME", "/opt/jdk").containsEntry("JKIT_USER_JDK", null);
         assertThat(leave.get("PATH")).isEqualTo("/usr/bin");
+    }
+
+    @Test
+    void pathEntriesAreComparedAsFolders(@TempDir Path tmp) {
+        String bin = tmp.resolve("jdk/bin").toString();
+        assertThat(ShellEnv.samePathEntry(bin, bin + File.separator)).isTrue();
+        assertThat(ShellEnv.samePathEntry(bin, tmp.resolve("jdk/./bin").toString())).isTrue();
+        assertThat(ShellEnv.samePathEntry(bin, tmp.resolve("jdk/bin2").toString())).isFalse();
+        if (File.separatorChar == '\\') {
+            assertThat(ShellEnv.samePathEntry(bin, bin.toUpperCase(Locale.ROOT).replace('\\', '/'))).isTrue();
+        }
     }
 
     @Test

@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -315,7 +316,7 @@ public final class ShellEnv {
         }
         String current = env.getOrDefault("PATH", "");
         for (String entry : current.split(File.pathSeparator)) {
-            if (!entry.isEmpty() && !underTools(entry, home) && !dropped.contains(entry)) {
+            if (!entry.isEmpty() && !underTools(entry, home) && dropped.stream().noneMatch(d -> samePathEntry(entry, d))) {
                 entries.add(entry);
             }
         }
@@ -323,7 +324,24 @@ public final class ShellEnv {
     }
 
     private static boolean onPath(Map<String, String> env, String entry) {
-        return List.of(env.getOrDefault("PATH", "").split(File.pathSeparator)).contains(entry);
+        return Arrays.stream(env.getOrDefault("PATH", "").split(File.pathSeparator))
+                .anyMatch(e -> !e.isEmpty() && samePathEntry(e, entry));
+    }
+
+    /**
+     * Whether two PATH entries name the same folder as written: absolute and normalized, so
+     * {@code \h\x} and {@code C:\h\x}, or a trailing separator, don't tell them apart, and on
+     * Windows neither do case or slash direction. Links aren't followed.
+     */
+    static boolean samePathEntry(String a, String b) {
+        if (a.equals(b)) {
+            return true;
+        }
+        try {
+            return Path.of(a).toAbsolutePath().normalize().equals(Path.of(b).toAbsolutePath().normalize());
+        } catch (InvalidPathException e) {
+            return false;
+        }
     }
 
     /**
