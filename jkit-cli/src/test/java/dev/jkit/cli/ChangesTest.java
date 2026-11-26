@@ -130,6 +130,21 @@ class ChangesTest {
     }
 
     @Test
+    void withTheHookInstalledButNotLoadedTheHintIsANewShell() throws Exception {
+        Path user = Files.createDirectories(home.resolve("user"));
+        Context ctx = context(Map.of("HOME", user.toString(), "SHELL", "/bin/bash"));
+        assertThat(print(new Changes(ctx).globalEffect(Tool.JDK))).contains("load it in new shells: jkit hook --install");
+
+        Files.writeString(user.resolve(".bashrc"), "alias ll='ls -l'\n");
+        assertThat(print(new Changes(ctx).globalEffect(Tool.JDK))).contains("load it in new shells: jkit hook --install");
+
+        Files.writeString(user.resolve(".bashrc"), String.join("\n", dev.jkit.core.ShellRc.block("bash")) + "\n");
+        assertThat(print(new Changes(ctx).globalEffect(Tool.JDK)))
+                .contains("the jkit hook is not loaded in this shell, so nothing sets JAVA_HOME; ")
+                .contains(".bashrc loads it, so open a new shell").doesNotContain("jkit hook --install");
+    }
+
+    @Test
     void anUnsetHomeWithoutTheHooksFileGetsAHintThatWorks() throws Exception {
         Context ctx = context(Map.of("JKIT_SHELL", "bash"));
         String out = print(new Changes(ctx).globalEffect(Tool.JDK));

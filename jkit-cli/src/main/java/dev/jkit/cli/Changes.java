@@ -3,6 +3,7 @@ package dev.jkit.cli;
 import dev.jkit.core.Fs;
 import dev.jkit.core.JkitHome;
 import dev.jkit.core.ShellEnv;
+import dev.jkit.core.ShellRc;
 import dev.jkit.model.Envs;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
@@ -176,6 +177,34 @@ final class Changes {
             : "jkit hook --install";
 
     /**
+     * What to do in a shell without the hook: open a new shell when the login shell's startup file
+     * already loads it (after jkit hook --install, until the shell is restarted), else load it
+     * in new shells.
+     */
+    static String hookHint(Context ctx) {
+        Path file = hookFile(ctx);
+        return file == null ? "load it in new shells: " + HOOK_SETUP
+                : tilde(file) + " loads it, so open a new shell";
+    }
+
+    /** The login shell's startup file when it loads the hook, else null (or when that can't be told). */
+    private static Path hookFile(Context ctx) {
+        if (ctx.platform.isWindows()) {
+            return null; // a PowerShell profile is the user's to edit
+        }
+        try {
+            Path file = ShellRc.file(HookCommand.loginShell(ctx), ctx.env, HookCommand.userHome(ctx));
+            if (!Files.isRegularFile(file)) {
+                return null;
+            }
+            String text = Files.readString(file, HookCommand.charsetOf(file));
+            return ShellRc.hasBlock(text) || ShellRc.manualLine(text) > 0 ? file : null;
+        } catch (IOException | RuntimeException e) { // JkitException too: no login shell or home
+            return null;
+        }
+    }
+
+    /**
      * The shell jkit runs in, by name for messages, when its hook can't switch on cd yet
      * (shell.auto_switch); null when it can, or when the shell isn't known. Without a hook, a
      * Windows shell counts as PowerShell, the only hook jkit has there.
@@ -250,8 +279,7 @@ final class Changes {
             note("warning: " + var + "=" + current + " is set outside jkit and wins over the global " + tool
                     + "; remove it from your shell profile to use jkit's");
         } else if (ctx.env.get("JKIT_SHELL") == null) {
-            note("the jkit hook is not loaded in this shell, so nothing sets " + var
-                    + "; load it in new shells: " + HOOK_SETUP);
+            note("the jkit hook is not loaded in this shell, so nothing sets " + var + "; " + hookHint(ctx));
         } else if (envFile != null && !ShellEnv.hasChoice(ctx.env, tool)) {
             Map<String, String> updates = ShellEnv.global(ctx.env, home, tool);
             ProjectShell.writeEnvFile(ctx, envFile, updates);

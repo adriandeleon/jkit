@@ -50,7 +50,7 @@ final class ResetCommand implements Callable<Integer> {
         }
         String envFile = ctx.env.get("JKIT_ENV_FILE");
         if (envFile == null) {
-            throw new JkitException("the jkit shell hook is not active", "load it in new shells: " + Changes.HOOK_SETUP);
+            throw new JkitException("the jkit shell hook is not active", Changes.hookHint(ctx));
         }
         if (!ShellEnv.hasChoice(ctx.env, tool)) {
             // nothing of jkit's to take away: a *_HOME the user set stays as it is
