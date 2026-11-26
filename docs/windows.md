@@ -38,7 +38,8 @@ started outside a hooked PowerShell (cmd.exe, IDEs, Explorer) to follow it too, 
 `jkit env --install` once: it sets `JAVA_HOME` and the other `*_HOME` variables in your user
 environment to the global links and puts their `bin` folders first on your user `PATH`, so a
 later `jkit use … --global` reaches new programs with no further change. Each change is printed;
-`jkit env --uninstall` takes out only what it set. A `java` on the system `PATH` still comes
+`jkit env --uninstall` takes out only what it set. A `*_HOME` of your own that `--install`
+replaced is kept in `JKIT_SAVED_<TOOL>` and put back by `--uninstall`. A `java` on the system `PATH` still comes
 first; `jkit doctor` says if there is one.
 
 ## Verifying a download

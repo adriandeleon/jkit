@@ -8,8 +8,8 @@ program can read stdout whole and show stderr lines as progress.
 see [Editora's jkit docs](https://editora-project.dev/docs/build-tools/#jkit).
 
 Commands with `--json`: `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`,
-`pin`, `unpin`, `sync`, `remove`, `prune`, `config` and `self-update`. (`reset` and `hook` only make sense in a shell; `exec`'s stdout
-belongs to the command it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
+`reset`, `pin`, `unpin`, `sync`, `remove`, `prune`, `config` and `self-update`. (`hook` only makes
+sense in a shell; `exec`'s stdout belongs to the command it runs.) For agents and scripts, see also [agents.md](agents.md). `--help` and `--version` with `--json`
 print `{"schemaVersion": 1, "help": "<usage text>"}` (or `"version"`).
 
 ## Versioning
@@ -194,6 +194,9 @@ what `--install` set. The message goes to stderr.
 - `changed` is false when there was nothing to do; `changes` is then empty.
 - `user-env` changes have the actions of `env` ones: `set`, `unset`, and `add` / `remove` for
   `PATH` entries.
+- When `--install` replaces a `*_HOME` you set yourself, it also sets `JKIT_SAVED_<TOOL>`
+  (`JKIT_SAVED_JDK`, …) to your value, a `user-env` `set` change. `--uninstall` sets the `*_HOME`
+  back to it (`set`, not `unset`) and unsets `JKIT_SAVED_<TOOL>`.
 
 ## `jkit doctor [--network] --json`
 
@@ -261,7 +264,7 @@ and not cached); `verifiable` is also `null` when the build isn't downloadable.
 
 Nothing jkit changes is silent. Every command that changes a file, a folder, a link or a variable
 prints the changes under its own message, and with `--json` lists each one in `changes`
-(`install`, `upgrade` per line and for the lookup, `use`, `pin`, `unpin`, `sync`, `remove`, `search`,
+(`install`, `upgrade` per line and for the lookup, `use`, `reset`, `pin`, `unpin`, `sync`, `remove`, `search`,
 `prune`, `config set` and `config unset`, `self-update`, `env --install` and `env --uninstall`).
 Text output folds cached version lists into one `cache` line, and `install` leaves out that line
 and the folders its own message names; `changes` lists them all.
@@ -286,7 +289,9 @@ the same lines on stderr, under a `jkit: using …` or `jkit: left the project �
   `value` null.
 - `kind: link`: a global link; `action` is `set` (`value` is its target) or `remove`.
 - `kind: env`: a variable of the calling shell; `action` is `set` (with `value`) or `unset`. `PATH`
-  is reported per entry, with `action` `add` or `remove`.
+  is reported per entry, with `action` `add`, `remove` or `move` (an entry already there that now
+  comes before or after another, which changes which program runs; `value` is the entry). An
+  empty entry, the current folder, has `value` `""`.
 - `kind: user-env`: a variable of the user's own environment (Windows, `env --install` and
   `--uninstall`), with the same actions as `env`.
 
@@ -357,6 +362,22 @@ lines text mode prints, also on stderr):
 variable (`JAVA_HOME`, `MAVEN_HOME`, …) unset, it also sets that variable to the link and, if
 missing, adds the link's `bin` to `PATH`: `env` changes. Without `--global`, only variables of this
 shell change.
+
+## `jkit reset <tool> [--global] --json`
+
+```json
+{
+  "schemaVersion": 1, "scope": "global", "tool": "maven", "changed": true,
+  "changes": [
+    { "kind": "link", "name": "/home/me/.jkit/global/maven", "action": "remove", "value": null }
+  ],
+  "notes": ["installs stay; new shells get no maven from jkit until: jkit use maven@<version> --global"]
+}
+```
+
+`scope` is `global` or `shell`. Without `--global` the shell hook must be active, and `changes`
+lists the shell's variables. `changed` is false, with `changes` empty, when there was nothing to
+reset. The text lines go to stderr.
 
 ## `jkit pin <tool>[@version] [vendor] [--fx] [--exact] [--here] --json`
 

@@ -13,7 +13,7 @@ Aider, …) and CI. The rules an agent needs:
   ends from SIGINT itself, as a program without a handler does: a shell shows that as 130, and
   from Node or Python it is a death by signal (`signal` `SIGINT`, a negative `returncode`), not
   exit code 130.
-- **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `pin`,
+- **`--json`** on `list`, `status`, `env`, `doctor`, `search`, `install`, `upgrade`, `use`, `reset`, `pin`,
   `unpin`, `sync`, `remove`, `prune`, `config` and `self-update` prints exactly one JSON document on stdout, also on failure, with an `error.hints`
   list of commands to try. Shapes: [json.md](json.md).
 - **Exit codes** are stable: `0` ok, `1` failure, `2` bad arguments, `3` the version isn't

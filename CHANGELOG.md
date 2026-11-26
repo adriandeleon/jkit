@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   make one yet. It contains musl libc and zlib, whose licenses are in `THIRD-PARTY-NOTICES`.
 - **`jkit doctor` reports leftover `*.jkit-tmp` files** from an interrupted write of a startup
   file, `config.toml` or `jkit.toml` (check `temp-files`), with the command that removes them.
+- **`jkit reset` takes `--json`**, with or without `--global`.
 
 ### Changed
 
@@ -81,9 +82,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project: GitHub releases list the version's changelog entry and how to install it, instead of
   a list of pull requests; building jkit on a JDK older than 25, or a Maven older than the
   wrapper's, stops at once with a clear message.
+- **PATH entries that move are reported** (`PATH  moved … ahead of …`, action `move` in
+  `--json`), since a move changes which program runs; before, only added and removed entries were.
+  Empty PATH entries (the current folder) are kept instead of dropped without a word.
+- **`.tool-versions` reads more asdf and mise Java ids**: Corretto's `21.0.5.11.1` numbering,
+  Semeru's `_openj9-…` suffix, Mandrel's `mandrel-<release>-java<N>`, `-javafx`, and `-jre`,
+  `-lite` and `-musl` builds (pinned as the vendor's full JDK, with a warning). A Zulu release
+  number such as `zulu-21.38.21` pins the major, with a warning, and an unknown vendor is warned
+  about when the file is read instead of failing at `sync`.
+- **`jkit env --install` (Windows) keeps a `JAVA_HOME` or other `*_HOME` of your own** that it
+  replaces, in `JKIT_SAVED_<TOOL>`, and `jkit env --uninstall` puts it back; each change is printed.
+- `jkit search` says when nothing matches (`no jdk build matches jdk@21.0.99`) and what to search
+  for instead, rather than printing an empty table or only the legend.
+- When `jkit install` finds no matching build, "available from:" lists only vendors that have that
+  version; when none has it, the hint says so and names the newest build of that release.
+- `jkit self-update` no longer holds the install lock while it downloads and tests the new binary,
+  so installs, `remove` and `prune` elsewhere don't wait for it.
+- With several project files, hints and warnings name the file that pins each tool, and the `cd`
+  line names the files properly (`~/p (.sdkmanrc, .tool-versions)`).
+- `jkit remove` says what uses a build ("the global maven", "this shell's jdk (chosen with jkit
+  use)"), and mentions the link `--force` removes only when there is one.
+- Leaving a project says `maven unset (no global maven)` for a tool with no global version, instead
+  of "back to the global versions".
+- The `.deb` and `.rpm` descriptions say to set up the shell with `jkit hook --install`.
 
 ### Fixed
 
+- **`jdk = 21` in `jkit.toml` (a TOML number, not a string) pins JDK 21.** Before, it was skipped
+  with a warning and `jkit sync` passed, saying the project pins no tools, so CI went on with the
+  wrong JDK. A decimal such as `maven = 3.10`, which TOML reads as 3.1, is refused with a warning to
+  quote it, and `jkit sync` now fails, installing nothing, when a file pins a tool it can't read.
+- A lookup no longer fails when its answer can't be saved to the cache (a full disk, a read-only
+  folder); jkit warns once and carries on.
+- An archive with colliding entries (a file and a folder of the same name) is refused as a broken
+  archive, instead of an error about something in the way in `~/.jkit/tmp`.
+- On Windows, `jkit self-update` no longer fails when an older jkit that is still running holds
+  `jkit.exe.old`: the old binary is set aside as `jkit.exe.1.old` (and so on), and the next
+  self-update deletes them all.
+- `jkit env --install --json` and `--uninstall --json` include `schemaVersion`, like every other
+  document.
+- A build from main says 0.5.0-SNAPSHOT, not 0.4.0-SNAPSHOT, so `jkit self-update` doesn't take it
+  for an older version than 0.4.0.
 - **`jkit hook --install` no longer breaks bash or zsh when the startup file has Windows (CRLF)
   line endings**: the block is always LF. `--uninstall` removes only the block and leaves every
   other byte as it was; `jkit pin` and `unpin` keep `jkit.toml`'s line endings too.
@@ -132,6 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A signature counts only when its key may sign and is strong enough**: marked for signing
+  (by its self-signature, or for a subkey its binding signature), RSA of 2048 bits or more, EdDSA
+  or ECDSA, and not expired when it signed. Before, an encryption subkey, an expired subkey, or
+  Guillaume Nodet's old DSA-1024 key in jkit's Maven keys would have passed.
 - **Temurin and Microsoft JDKs are always checked against the vendor's OpenPGP signature**, the
   `.sig` the vendor publishes next to the download, whether or not foojay lists one. Some current
   Temurin builds (21.0.13+9, 25.0.5+8) installed on foojay's checksum alone. Temurin builds from
