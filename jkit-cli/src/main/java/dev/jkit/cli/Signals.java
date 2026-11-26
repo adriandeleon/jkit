@@ -11,7 +11,7 @@ import sun.misc.SignalHandler;
 
 /**
  * Ignores terminal signals while jkit waits for a child that receives them itself, and ends jkit
- * from the signal that ended the child.
+ * from the signal that ended the child, or that jkit got itself.
  */
 final class Signals {
     record Saved(Signal signal, SignalHandler previous) { }
@@ -71,9 +71,10 @@ final class Signals {
     }
 
     /**
-     * Ends jkit from the signal that ended its child, with the default action (not jkit's own
-     * handler, which would only exit with the same code): the caller then sees what it would see
-     * without jkit in between. Returns when there is no such signal, or it can't be raised here.
+     * Ends jkit from the signal an exit code stands for (the one that ended its child, or that jkit
+     * got itself), with the default action (not jkit's own handler, which would only exit with the
+     * same code): the caller then sees what it would see without jkit in between. Returns when
+     * there is no such signal, or it can't be raised here.
      */
     static void raiseFor(int exitCode) {
         String name = endedBy(exitCode, File.separatorChar == '\\');

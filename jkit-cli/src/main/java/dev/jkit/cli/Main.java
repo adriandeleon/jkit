@@ -126,8 +126,10 @@ public final class Main implements Runnable {
 
     /**
      * Ctrl-C (SIGINT), SIGTERM and SIGHUP stop jkit as before, but first delete the folder an
-     * install is downloading into. jkit exec puts its own handlers in place while its command runs.
-     * A signal the shell set to be ignored (a background job's SIGINT) stays ignored.
+     * install is downloading into. jkit then ends from the signal itself, not with exit code 130 or
+     * 143: a bash script running jkit stops on Ctrl-C only when its command died from SIGINT. jkit exec
+     * puts its own handlers in place while its command runs. A signal the shell set to be ignored
+     * (a background job's SIGINT) stays ignored.
      */
     private static void cleanUpOnSignals() {
         for (String name : List.of("INT", "TERM", "HUP")) {
@@ -138,7 +140,9 @@ public final class Main implements Runnable {
                     System.err.println("interrupted: nothing was installed; deleted the partial download in "
                             + Changes.tilde(deleted.getFirst().toString()));
                 }
-                System.exit(128 + signalNumber(name));
+                int code = 128 + signalNumber(name);
+                Signals.raiseFor(code); // on Windows, or where it can't be raised: the exit code below
+                System.exit(code);
             }, name);
             if (!saved.isEmpty() && saved.getFirst().previous() == SignalHandler.SIG_IGN) {
                 Signals.restore(saved);
