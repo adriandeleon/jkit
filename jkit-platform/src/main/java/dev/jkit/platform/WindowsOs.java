@@ -2,6 +2,7 @@ package dev.jkit.platform;
 
 import dev.jkit.model.JkitException;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -91,13 +92,15 @@ final class WindowsOs implements OsServices {
         // the full path: a bare "cmd" is looked up in the current folder first on Windows
         String systemRoot = Objects.requireNonNullElse(System.getenv("SystemRoot"), "C:\\Windows");
         String cmd = Path.of(systemRoot, "System32", "cmd.exe").toString();
-        ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/s", "/c",
+        // /u: cmd writes its own commands' output (mklink's messages) to the pipe as UTF-16LE,
+        // rather than in the console's code page, which Java can't tell for sure
+        ProcessBuilder pb = new ProcessBuilder(cmd, "/d", "/u", "/s", "/c",
                 "\"mklink /J \"%JKIT_LINK%\" \"%JKIT_TARGET%\"\"").redirectErrorStream(true);
         pb.environment().put("JKIT_LINK", link.toString());
         pb.environment().put("JKIT_TARGET", target.toString());
         Process p = pb.start();
         try {
-            String output = new String(p.getInputStream().readAllBytes());
+            String output = cmdOutput(p.getInputStream().readAllBytes());
             if (p.waitFor() != 0) {
                 throw new IOException("mklink /J failed: " + output.trim());
             }
@@ -105,6 +108,34 @@ final class WindowsOs implements OsServices {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted", e);
         }
+    }
+
+    /**
+     * The text of cmd /u's output: UTF-16LE. Output without a zero byte isn't UTF-16 (each space,
+     * backslash or ASCII letter of a path has one), so it was written some other way, and is read
+     * in the console's charset, as cmd writes without /u.
+     */
+    static String cmdOutput(byte[] bytes) {
+        for (byte b : bytes) {
+            if (b == 0) {
+                return new String(bytes, StandardCharsets.UTF_16LE);
+            }
+        }
+        return new String(bytes, consoleCharset());
+    }
+
+    private static Charset consoleCharset() {
+        for (String property : new String[] {"stdout.encoding", "native.encoding"}) {
+            try {
+                String name = System.getProperty(property);
+                if (name != null) {
+                    return Charset.forName(name);
+                }
+            } catch (IllegalArgumentException unknown) {
+                // the next one
+            }
+        }
+        return Charset.defaultCharset();
     }
 
     @Override
