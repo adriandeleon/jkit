@@ -17,6 +17,17 @@ class ToolSpecTest {
     }
 
     @Test
+    void findLooksAToolUpWithoutThrowing() {
+        assertThat(Tool.find("Java")).contains(Tool.JDK);
+        assertThat(Tool.find("mvn")).contains(Tool.MAVEN);
+        assertThat(Tool.find("graalvm")).contains(Tool.GRAALVM);
+        assertThat(Tool.find("zulu")).isEmpty();
+        assertThat(Tool.find("")).isEmpty();
+        assertThat(Tool.parse("SBT")).isEqualTo(Tool.SBT);
+        assertThatThrownBy(() -> Tool.parse("zulu")).isInstanceOf(JkitException.class).hasMessage("unknown tool 'zulu'");
+    }
+
+    @Test
     void ltsIsAJdkWord() {
         assertThat(ToolSpec.parse("jdk@LTS").isLts()).isTrue();
         assertThat(ToolSpec.parse("graalvm@lts").isLts()).isTrue();

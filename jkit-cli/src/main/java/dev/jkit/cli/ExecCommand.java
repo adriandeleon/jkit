@@ -109,12 +109,7 @@ final class ExecCommand implements Callable<Integer> {
     /** A tool spec, or null when the word names no tool (so it may be a vendor). */
     private static ToolSpec asSpec(String word) {
         String tool = word.contains("@") ? word.substring(0, word.indexOf('@')) : word;
-        try {
-            Tool.parse(tool);
-        } catch (JkitException e) {
-            return null;
-        }
-        return ToolSpec.parse(word); // a bad version is an error, not a vendor
+        return Tool.find(tool).isEmpty() ? null : ToolSpec.parse(word); // a bad version is an error, not a vendor
     }
 
     static Plan plan(Context ctx, Path dir, boolean ignoreProject, List<Choice> choices, List<String> command)

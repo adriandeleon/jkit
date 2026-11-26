@@ -356,10 +356,8 @@ public final class ProjectFile {
             TomlTable table = toml.getTable("tools");
             for (String key : table.keySet()) {
                 String where = at(file, toml.inputPositionOf(List.of("tools", key)));
-                Tool tool;
-                try {
-                    tool = Tool.parse(key);
-                } catch (JkitException e) {
+                Tool tool = Tool.find(key).orElse(null);
+                if (tool == null) {
                     warnings.add(where + ": unknown tool '" + shown(key) + "', skipped (tools: jdk, maven, gradle, sbt, graalvm)");
                     continue;
                 }

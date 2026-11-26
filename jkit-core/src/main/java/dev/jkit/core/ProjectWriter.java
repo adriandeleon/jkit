@@ -149,13 +149,7 @@ public final class ProjectWriter {
                 continue;
             }
             at.lastKey = i;
-            Tool keyTool;
-            try {
-                keyTool = Tool.parse(unquote(key.group(2)));
-            } catch (JkitException e) {
-                continue;
-            }
-            if (keyTool == tool && at.line < 0) {
+            if (Tool.find(unquote(key.group(2))).orElse(null) == tool && at.line < 0) {
                 at.line = i;
                 at.indent = key.group(1);
                 at.key = key.group(2);
