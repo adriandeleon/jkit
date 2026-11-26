@@ -70,7 +70,10 @@ final class SearchCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        Context ctx = options.context();
+        return run(options.context());
+    }
+
+    int run(Context ctx) throws Exception {
         // a vendor's own newest LTS; with none named, the newest of any vendor, as the list shows them all
         spec = Resolve.lts(ctx, spec, true, spec != null && spec.isLts() && vendorText != null
                 ? Resolve.knownVendor(ctx, spec, vendorText) : null, fx);
@@ -202,6 +205,11 @@ final class SearchCommand implements Callable<Integer> {
         } else {
             List<Pkg> builds = foojay.builds(spec.major(), vendor, ctx.platform, fx, pre).stream()
                     .filter(p -> p.version().matches(spec.version())).toList();
+            if (builds.isEmpty()) {
+                noMatch(ctx, vendor.name(), "jkit search " + spec.tool().id() + "@" + spec.major() + " " + vendor.name()
+                        + " lists its " + spec.major() + " builds");
+                return;
+            }
             Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, builds, true);
             Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
             for (Pkg p : builds) {
@@ -435,11 +443,28 @@ final class SearchCommand implements Callable<Integer> {
         return false;
     }
 
+    /**
+     * Says that nothing matches, in place of an empty table: "no zulu jdk build matches
+     * jdk@21.0.99", then {@code hint} (what to search for instead), if any.
+     */
+    private void noMatch(Context ctx, String vendor, String hint) {
+        String what = (vendor == null ? "" : vendor + " ") + (fx ? "JavaFX " : "") + spec.tool().id()
+                + (spec.tool().hasVendors() ? " build" : " version");
+        ctx.out.println("no " + what + (spec.version() == null ? " for " + ctx.platform : " matches " + spec));
+        if (hint != null) {
+            ctx.out.println(hint);
+        }
+    }
+
     private void vendorRows(Context ctx, FoojaySource foojay, List<Pkg> index, Vendor vendor,
                             List<Installed> installed) {
         TreeMap<String, Pkg> byVendor = new TreeMap<>();
         for (Pkg p : index) {
             byVendor.put(p.vendor().name(), p);
+        }
+        if (byVendor.isEmpty()) {
+            noMatch(ctx, null, "jkit search " + spec.tool().id() + " lists the versions there are");
+            return;
         }
         Map<Pkg, Verdict> verdicts = verdicts(ctx, foojay, new ArrayList<>(byVendor.values()), false);
         Set<Verdict> shown = EnumSet.noneOf(Verdict.class);
@@ -465,6 +490,11 @@ final class SearchCommand implements Callable<Integer> {
             if (v.matches(spec.version())) {
                 groups.computeIfAbsent(v.part(0) + "." + v.part(1), k -> new ArrayList<>()).add(v);
             }
+        }
+        if (groups.isEmpty()) {
+            noMatch(ctx, null, spec.version() == null ? null
+                    : "jkit search " + spec.tool().id() + " lists the versions there are");
+            return;
         }
         for (Map.Entry<String, List<Version>> g : groups.entrySet()) {
             StringBuilder line = new StringBuilder(String.format("%-6s", g.getKey()));
