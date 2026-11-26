@@ -110,8 +110,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`jkit search` and `jkit install` point out builds from a vendor that stopped updating a
   release.** openjdk (jdk.java.net) and GraalVM CE publish only the first updates of each release,
   so `jkit install jdk@21 openjdk` got 21.0.2 from January 2024 without a word. Search now marks a
-  vendor's newest build that is two or more updates behind another vendor's (`↓ behind: newest 21
-  is 21.0.9`), and install warns and says where the newest build is. `--json` has a `behind` field.
+  vendor's newest build that is two or more updates behind the newest update at least two vendors
+  have (`↓ behind: newest 21 is 21.0.9`; for JDK 8, two quarterly releases), and install warns and
+  says where the newest build is. Only OpenJDK update numbers count: GraalVM distributions' own
+  release numbers (Gluon 21.2, GraalVM CE 25.4) don't. `--json` has a `behind` field.
 - **`jkit upgrade` stays within a Maven or Gradle minor release** (3.9.9 → 3.9.11, not 3.10.2), as
   its help says; JDK, GraalVM and sbt lines are still the major version. "is up to date" also says
   when the global points at an older build of that line, and how to move it. `jkit prune` treats
@@ -136,10 +138,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hook puts the global versions first on PATH even when PATH has them further back.** On
+  Windows, `jkit env --install` puts them on the user PATH, which Windows puts after the system
+  one, so a hooked PowerShell ran the system's `java` with jkit's `JAVA_HOME`; macOS's
+  `path_helper` did the same in a nested login zsh. `jkit reset` and leaving a project move the
+  `bin` that comes back to the front too, and say so. In fish the order is put back once more at
+  the first prompt, after `config.fish` (Homebrew's `fish_add_path --move`).
+- **Loading the zsh hook no longer turns on `COMPLETE_ALIASES` or defines a `compopt` alias**
+  (from picocli's completion script), which broke completion of your aliases; zsh's
+  `warn_create_global` no longer warns about the hook either.
+- **Windows:**
+  - The PowerShell hook and `jkit env --shell pwsh` keep paths with accents intact (`C:\Users\José`
+    arrived as `JosÚ`): their output is ASCII only.
+  - `jkit hook --install` no longer writes a bash block for Git Bash, which made every Git Bash
+    start fail; it gives the PowerShell `$PROFILE` line instead, and `jkit hook bash
+    --uninstall` takes out a block an older jkit added.
+  - `jkit exec ./gradlew build` works: a path is resolved against the command's folder and tried
+    with `.exe`, `.cmd` and `.bat`.
+  - The console shows `->`, `...`, `+`, `o`, `*` where its code page lacks jkit's symbols, instead
+    of `?` (as with `LANG=C`); `--json` writes `\u` escapes there instead.
+  - `mklink`'s error messages keep accented characters.
+- **The hook no longer runs a `./jkit` or `bin/jkit` of the current folder** when its saved jkit is
+  gone and PATH has `.` or another relative entry.
+- An install no longer waits for another jkit's install of a different build whose name starts
+  the same (the JavaFX build of the same version, Maven 4.0.0-rc-4 when installing 4.0.0); the
+  waiting line says Ctrl-C stops it.
+- jenv's `oracle64-1.8…` and `oracle64-11…` names are skipped with a warning that says why: Oracle
+  offers JDK 8 and 11 only after a sign-in. Warnings about jenv names quote the name as written.
 - **`jkit sync` no longer fails with "jkit can't read that pin"** when `.sdkmanrc` pins a JDK and a
   `.java-version` beside it holds something jkit can't read: the first file that mentions a tool
-  decides it. Within `.sdkmanrc` and `.tool-versions`, the first line for a tool decides; a later
-  one is ignored with a warning.
+  decides it. In `.sdkmanrc` the last line for a tool decides, as in `sdk env`, and in
+  `.tool-versions` the first one, as in asdf; the other is ignored with a warning. A pin jkit
+  can't read in an earlier file no longer gives way to a later file's pin, which it used to.
 - **A second install of the same build no longer downloads it again**: it waits for the first,
   and downloads only if that one failed.
 - **`jkit install … --offline` uses what `jkit search … --offline` cached.** Before, it failed with
@@ -217,6 +247,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **foojay's vendor synonyms can no longer turn one vendor into another.** A distributions answer
+  listing "temurin" as a synonym of Zulu made `jkit install jdk@21` install a Zulu-labelled build,
+  skipping Temurin's signature check and download-server pin, and that answer was cached.
+  Temurin (and `adoptium`), Microsoft and Corretto are now known without asking foojay, a
+  distribution's own name or a name jkit reads as an alias always means that vendor, and a
+  synonym two distributions claim is ignored.
+- **Zulu, Liberica, SapMachine, Semeru, Oracle, GraalVM CE, Oracle GraalVM and Mandrel downloads
+  must come from the vendor's own server**, as Temurin, Microsoft and Corretto already did. jkit
+  has no key for these vendors and their checksum comes from foojay, so before, a compromised
+  foojay could choose both the file and its checksum. A foojay mirror (`JKIT_SOURCES_FOOJAY_URL`)
+  must keep their links; one on localhost may serve its own.
+- **The update command `jkit self-update` prints for an `.rpm` or a `.deb` installed from a file
+  checks the package** against the release's signed `SHA256SUMS` before `sudo dnf install` or
+  `sudo apt install`, since dnf and apt don't check the signature of a package given as a file or
+  URL; self-update checks `SHA256SUMS.asc` first for these installs too.
+- **`jkit self-update` no longer moves a release onto a pre-release**, even a signed one marked as
+  the latest release.
+- **A failed lookup falls back to a cached version list at most a week old.** An older one fails,
+  with a hint to use it on purpose with `--offline`, which still uses any cached copy. Before, a
+  network that kept jkit from foojay or Maven Central kept it on an old list indefinitely.
+- `jkit install … --offline` drops a cached build whose version is another major's, as it does
+  online.
+- PowerShell's environment file in `/tmp` (Linux, macOS) is readable by its owner only.
 - **`--json` output escapes Unicode tag characters (U+E0000–E007F)**, which can hide ASCII text
   from a reader, as text output already did; both now use one list of hidden characters.
 - **A later self-signature without key flags no longer turns a vendor's key into "not a signing

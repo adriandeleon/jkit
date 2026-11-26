@@ -19,12 +19,16 @@ Windows on ARM runs the x64 build under emulation.
 
 ## The PowerShell hook
 
-`jkit hook --install` doesn't do PowerShell yet, so add the hook to your profile by hand:
+`jkit hook --install` doesn't edit startup files on Windows (for Git Bash neither: jkit has no bash
+hook there), so add the hook to your PowerShell profile by hand:
 `notepad $PROFILE`, then add
 
 ```powershell
 jkit hook pwsh | Out-String | Invoke-Expression
 ```
+
+The hook puts the global `bin` folders first on PATH, ahead of the system PATH, where `jkit env
+--install` alone can't put them.
 
 Windows PowerShell (5.1, the one Windows comes with) runs no profile until scripts are allowed:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7 allows them already.

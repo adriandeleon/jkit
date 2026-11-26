@@ -40,8 +40,10 @@ The usual culprits:
 - **`JAVA_HOME` set in your shell profile** (`~/.bashrc`, `~/.profile`, `/etc/environment`): it wins
   over jkit's global version, for `java` on PATH too (the hook puts `$JAVA_HOME/bin` first instead
   of jkit's). Remove the export.
-- **The hook loads before something else changes PATH** (SDKMAN, a distro's `java` alternatives):
-  move the jkit line to the end of the startup file.
+- **Something changes PATH after the hook loads** (SDKMAN, a distro's `java` alternatives, a
+  `PATH=/usr/bin:$PATH` later in the file): move the jkit line to the end of the startup file. The
+  hook itself moves jkit's folders ahead of entries already on PATH, and in fish puts them back
+  once more at the first prompt, after `config.fish`.
 - **No hook at all**: `jkit hook --install`, then open a new shell.
 
 ## `jkit env`
