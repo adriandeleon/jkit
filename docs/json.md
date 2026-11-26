@@ -236,7 +236,7 @@ Exit code 1 when any check has level `fail`, 0 otherwise; the document is printe
   "available": [
     { "tool": "jdk", "version": "25.0.1+8", "major": 25, "vendor": "temurin", "graalvm": false,
       "fx": false, "lts": true, "maintained": true, "preRelease": false, "installed": false,
-      "downloadable": true, "verifiable": true }
+      "downloadable": true, "verifiable": true, "behind": null }
   ]
 }
 ```
@@ -255,6 +255,11 @@ false` when no matching build has a direct download (install refuses it), `verif
 the build it would download has no published checksum and no signature jkit checks (install
 refuses it unless `--allow-unverified`). Either is `null` when jkit couldn't look it up (offline
 and not cached); `verifiable` is also `null` when the build isn't downloadable.
+
+`behind` is set on a vendor's newest build of a release when the vendor stopped updating it: two
+or more updates behind another vendor's newest. It is `{"newest": "21.0.9+10", "vendors":
+["temurin", "zulu"]}` (the newest build of that release, and who has it), and `null` otherwise or
+when jkit couldn't compare (offline and not cached).
 
 `vendor` is the default vendor, or the one typed (`vendorChosen: true`). For Maven, Gradle and sbt,
 `available` holds every matching version (`tool`, `version`, `major`, `preRelease`, `installed`), and
@@ -302,14 +307,17 @@ without `--install` or `--uninstall` (`hook`'s edit your shell's startup file an
 ## `jkit install <tool>@<version> [vendor] --json`
 
 ```json
-{ "schemaVersion": 1, "status": "installed", "verified": true, "signedBy": "Adoptium",
+{ "schemaVersion": 1, "status": "installed", "verified": true, "signedBy": "Adoptium", "behind": null,
   "installed": { "...": "the install object" },
   "changes": [ { "kind": "folder", "name": "…/tools/jdk/21.0.9+10-temurin", "action": "create", "value": null } ],
   "notes": [ "signature checked: signed by Adoptium (key 843C48A565F8F04B)" ] }
 ```
 
 `signedBy` is whose signature was checked, or null (see the install object); when a signature
-couldn't be fetched or checked, `notes` says so. Upgrade rows carry the same `signedBy` and `notes`.
+couldn't be fetched or checked, `notes` says so, and a build checked by its checksum alone has
+the note `checksum checked (sha256)`. Upgrade rows carry the same `signedBy` and `notes`. `behind`
+is as in search: set when the build installed is from a vendor that stopped updating that
+release, else null.
 
 `status` is `installed` or `already-installed` (then `verified` is null; the install object's own
 `verified` says how it was installed). `verified` is false when the source publishes only an md5

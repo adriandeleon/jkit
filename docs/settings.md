@@ -27,7 +27,7 @@ jdk.vendor` change the file, keeping its comments. An environment variable wins 
 | `JKIT_AUTO_SWITCH` | like `shell.auto_switch` (`1`/`0`); `0` also stops switching in a shell that's already open |
 | `JKIT_DEBUG` | set (to anything): when a command fails with an error, also print its stack trace on stderr. For reporting a bug |
 | `JKIT_PROJECT_FILE` | use this project file, or none when empty ([project files](project-files.md)) |
-| `JKIT_NETWORK_OFFLINE` | `1`/`true`: like `--offline`, version lists come only from the cache |
+| `JKIT_NETWORK_OFFLINE` | `1`/`true`: like `--offline`, version lists come only from the cache, and `jkit doctor --network` skips its check. `JKIT_OFFLINE` isn't read; jkit warns when it is set |
 | `HTTPS_PROXY`, `NO_PROXY` | the proxy to use, and the hosts to reach directly |
 | `JKIT_NETWORK_PROXY` | the proxy, taking precedence over `HTTPS_PROXY` |
 | `JKIT_SOURCES_FOOJAY_URL`, `JKIT_SOURCES_GRADLE_URL`, `JKIT_SOURCES_MAVEN_URL`, `JKIT_SOURCES_SBT_URL`, `JKIT_SOURCES_RELEASES_URL` | https mirrors of foojay, services.gradle.org, Maven Central, sbt's releases and jkit's own releases. What a mirror must keep is in [SECURITY.md](../SECURITY.md#what-jkit-verifies) |
