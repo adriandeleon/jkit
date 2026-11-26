@@ -11,11 +11,14 @@ import dev.jkit.model.ToolSpec;
 import dev.jkit.model.Vendor;
 import dev.jkit.model.Version;
 import dev.jkit.sources.Artifact;
+import dev.jkit.sources.FoojaySource;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -125,6 +128,10 @@ final class InstallCommand implements Callable<Integer> {
         boolean wantPre = pre || spec.version() != null && Version.looksLikeVersion(spec.version())
                 && Version.parse(spec.version()).isPreRelease();
         Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
+        behind = behind(ctx, spec.tool(), artifact);
+        if (behind != null) {
+            ctx.err.println("warning: " + behindWarning(ctx, spec.tool(), artifact, behind));
+        }
         PrintStream say = json.json ? ctx.err : ctx.out;
         if (ctx.store.contains(spec.tool(), artifact.version(), artifact.vendor(), artifact.fx())) {
             say.println(artifact.label() + " is already installed");
@@ -183,6 +190,48 @@ final class InstallCommand implements Callable<Integer> {
         return 0;
     }
 
+    /** What {@link #behind(Context, Tool, Artifact)} found for this install, for the JSON. */
+    private FoojaySource.Behind behind;
+
+    /**
+     * Whether {@code artifact} is its vendor's newest build of its major and that vendor has
+     * stopped updating it ({@link FoojaySource#behind}): openjdk publishes only the first updates of
+     * each release. Uses the list of each vendor's newest builds, which search and an install with
+     * no version fetch too; null when it can't be had (offline and not cached) or for other tools.
+     */
+    static FoojaySource.Behind behind(Context ctx, Tool tool, Artifact artifact) {
+        if ((tool != Tool.JDK && tool != Tool.GRAALVM) || artifact.vendor() == null || artifact.version().isPreRelease()) {
+            return null;
+        }
+        try {
+            List<FoojaySource.Pkg> index = new ArrayList<>(ctx.foojay().newestPerVendorAndMajor(ctx.platform, artifact.fx()));
+            if (tool == Tool.GRAALVM) {
+                index.removeIf(p -> !p.vendor().isGraalVmBased());
+            }
+            for (Map.Entry<FoojaySource.Pkg, FoojaySource.Behind> e : FoojaySource.behind(index).entrySet()) {
+                FoojaySource.Pkg p = e.getKey();
+                if (p.vendor().equals(artifact.vendor()) && p.version().equals(artifact.version())) {
+                    return e.getValue();
+                }
+            }
+        } catch (IOException | JkitException e) {
+            // nothing to compare with
+        }
+        return null;
+    }
+
+    /** "openjdk stopped updating 21 at 21.0.2+13; the newest 21 is 21.0.9+10 (temurin, zulu): jkit install jdk@21". */
+    static String behindWarning(Context ctx, Tool tool, Artifact artifact, FoojaySource.Behind behind) {
+        int major = artifact.version().part(0);
+        String vendors = behind.vendors().size() <= 3 ? String.join(", ", behind.vendors())
+                : String.join(", ", behind.vendors().subList(0, 3)) + ", …";
+        String byDefault = ctx.config.defaultVendor(tool).name();
+        String pick = behind.vendors().contains(byDefault) ? "" : " " + behind.vendors().getFirst();
+        return artifact.vendor() + " stopped updating " + major + " at " + artifact.version() + "; the newest " + major
+                + " is " + behind.newest() + " (" + vendors + "): jkit install " + tool.id() + "@" + major + pick
+                + (artifact.fx() ? " --fx" : "");
+    }
+
     /**
      * Whether the global link points at {@code home}. Checked again after the install because the
      * jkit that won an install race may have made it the default, and then the hint on how to
@@ -227,6 +276,8 @@ final class InstallCommand implements Callable<Integer> {
         doc.put("status", status);
         doc.put("verified", verified);
         doc.put("signedBy", signedBy);
+        doc.put("behind", behind == null ? null
+                : JsonOut.fields("newest", behind.newest().raw(), "vendors", behind.vendors()));
         for (Installed i : ctx.store.list(spec.tool().storeTool())) {
             if (i.version().equals(version) && Objects.equals(i.vendor(), vendor) && i.fx() == fxBuild) {
                 doc.put("installed", JsonOut.installed(ctx, i));
