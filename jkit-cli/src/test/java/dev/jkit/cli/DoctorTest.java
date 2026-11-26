@@ -194,6 +194,29 @@ class DoctorTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void aWorkFolderJkitCantTellIsInUseIsNamedWithItsAgeNotCountedAsLeftOver() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(!"root".equals(System.getProperty("user.name")));
+        // its lock file can't be locked (as on a file system without locks): maybe a running install
+        Path tmpDir = Files.createDirectories(home.resolve("tmp"));
+        Path old = Files.createDirectories(tmpDir.resolve("install-1"));
+        Path young = Files.createDirectories(tmpDir.resolve("install-2"));
+        for (Path p : List.of(old, young)) {
+            Files.setPosixFilePermissions(Files.createFile(p.resolve(".lock")), PosixFilePermissions.fromString("r--r--r--"));
+        }
+        java.time.Instant now = java.time.Instant.now();
+        Files.setLastModifiedTime(old, java.nio.file.attribute.FileTime.from(now.minus(java.time.Duration.ofDays(3))));
+        Files.setLastModifiedTime(young, java.nio.file.attribute.FileTime.from(now.minus(java.time.Duration.ofHours(2))));
+        List<Finding> store = of(run(), "store");
+        assertThat(store).extracting(Finding::level).containsExactly(Level.WARN, Level.INFO);
+        assertThat(store.get(0).message()).isEqualTo(old + " (3 days old): jkit can't tell whether an install is using it"
+                + " (this file system keeps no locks); probably left over");
+        assertThat(store.get(0).fix()).isEqualTo("when no jkit is running: rm -rf " + old);
+        assertThat(store.get(1).message()).startsWith(young + " (2 h old): jkit can't tell").doesNotContain("left over");
+        assertThat(old).isDirectory();
+    }
+
+    @Test
     void brokenConfigIsOneFailAndTheOtherChecksStillRun() throws Exception {
         Files.writeString(home.resolve("config.toml"), "[jdk\nvendor = \"zulu\"\n");
         List<Finding> findings = run();

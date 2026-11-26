@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -82,23 +84,59 @@ public final class WorkDirs {
      * from before {@link #create} finished, which happens under the install lock.
      */
     public static boolean inUse(Path dir) {
+        return use(dir) != Use.FREE;
+    }
+
+    /** What {@link #use} can tell of a folder in tmp/. */
+    public enum Use {
+        /** No running jkit holds it: left over. */
+        FREE,
+        /** This jkit or another running one works in it. */
+        IN_USE,
+        /**
+         * jkit can't lock its {@value #LOCK} file (a file system without locks, such as some NFS
+         * mounts): left alone, as in use, but doctor and prune name it, with its age.
+         */
+        UNKNOWN
+    }
+
+    /**
+     * How old a folder {@link Use#UNKNOWN} must be to be called probably left over: an install
+     * gives up on a download after three hours, so one a day old isn't running any more.
+     */
+    public static final Duration STALE = Duration.ofDays(1);
+
+    /** How long ago {@code dir} last changed; zero when that can't be read. */
+    public static Duration age(Path dir, Instant now) {
+        try {
+            Duration age = Duration.between(Files.getLastModifiedTime(dir, LinkOption.NOFOLLOW_LINKS).toInstant(), now);
+            return age.isNegative() ? Duration.ZERO : age;
+        } catch (IOException e) {
+            return Duration.ZERO;
+        }
+    }
+
+    /** {@link #inUse}, telling a folder it can't decide about apart. */
+    public static Use use(Path dir) {
         if (ACTIVE.containsKey(key(dir))) {
             // never opened here: on Unix, closing any channel to the file would drop this process's lock
-            return true;
+            return Use.IN_USE;
         }
         Path lock = dir.resolve(LOCK);
         if (!Files.isRegularFile(lock, LinkOption.NOFOLLOW_LINKS)) {
-            return false;
+            return Use.FREE;
         }
         try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE)) {
             FileLock held = channel.tryLock();
             if (held == null) {
-                return true;
+                return Use.IN_USE;
             }
             held.release();
-            return false;
-        } catch (OverlappingFileLockException | IOException e) {
-            return true; // can't tell: leave it, doctor reports it
+            return Use.FREE;
+        } catch (OverlappingFileLockException e) {
+            return Use.IN_USE; // this process holds it
+        } catch (IOException e) {
+            return Use.UNKNOWN;
         }
     }
 

@@ -92,6 +92,7 @@ final class PruneCommand implements Callable<Integer> {
                     "bytes", s.bytes(), "pid", user.pid(), "command", user.command()));
         }
         List<Path> leftovers = leftovers(ctx);
+        List<Path> unclear = unclear(ctx, now);
         List<Path> cache = oldCache(ctx, now);
         long bytes = 0;
         List<Object> rows = new ArrayList<>(); // before anything is removed: the install object reads the folder
@@ -111,6 +112,11 @@ final class PruneCommand implements Callable<Integer> {
         for (Superseded s : kept) {
             say.println((dryRun ? "would keep " : "kept ") + s.install().tool() + " " + s.install().label()
                     + ": " + usedBy(inUse.get(s.install().home())));
+        }
+        for (Path p : unclear) {
+            Duration age = WorkDirs.age(p, now);
+            say.println("left " + unclearLine(p, age) + (stale(age) ? ": when no jkit is running, "
+                    + (ctx.platform.isWindows() ? "Remove-Item -Recurse -Force " : "rm -rf ") + Changes.tilde(p.toString()) : ""));
         }
         if (builds.isEmpty() && leftovers.isEmpty() && cache.isEmpty()) {
             say.println("nothing to prune");
@@ -337,6 +343,37 @@ final class PruneCommand implements Callable<Integer> {
     /** The name of a folder an install, a removal or self-update works in, in tmp/. */
     static boolean workFolder(String name) {
         return name.startsWith("install-") || name.startsWith("remove-");
+    }
+
+    /**
+     * Work folders in tmp/ that jkit can't tell are in use or left over ({@link WorkDirs.Use#UNKNOWN}:
+     * a file system that keeps no locks), oldest first. Never deleted by prune: such a folder may be
+     * an install running right now.
+     */
+    static List<Path> unclear(Context ctx, Instant now) throws IOException {
+        List<Path> found = new ArrayList<>();
+        collect(ctx.home.tmp(), PruneCommand::workFolder, found);
+        found.removeIf(p -> WorkDirs.use(p) != WorkDirs.Use.UNKNOWN);
+        found.sort(Comparator.comparing((Path p) -> WorkDirs.age(p, now)).reversed());
+        return found;
+    }
+
+    /** One line about an {@link #unclear} folder, with its age: probably left over once a day old. */
+    static String unclearLine(Path dir, Duration age) {
+        return Changes.tilde(dir.toString()) + " (" + ago(age) + " old): jkit can't tell whether an install is using it"
+                + " (this file system keeps no locks)" + (stale(age) ? "; probably left over" : "");
+    }
+
+    static boolean stale(Duration age) {
+        return age.compareTo(WorkDirs.STALE) >= 0;
+    }
+
+    /** "3 days", "5 h", "12 min". */
+    static String ago(Duration age) {
+        if (age.toDays() >= 1) {
+            return age.toDays() + (age.toDays() == 1 ? " day" : " days");
+        }
+        return age.toHours() >= 1 ? age.toHours() + " h" : Math.max(1, age.toMinutes()) + " min";
     }
 
     private static void collect(Path dir, Predicate<String> match, List<Path> into)
