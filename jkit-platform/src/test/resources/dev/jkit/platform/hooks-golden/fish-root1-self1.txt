@@ -6,7 +6,7 @@ for t in sbt gradle maven jdk
   set -l v (string upper -- $t)_HOME
   test $t = jdk; and set v JAVA_HOME
   set -l h $$v
-  # without a trailing /, so PATH gets /x/jdk/bin as jkit writes it, not /x/jdk//bin
+  # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
   test -n "$h"; and set h (string trim -r -c / -- "$h")
   set -l b $__jkit_g/$t/bin
   if test -n "$h"; and not contains -- "$h" $__jkit_g/$t; and test -d "$h/bin"
@@ -24,7 +24,8 @@ set -g __jkit_bin '/usr/local/bin/jkit'
 set -g __jkit_root '/tmp/o\'brien $HOME `x` \\ "q" ‘t’/.jkit'
 function __jkit_run
   if test -z "$__jkit_bin"; or not test -x "$__jkit_bin"
-    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin
+    # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit
     set -g __jkit_bin ''
     for d in $PATH
       if test (string sub -l (string length -- "$__jkit_root/") -- "$d/") != "$__jkit_root/"; and test -x $d/jkit

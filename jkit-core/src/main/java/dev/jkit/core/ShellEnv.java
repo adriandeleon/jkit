@@ -15,20 +15,21 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Computes the variables a shell-level {@code jkit use}, {@code jkit reset} or {@code jkit sync}
- * changes. The shell wrapper sources the result. jkit remembers each shell choice in
- * {@code JKIT_SHELL_<TOOL>} and each install applied from a project file in
- * {@code JKIT_PROJECT_<TOOL>}; a shell choice wins over a project's. A *_HOME the user set
- * outside jkit is kept in {@code JKIT_USER_<TOOL>} the first time jkit replaces it, and comes back
- * (instead of the global version) once neither applies any more, its bin first on PATH. It only
- * ever removes PATH entries under tools/ and the global bins, so it never removes anything the
- * user added.
+ * Computes the variables that {@code jkit use}, {@code jkit reset} and {@code jkit sync} change in
+ * the current shell; the shell hook sources the result.
+ *
+ * <p>jkit remembers a {@code jkit use} choice in {@code JKIT_SHELL_<TOOL>} and an install applied
+ * from a project file in {@code JKIT_PROJECT_<TOOL>}. A shell choice wins over a project's. When
+ * jkit first replaces a *_HOME that the user set themselves, it saves the old value in
+ * {@code JKIT_USER_<TOOL>}, and restores it (with its bin first on PATH) once no jkit choice
+ * applies any more. jkit only removes PATH entries under tools/ and the global bin folders, so
+ * entries the user added are never lost.
  */
 public final class ShellEnv {
     static final String GRAALVM_FOLLOWS = "JKIT_GRAALVM_FOLLOWS_JDK";
     /**
-     * The project applied to this shell, as {@link ProjectFile#key}: lets the {@code cd} hook see
-     * that nothing changed without reading the files again.
+     * The project applied to this shell, as {@link ProjectFile#key}. The {@code cd} hook compares it
+     * to tell that nothing changed without reading the project files again.
      */
     public static final String PROJECT = "JKIT_PROJECT";
 
@@ -39,8 +40,8 @@ public final class ShellEnv {
     }
 
     /**
-     * Where this shell keeps the *_HOME it had before jkit first replaced it, when that was set
-     * outside jkit (not the global link the hook sets): it comes back when jkit's choice goes.
+     * The variable that saves a *_HOME the user set themselves (not the global link the hook sets)
+     * when jkit first replaces it, so it can be restored when jkit's choice goes away.
      */
     public static String userVariable(Tool tool) {
         return "JKIT_USER_" + tool.name();
@@ -75,7 +76,7 @@ public final class ShellEnv {
         return out;
     }
 
-    /** Drops the shell choice: the project's install applies again if one was applied, else the global one. */
+    /** Drops the shell choice: the project's install applies again if there is one, else the global one. */
     public static Map<String, String> reset(Map<String, String> env, JkitHome home, Tool tool) {
         return reset(env, home, tool, false);
     }
@@ -205,9 +206,9 @@ public final class ShellEnv {
     }
 
     /**
-     * Gives a shell whose {@code tool} *_HOME is unset the global link, as the hook does when it
-     * loads: *_HOME names the link, and its bin goes first on PATH unless PATH has it already.
-     * For a first install in a shell whose hook loaded before there was anything to link to.
+     * Points {@code tool}'s *_HOME at the global link and puts its bin first on PATH (unless it is
+     * there already), as the hook does when it loads. Used after the first install in a shell
+     * whose hook loaded before there was anything to link to.
      */
     public static Map<String, String> global(Map<String, String> env, JkitHome home, Tool tool) {
         Map<String, String> out = new LinkedHashMap<>();
@@ -236,10 +237,9 @@ public final class ShellEnv {
     }
 
     /**
-     * Sets {@code tool}'s *_HOME to {@code value}. The first time jkit replaces one the user set
-     * outside jkit (no jkit choice applies to it yet, and it isn't the global link the hook sets),
-     * that value is kept in {@link #userVariable} so {@link #back} can give it back. So is one the
-     * user set by hand over jkit's choice: it is the user's own now.
+     * Sets {@code tool}'s *_HOME to {@code value}. If the current value is the user's own (set
+     * before any jkit choice, or changed by hand over one, and not the global link), it is saved
+     * in {@link #userVariable} first so that {@link #back} can restore it.
      */
     private static void setHome(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool,
                                 String value) {
@@ -256,8 +256,8 @@ public final class ShellEnv {
     }
 
     /**
-     * The *_HOME jkit set for {@code tool} in this shell: its shell choice, else the project's, else
-     * for a GraalVM that follows the JDK, the JDK's. Null when jkit set none.
+     * The *_HOME jkit set for {@code tool} in this shell: the shell choice, else the project's, else
+     * (for a GRAALVM_HOME that follows the JDK) the JDK's. Null when jkit set none.
      */
     private static String jkitsHome(Map<String, String> env, Tool tool) {
         String value = blankToNull(env.get(stateVariable(tool)));
@@ -271,8 +271,8 @@ public final class ShellEnv {
     }
 
     /**
-     * Whether the user changed or unset {@code tool}'s *_HOME by hand since jkit set it: it is then
-     * the user's, and jkit leaves it as it is when its own choice goes.
+     * Whether the user changed or unset {@code tool}'s *_HOME by hand since jkit set it. Such a value
+     * belongs to the user from then on, and jkit leaves it alone when its own choice goes away.
      */
     public static boolean changedByHand(Map<String, String> env, Tool tool) {
         String jkits = jkitsHome(env, tool);
@@ -284,9 +284,9 @@ public final class ShellEnv {
     }
 
     /**
-     * Takes jkit's choice for {@code tool} away: its *_HOME goes back to the user's own value if
-     * {@link #setHome} kept one, else to the global link (unset when there is none). A *_HOME the
-     * user changed by hand since jkit set it stays, and the value jkit kept goes.
+     * Takes jkit's choice for {@code tool} away: *_HOME goes back to the value {@link #setHome}
+     * saved, else to the global link (or is unset when there is none). A *_HOME the user changed by
+     * hand since jkit set it is kept as it is, and the saved value is dropped.
      */
     private static void back(Map<String, String> env, JkitHome home, Map<String, String> out, Tool tool) {
         if (changedByHand(env, tool)) {
@@ -308,8 +308,8 @@ public final class ShellEnv {
     }
 
     /**
-     * Whether jkit chose {@code tool} in this shell: with jkit use, from a project, or by keeping the
-     * user's own *_HOME aside. Without one, a reset has nothing to take away.
+     * Whether jkit made a choice for {@code tool} in this shell (jkit use, a project, or a saved
+     * user *_HOME), i.e. whether a reset has anything to undo.
      */
     public static boolean hasChoice(Map<String, String> env, Tool tool) {
         return blankToNull(env.get(stateVariable(tool))) != null || env.containsKey(projectVariable(tool))
@@ -332,11 +332,11 @@ public final class ShellEnv {
     }
 
     /**
-     * PATH with each active install's bin first. For a tool with none, PATH follows the *_HOME the
-     * shell ends up with ({@code changes} over {@code env}): the user's own puts its bin first
-     * instead of the global one the hook added, so {@code java} is $JAVA_HOME/bin/java; the global
-     * link puts the global bin back. Only entries under tools/ and the global bins are jkit's to
-     * remove; the user's own entries all stay.
+     * PATH with each active install's bin first. For a tool without one, PATH follows the *_HOME
+     * the shell ends up with ({@code changes} applied over {@code env}): a *_HOME of the user's own
+     * puts its bin first in place of the global bin, so that {@code java} is $JAVA_HOME/bin/java,
+     * and the global link puts the global bin back. Only entries under tools/ and the global bins
+     * are removed; the user's own entries all stay.
      */
     static String path(Map<String, String> env, JkitHome home, Map<Tool, String> active, Map<String, String> changes) {
         List<String> entries = new ArrayList<>();
@@ -352,8 +352,8 @@ public final class ShellEnv {
             }
             String toolHome = blankToNull(changes.containsKey(t.homeVariable())
                     ? changes.get(t.homeVariable()) : env.get(t.homeVariable()));
-            // a tool with no jkit choice left: its *_HOME is the user's own, wherever it is, or the
-            // global link (a choice going away gives *_HOME back in changes)
+            // No jkit choice is left for this tool, so its *_HOME is either the user's own or the
+            // global link; when a choice just went away, changes holds the restored value.
             if (toolHome == null) {
                 continue;
             }
@@ -365,7 +365,8 @@ public final class ShellEnv {
             } else if (Files.isDirectory(ownBin.resolve("bin"))) {
                 dropped.add(global);
                 String bin = ownBin.resolve("bin").toString();
-                // entries under tools/ are taken off below, so the user's own one there goes back first
+                // Entries under tools/ are all removed below, so a user's own *_HOME inside tools/
+                // must be added here even if PATH already has it.
                 if (!onPath(env, bin) || underTools(bin, home)) {
                     entries.add(bin);
                 }
@@ -386,9 +387,9 @@ public final class ShellEnv {
     }
 
     /**
-     * Whether two PATH entries name the same folder as written: absolute and normalized, so
-     * {@code \h\x} and {@code C:\h\x}, or a trailing separator, don't tell them apart, and on
-     * Windows neither do case or slash direction. Links aren't followed.
+     * Whether two PATH entries name the same folder, compared as absolute normalized paths: a
+     * trailing separator or {@code \h\x} versus {@code C:\h\x} makes no difference, and on Windows
+     * neither do case or slash direction. Symbolic links aren't followed.
      */
     static boolean samePathEntry(String a, String b) {
         if (a.equals(b)) {

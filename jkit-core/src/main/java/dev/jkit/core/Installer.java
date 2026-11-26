@@ -31,14 +31,15 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Download, check checksum, unpack into tmp/, check the tool's executable, then move into
- * tools/ in one rename. An interrupted install leaves nothing in tools/.
+ * Installs a tool: downloads it, checks its checksum and signature, unpacks it into tmp/, checks
+ * that the tool's launcher is there, and moves it into tools/ with one rename, so an interrupted
+ * install leaves nothing in tools/.
  * <p>
- * The install lock is held only to look at tools/ and to change it: to see whether the build is
- * already installed and clear what interrupted installs left in tmp/, and again for the move.
- * The download and checks in between run in a work folder of this process's own ({@link
- * WorkDirs#create}), so two installs of different tools, in two terminals or CI jobs, download
- * side by side, and remove, prune or self-update don't wait for a download.
+ * The install lock is held only while looking at or changing tools/: first to see whether the
+ * build is already installed and to clear what interrupted installs left in tmp/, then again for
+ * the move. The download and the checks run in between, in a work folder this process owns
+ * ({@link WorkDirs#create}). That way two installs in two terminals or CI jobs download side by
+ * side, and remove, prune or self-update never wait for a download.
  */
 public final class Installer {
 
@@ -57,7 +58,8 @@ public final class Installer {
      *                 signature by a key built into jkit; false for md5 or sha1 only, or nothing
      * @param removedLeftovers tmp/ folders of interrupted installs that this install deleted
      * @param signedBy whose OpenPGP signature was checked (Adoptium, Amazon, Apache Maven, ...), or null
-     * @param notes what the signature check found, for the user: checked, or why it couldn't be
+     * @param notes messages for the user about the signature check: that it passed, or why it
+     *              couldn't be done
      */
     public record Result(Installed installed, boolean fresh, boolean verified, List<Path> removedLeftovers,
             String signedBy, List<String> notes) {
@@ -79,19 +81,20 @@ public final class Installer {
     }
 
     /**
-     * @param signatureRequired a signature that can't be fetched or checked throws
-     *                          {@link SignatureRequired} rather than installing on the checksum
-     *                          alone: jkit's commands require one whenever the publisher signs its
-     *                          downloads, unless --allow-unverified
+     * @param signatureRequired when true, a signature that can't be fetched or checked throws
+     *                          {@link SignatureRequired} instead of installing on the checksum
+     *                          alone. jkit's commands pass true whenever the publisher signs its
+     *                          downloads, unless --allow-unverified is given.
      */
-    @SuppressWarnings("try") // the lock is held for the block, unused inside it
+    @SuppressWarnings("try") // the lock only needs to be held for the block; nothing in it reads the variable
     public Result install(Artifact artifact, Http.Progress progress, boolean signatureRequired) throws IOException {
         Http.requireSecure(artifact.url());
         Tool storeTool = artifact.tool().storeTool();
         Path toolsDir = home.tools(storeTool);
         String dirName = Installed.dirName(artifact.version(), artifact.vendor(), artifact.fx());
         Path dest = toolsDir.resolve(dirName).normalize();
-        // the folder's bin goes on PATH: no ":" or ";" (PATH separators), "/", spaces or controls
+        // The folder's bin goes on PATH, so its name must not contain a PATH separator (: or ;), a
+        // slash, spaces or control characters.
         if (!dirName.matches("[0-9A-Za-z][0-9A-Za-z.+_~-]{0,160}") || !toolsDir.equals(dest.getParent())) {
             throw new JkitException("refusing an install folder outside " + toolsDir + ": " + dest);
         }
@@ -106,8 +109,9 @@ public final class Installer {
             }
             Perms.mkdirs(home.tmp());
             removed = removeLeftovers(home.tmp());
-            // made under the lock, so no other jkit takes it for a leftover before it is held
-            work = WorkDirs.create(home.tmp(), "install-"); // Ctrl-C deletes it too (jkit's signal handler)
+            // Created under the lock, so no other jkit can take it for a leftover and delete it
+            // before this one holds it. jkit's Ctrl-C handler deletes it too.
+            work = WorkDirs.create(home.tmp(), "install-");
         }
         IOException failure = null;
         try {
@@ -117,15 +121,17 @@ public final class Installer {
                 throw new SignatureRequired(artifact.label() + " has no published checksum or signature jkit can"
                         + " check; nothing was installed");
             }
-            // the signature first: a few hundred bytes that may already refuse the install (none
-            // published, or made with a key jkit doesn't have), which then doesn't wait for the download
+            // Fetch the signature first. It is a few hundred bytes and can refuse the install on its
+            // own (none is published, or it was made with a key jkit doesn't have), and then the user
+            // doesn't wait for the whole download to hear it.
             byte[] signature = signable ? fetchSignature(artifact, work, notes, signatureRequired) : null;
             Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
             progress.starting();
             http.download(artifact.url(), archive, progress);
             boolean verified = false;
             if (artifact.checksum() != null && artifact.checksumAlgorithm() != null) {
-                // md5 and sha1 still catch a broken download, but don't count as verified
+                // md5 and sha1 still catch a broken download, but not a tampered one, so they don't
+                // count as verified
                 Checksums.verify(archive, artifact.checksumAlgorithm(), artifact.checksum(), artifact.label());
                 verified = Checksums.strong(artifact.checksumAlgorithm());
             }
@@ -133,20 +139,24 @@ public final class Installer {
                     : null;
             if (artifact.signature() == null && artifact.checksum() != null
                     && Signatures.covers(artifact.tool(), artifact.vendor())) {
-                // Temurin before mid-2022, Maven before 3.9.0: said, so the user knows what was checked
+                // Older releases of a signing publisher (Temurin before mid-2022, Maven before 3.9.0)
+                // come unsigned. Say so, so the user knows that only the checksum was checked.
                 notes.add("note: no signature jkit can check is published for " + artifact.label()
                         + "; only its checksum was checked");
             }
-            // a good signature by a built-in key is a stronger check than any checksum; one that
-            // is published but couldn't be checked (--allow-unverified) leaves the install unverified:
-            // whoever can replace the download can usually replace its checksum too
+            // A good signature by a key built into jkit is a stronger check than any checksum. A
+            // signature that is published but couldn't be checked (--allow-unverified) leaves the
+            // install unverified even with a strong checksum, because whoever can replace the
+            // download can usually replace the checksum next to it too.
             verified = signedBy != null || (verified && !signable);
-            // made here, not by extract with its parents: once Ctrl-C has deleted the work folder this fails
+            // Created here, without its parents, rather than by extract: if Ctrl-C has already
+            // deleted the work folder, this fails instead of creating it again.
             Path out = Files.createDirectory(work.resolve("out"));
             try {
                 Archives.extract(archive, out, artifact.archiveType());
             } catch (IOException e) {
-                // truncated or corrupt (EOF, "not a ZIP archive"): the download, not this disk
+                // Anything but a file system error means the archive is truncated or corrupt (EOF,
+                // "not a ZIP archive"), so the message blames the download, not this disk.
                 if (e instanceof FileSystemException) {
                     throw e;
                 }
@@ -158,14 +168,14 @@ public final class Installer {
             requireLinksInside(toolHome);
             requireExecutable(storeTool, toolHome, artifact.label());
             if (signedBy != null) {
-                // a signature covers the file, not its name: any build the publisher signed would
-                // pass, an older one included, and the checksum next to it may come from the same
-                // server as the download. The unpacked tool must be the version asked for
+                // A signature covers the file's bytes, not its name: any build the publisher ever
+                // signed would pass, an older one included, and the checksum may come from the same
+                // server as the download. So the unpacked tool must also be the version asked for.
                 requireSignedVersion(storeTool, toolHome, artifact);
             }
             Store.writeMarker(toolHome, installed, artifact.url().toString(), verified, signedBy);
             try (Store.Lock held = lock()) {
-                // another jkit may have installed the same build meanwhile: theirs stays, ours goes
+                // Another jkit may have installed the same build in the meantime: keep that one.
                 Result existing = existing(installed, removed);
                 if (existing != null) {
                     return existing;
@@ -180,14 +190,14 @@ public final class Installer {
             }
             throw e;
         } finally {
-            WorkDirs.remove(work); // its lock first: Windows deletes no open file
+            WorkDirs.remove(work); // releases its lock first, since Windows can't delete an open file
             try {
                 Fs.deleteRecursively(work);
             } catch (IOException e) {
                 if (failure != null) {
                     failure.addSuppressed(e);
                 }
-                // a leftover in tmp/ is cleaned up by the next install; don't hide the real result
+                // The next install removes what is left in tmp/; don't let this hide the real result.
             }
         }
     }
@@ -209,17 +219,17 @@ public final class Installer {
     }
 
     /**
-     * Fetches the publisher's signature and looks at what can be told of it without the download:
-     * who made it, and whether it is of a kind jkit accepts. Returns it when checking the download
-     * decides. One jkit can't fetch or check refuses the install when {@code required}; otherwise
-     * the checksum is the only check, {@code notes} says so, and this returns null.
+     * Fetches the publisher's signature and checks what it can before the download: who made it,
+     * and whether it is a kind jkit accepts. Returns the signature when only the download can
+     * decide. When it can't be fetched or checked, this throws if {@code required}; otherwise it
+     * adds a warning to {@code notes} and returns null, leaving the checksum as the only check.
      */
     private byte[] fetchSignature(Artifact artifact, Path work, List<String> notes, boolean required)
             throws IOException {
         Path file = work.resolve("download.sig");
         byte[] bytes;
         try {
-            // stopped at the limit: a signature link that serves a JDK's worth of data isn't read whole
+            // Capped, so a signature link that serves a JDK's worth of data isn't read whole.
             http.download(artifact.signature(), file, Http.Progress.NONE, Signatures.MAX_SIGNATURE);
             bytes = Files.readAllBytes(file);
         } catch (IOException | JkitException e) {
@@ -262,10 +272,11 @@ public final class Installer {
         }
     }
 
-    /** A signature jkit can't check: refuses the install when {@code required}, else a warning in {@code notes}. */
+    /** For a signature jkit can't check: throws when {@code required}, else adds a warning to {@code notes}. */
     private static void uncheckable(Artifact artifact, Signatures.Result result, List<String> notes, boolean required) {
         String why = "couldn't check the signature of " + artifact.label() + ": " + result.detail();
-        // a key jkit doesn't know may be the publisher's new one; a retired one stays unknown
+        // An unknown key may be the publisher's new one, which a newer jkit knows. A retired key
+        // never comes back, so the advice there is a newer build instead.
         String newer = result.outcome() == Signatures.Outcome.UNKNOWN_KEY
                 ? " (a newer jkit may know a new key: jkit self-update)"
                 : result.outcome() == Signatures.Outcome.RETIRED_KEY ? " (pick a newer build)" : "";
@@ -286,21 +297,23 @@ public final class Installer {
     }
 
     /**
-     * Folders an interrupted install (Ctrl-C skips finally blocks) left, not those another jkit is
-     * downloading into right now ({@link WorkDirs#inUse}); only called with the lock held.
+     * Deletes the folders that interrupted installs left in tmp/ (Ctrl-C skips finally blocks), but
+     * not those another jkit is downloading into right now ({@link WorkDirs#inUse}). Only called
+     * with the lock held.
      */
     private static List<Path> removeLeftovers(Path tmp) {
         List<Path> removed = new ArrayList<>();
         try (Stream<Path> children = Files.list(tmp)) {
             for (Path child : children.toList()) {
                 String name = child.getFileName().toString();
-                // remove and self-update work under the lock, so their folders here are leftovers too
+                // remove does its work while holding the lock, so a remove- folder seen while this
+                // install holds it is a leftover too
                 if ((name.startsWith("install-") || name.startsWith("remove-")) && !WorkDirs.inUse(child)) {
                     try {
                         Fs.deleteRecursively(child);
                         removed.add(child);
                     } catch (IOException ignored) {
-                        // doctor reports what is left
+                        // doctor reports whatever couldn't be deleted
                     }
                 }
             }
@@ -320,7 +333,7 @@ public final class Installer {
         return name;
     }
 
-    /** The single top folder, or macOS's Contents/Home inside it. */
+    /** The tool's home in the unpacked archive: its single top folder, or macOS's Contents/Home in it. */
     static Path locateHome(Path out) throws IOException {
         Path candidate = out;
         try (Stream<Path> children = Files.list(out)) {
@@ -330,7 +343,8 @@ public final class Installer {
             }
         }
         Path macHome = candidate.resolve("Contents").resolve("Home");
-        // real folders only: a Contents/Home that is a link (to "..") would install a link
+        // Only real folders count: a Contents/Home that is a symbolic link (to "..", say) would
+        // install a link.
         boolean real = Files.isDirectory(macHome, LinkOption.NOFOLLOW_LINKS)
                 && Files.isDirectory(macHome.getParent(), LinkOption.NOFOLLOW_LINKS);
         if (!real && Files.isSymbolicLink(macHome)) {
@@ -338,9 +352,9 @@ public final class Installer {
         }
         Path frameworks = candidate.resolve("Contents").resolve("Frameworks");
         if (real && Files.isDirectory(frameworks, LinkOption.NOFOLLOW_LINKS)) {
-            // JetBrains' JCEF build keeps Chromium in Contents/Frameworks, next to Home, and finds it
-            // from java.home: install the whole bundle, with links to Home's folders at its top, so
-            // JAVA_HOME/bin/java works and java still sees Contents/Home as its home
+            // JetBrains' JCEF builds keep Chromium in Contents/Frameworks, next to Home, and find it
+            // relative to java.home. So the whole bundle is installed, with links at its top to
+            // Home's folders: JAVA_HOME/bin/java works, and java still sees Contents/Home as its home.
             try (Stream<Path> children = Files.list(macHome)) {
                 for (Path child : children.toList()) {
                     Path link = candidate.resolve(child.getFileName().toString());
@@ -355,8 +369,9 @@ public final class Installer {
     }
 
     /**
-     * Archives checks links against the archive's top folder, but only part of it may be installed
-     * (macOS's Contents/Home): a link that climbs out of that part would point into tools/ once moved.
+     * Archives checks that links stay inside the archive's top folder, but jkit may install only
+     * part of it (macOS's Contents/Home). A link that climbs out of that part would point somewhere
+     * else in tools/ once moved, so it is refused here.
      */
     static void requireLinksInside(Path toolHome) throws IOException {
         Path root = toolHome.toAbsolutePath().normalize();
@@ -406,9 +421,10 @@ public final class Installer {
     }
 
     /**
-     * tools/ is on another disk than tmp/ (a link to it): copy next to the destination, then
-     * rename there, so the install still appears in one step. The copy, {@code .<name>.partial},
-     * is deleted if it fails, and by Ctrl-C (WorkDirs) while it runs.
+     * For when tools/ is on another disk than tmp/ (tools/ is a link), so no rename can move the
+     * install. Copies it next to the destination as {@code .<name>.partial} and renames that, so the
+     * install still appears in one step. The partial copy is deleted if the copy fails, and by
+     * Ctrl-C (through WorkDirs) while it runs.
      */
     static void copyAcross(Path from, Path to, Copy copy) throws IOException {
         Path partial = to.resolveSibling("." + to.getFileName() + ".partial");
@@ -421,7 +437,7 @@ public final class Installer {
             try {
                 Fs.deleteRecursively(partial);
             } catch (IOException suppressed) {
-                e.addSuppressed(suppressed); // jkit prune and doctor find what is left
+                e.addSuppressed(suppressed); // jkit prune and doctor find whatever is left
             }
             throw e;
         } finally {
@@ -430,17 +446,20 @@ public final class Installer {
         Fs.deleteRecursively(from);
     }
 
-    /** Takes the store lock, as the commands do ({@link Store#lock()}), on the same open file. */
+    /**
+     * Takes the install lock through {@link Store#lock()}, as the commands do, so the process opens
+     * the lock file only once however many code paths hold it.
+     */
     private Store.Lock lock() throws IOException {
         return new Store(home).lock(home.lockFile(), "waiting for another jkit to finish installing…");
     }
 
-    /** chmod a+x on the regular files directly in {@code bin} (not .bat/.cmd/.exe, which don't care). */
+    /** Runs chmod a+x on the regular files directly in {@code bin}, except .bat, .cmd and .exe files. */
     private static void makeExecutable(Path bin) {
         makeExecutable(bin, null);
     }
 
-    /** Like {@link #makeExecutable(Path)}, only the file {@code only} when it isn't null. */
+    /** Like {@link #makeExecutable(Path)}, but only for the file named {@code only} when it isn't null. */
     private static void makeExecutable(Path bin, String only) {
         try (var files = Files.list(bin)) {
             for (Path f : files.toList()) {
@@ -474,15 +493,16 @@ public final class Installer {
     }
 
     /**
-     * For a signed JDK: the unpacked JDK's {@code release} file must report the version jkit asked
-     * for, every part of it (21.0.13.1 is a fix 21.0.13 lacks; the build number after + isn't in
-     * that file). Corretto 8 has no {@code release} file; its {@code version.txt} says the same thing.
+     * For a signed JDK, checks that the unpacked JDK's {@code release} file reports every part of
+     * the version jkit asked for, since 21.0.13.1 has a fix that 21.0.13 lacks. (The build number
+     * after + isn't in that file.) Corretto 8 has no {@code release} file, so its
+     * {@code version.txt} is read instead.
      */
     static void requireReleaseVersion(Path jdkHome, Artifact artifact) {
         String found = ToolStates.releaseVersion(jdkHome);
         String compared = found == null ? null : Version.fromLegacyJava(found);
-        // the parts after the third in version.txt (8.514.01.1) are Corretto's build and revision,
-        // which the version jkit asked for (8.0.514) doesn't have
+        // In version.txt (8.514.01.1) the parts after the third are Corretto's build and revision,
+        // which the version jkit asked for (8.0.514) doesn't have, so only three parts are compared.
         int parts = Integer.MAX_VALUE;
         if (found == null) {
             found = correttoVersionTxt(jdkHome);
@@ -507,8 +527,8 @@ public final class Installer {
     }
 
     /**
-     * For a signed Maven: its {@code lib/maven-core-<version>.jar} names the release, in every
-     * Maven from 3.0 to 4.
+     * For a signed Maven, checks the release named by its {@code lib/maven-core-<version>.jar},
+     * which every Maven from 3.0 to 4 has.
      */
     static void requireMavenVersion(Path mavenHome, Artifact artifact) {
         String found = null;
@@ -530,9 +550,9 @@ public final class Installer {
             Pattern.compile("sbt\\.version-read\\(sbt\\.version\\)\\[([^\\]\\s]{1,64})\\]");
 
     /**
-     * For a signed sbt: the launcher's {@code sbt/sbt.boot.properties} names the sbt version it
-     * starts by default ({@code ${sbt.version-read(sbt.version)[1.10.7]}}), in every release from
-     * 1.3.0 to 2.x.
+     * For a signed sbt, checks the version the launcher starts by default, which its
+     * {@code sbt/sbt.boot.properties} names ({@code ${sbt.version-read(sbt.version)[1.10.7]}}) in
+     * every release from 1.3.0 to 2.x.
      */
     static void requireSbtVersion(Path sbtHome, Artifact artifact) {
         String found = null;
@@ -542,7 +562,7 @@ public final class Installer {
                 ZipEntry entry = jar.getEntry("sbt/sbt.boot.properties");
                 if (entry != null) {
                     try (InputStream in = jar.getInputStream(entry)) {
-                        // a few hundred bytes; more is read no further
+                        // The file is a few hundred bytes; a bigger one is read only this far.
                         String text = new String(in.readNBytes(64 * 1024), StandardCharsets.UTF_8);
                         Matcher m = SBT_VERSION.matcher(text);
                         found = m.find() && Version.isSafeText(m.group(1)) ? m.group(1) : null;
@@ -599,8 +619,8 @@ public final class Installer {
             Path launcher = toolHome.resolve("bin").resolve(name);
             if (Files.isRegularFile(launcher)) {
                 if (Perms.posix() && !name.contains(".") && !Files.isExecutable(launcher)) {
-                    makeExecutable(toolHome.resolve("bin")); // a zip made without Unix modes
-                    // the JDK starts child processes through these: without +x, ProcessBuilder fails
+                    makeExecutable(toolHome.resolve("bin")); // a zip archive made without Unix file modes
+                    // The JDK starts child processes through these, so without +x ProcessBuilder fails.
                     for (String helper : List.of("jspawnhelper", "jexec")) {
                         Path file = toolHome.resolve("lib").resolve(helper);
                         if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {

@@ -64,12 +64,14 @@ final class InstallCommand implements Callable<Integer> {
     JsonOut.Flag json = new JsonOut.Flag();
 
     /**
-     * Downloads and installs {@code artifact}, saying beforehand what can't be checked: no checksum
-     * at all is refused unless {@code allowUnverified} ({@code retry} is the command that allows it),
-     * md5 or sha1 only is a warning. A project's jkit sync must not install unchecked code unasked.
-     * A download its publisher signs, with a key built into jkit, must have a good signature too:
-     * one that can't be fetched or checked refuses it unless {@code allowUnverified}. With no
-     * checksum (Corretto) the signature is the only check.
+     * Downloads and installs {@code artifact}, first telling the user what can't be checked.
+     *
+     * <p>A download with no checksum at all is refused unless {@code allowUnverified}, so that a
+     * project's jkit sync never installs unchecked code without being asked to; {@code retry} is
+     * the command line that allows it. An md5 or sha1 checksum only gets a warning. If the
+     * publisher signs its downloads with a key built into jkit, the signature must check out too,
+     * unless {@code allowUnverified}. For downloads without a checksum (Corretto) the signature is
+     * the only check.
      */
     static Installer.Result download(Context ctx, Artifact artifact, boolean allowUnverified, String retry)
             throws Exception {
@@ -78,8 +80,8 @@ final class InstallCommand implements Callable<Integer> {
                     "run the command without --offline");
         }
         String signer = signer(artifact);
-        // the publisher signs it: a signature jkit can't fetch or check refuses the install, since
-        // whoever can replace the download can usually replace its checksum next to it too
+        // When the publisher signs its downloads, a signature jkit can't fetch or check refuses the
+        // install: whoever can replace a download can usually replace the checksum next to it too.
         boolean signatureRequired = signer != null && !allowUnverified;
         if (artifact.checksum() == null && signer != null) {
             ctx.err.println("note: " + artifact.label() + " has no published checksum; checking " + signer
@@ -96,8 +98,8 @@ final class InstallCommand implements Callable<Integer> {
             ctx.err.println("warning: only a " + artifact.checksumAlgorithm() + " checksum is published for "
                     + artifact.label() + ": it catches a broken download, not a tampered one");
         }
-        // said by the progress bar once the download starts: a signature that refuses the install
-        // is fetched and checked first, and then nothing is downloaded
+        // The progress bar prints this when the download actually starts. The signature is fetched
+        // and checked first, and if it refuses the install nothing is downloaded at all.
         ProgressBar progress = new ProgressBar(ctx.err,
                 "downloading " + artifact.label() + " from " + artifact.url().getHost());
         try {
@@ -124,7 +126,7 @@ final class InstallCommand implements Callable<Integer> {
         Context ctx = options.context();
         Vendor vendor = Resolve.knownVendor(ctx, spec, vendorText);
         spec = Resolve.lts(ctx, spec, true, vendor, fx);
-        // an exact pre-release (maven@4.0.0-rc-7) asks for pre-releases by itself, as pin and sync do
+        // Asking for an exact pre-release (maven@4.0.0-rc-7) implies --pre, as in pin and sync.
         boolean wantPre = pre || spec.version() != null && Version.looksLikeVersion(spec.version())
                 && Version.parse(spec.version()).isPreRelease();
         Artifact artifact = artifact(ctx, spec, vendor, fx, wantPre);
@@ -138,9 +140,10 @@ final class InstallCommand implements Callable<Integer> {
             }
             return 0;
         }
-        // only the very first build of a tool: after jkit reset --global, no default was a choice
-        // GraalVM builds count only for graalvm; for jdk, a GraalVM installed with jkit install graalvm
-        // doesn't make a plain JDK "not the first"
+        // Only the very first build of a tool becomes the default: if the user cleared the default
+        // with jkit reset --global, later installs must not set it again. GraalVM builds count
+        // separately, so a GraalVM installed with jkit install graalvm doesn't stop the first plain
+        // JDK from becoming the default.
         boolean installingGraal = artifact.vendor() != null && artifact.vendor().isGraalVmBased();
         boolean first = ctx.store.list(spec.tool()).stream().noneMatch(i -> {
             boolean graal = i.vendor() != null && i.vendor().isGraalVmBased();
@@ -150,11 +153,11 @@ final class InstallCommand implements Callable<Integer> {
                 + (vendorText == null ? "" : " " + vendorText) + (fx ? " --fx" : "") + (pre ? " --pre" : "")
                 + " --allow-unverified");
         Changes changes = installed(ctx, result);
-        // the first one of a tool becomes the default, as most people would do next anyway
         Path globalLink = ctx.home.global(spec.tool());
         boolean madeDefault = false;
         if (result.fresh() && first && !noDefault) {
-            // checked and set under the link lock: another jkit may set a default or remove this meanwhile
+            // Checked and set under the link lock, since another jkit may set a default or remove this
+            // install in the meantime.
             try (AutoCloseable lock = ctx.store.linkLock()) {
                 if (ctx.os.readLink(globalLink) == null && !Files.exists(globalLink, LinkOption.NOFOLLOW_LINKS)
                         && Files.isRegularFile(result.installed().home().resolve(Store.MARKER),
@@ -169,7 +172,7 @@ final class InstallCommand implements Callable<Integer> {
             changes.note("it's the default " + spec.tool() + " now (the first one installed); to clear it: jkit reset "
                     + spec.tool() + " --global");
         }
-        // another jkit may have installed it while this one waited for the store lock
+        // Not fresh means another jkit installed it while this one waited for the store lock.
         say.println((result.fresh() ? "installed " : "already installed (by another jkit just now): ")
                 + artifact.label() + " → " + Changes.tilde(result.installed().home().toString()));
         changes.namedInMessage(result.installed().home()).print(say);
@@ -186,8 +189,9 @@ final class InstallCommand implements Callable<Integer> {
     }
 
     /**
-     * Whether the global link points at {@code home} now: the jkit that won an install race may
-     * have made it the default meanwhile, and then saying how to make it one is wrong.
+     * Whether the global link points at {@code home}. Checked again after the install because the
+     * jkit that won an install race may have made it the default, and then the hint on how to
+     * make it the default would be wrong.
      */
     static boolean isDefault(Context ctx, Path link, Path home) {
         try {
@@ -217,7 +221,7 @@ final class InstallCommand implements Callable<Integer> {
         if (result.fresh()) {
             changes.folder(result.installed().home(), true);
         }
-        result.notes().forEach(changes::note); // what the signature check found
+        result.notes().forEach(changes::note); // what the signature check found, if anything
         return changes;
     }
 

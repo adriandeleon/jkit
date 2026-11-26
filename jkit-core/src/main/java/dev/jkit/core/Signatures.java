@@ -37,15 +37,17 @@ import org.bouncycastle.openpgp.operator.bc.BcPGPContentVerifierBuilderProvider;
 public final class Signatures {
 
     /**
-     * The signing keys of one publisher: the {@code .asc} resource under {@code dev/jkit/core/keys/}
-     * and the fingerprints of the primary keys it must hold, exactly, checked when it is loaded.
+     * The signing keys of one publisher: the {@code .asc} resource under {@code dev/jkit/core/keys/},
+     * and the fingerprints of the primary keys it holds. The resource must hold exactly those keys,
+     * which is checked when it is loaded.
      *
      * @param vendor the foojay name of the JDK vendor whose builds these keys sign, or null
      * @param tool the tool whose downloads these keys sign, when {@code vendor} is null
      */
     record Key(String vendor, Tool tool, String owner, String resource, List<String> fingerprints) {
         Key {
-            // neither: jkit's own release key (JKIT), which signs jkit's releases, not downloads
+            // A key with neither a vendor nor a tool is jkit's own release key (JKIT), which signs
+            // jkit's releases rather than downloads.
             if ((vendor != null && tool != null) || fingerprints.isEmpty()) {
                 throw new IllegalArgumentException("a key is for one vendor, one tool, or jkit");
             }
@@ -129,11 +131,11 @@ public final class Signatures {
         GOOD,
         /** The publisher's key made it, and it doesn't match the file: refuse the download. */
         BAD,
-        /** Not by a key jkit has for this publisher (it may have a new key): checksum only. */
+        /** Not made by a key jkit has for this publisher, which may have a new key. Only the checksum counts. */
         UNKNOWN_KEY,
-        /** By one of the publisher's {@link #RETIRED} keys, which jkit doesn't have: checksum only. */
+        /** Made by one of the publisher's {@link #RETIRED} keys, which jkit doesn't have. Only the checksum counts. */
         RETIRED_KEY,
-        /** Not a signature jkit can check (damaged, or a weak hash): checksum only. */
+        /** Not a signature jkit can check (damaged, or a weak hash). Only the checksum counts. */
         UNREADABLE
     }
 
@@ -181,17 +183,18 @@ public final class Signatures {
         return verify(() -> Files.newInputStream(file), signature, key, ring);
     }
 
-    /** What a signature is over: opened once per signature tried. */
+    /** The signed data, opened again for each signature tried. */
     @FunctionalInterface
     interface Data {
         InputStream open() throws IOException;
     }
 
     /**
-     * What can be told of {@code signature} without the file it is over: null when a key jkit has
-     * for {@code tool} or {@code vendor} made it and it is of a kind jkit accepts, so checking the
-     * file decides; otherwise why it can't be checked (never GOOD or BAD). An install asks this
-     * before it downloads, so a signature it would refuse anyway doesn't cost the whole download.
+     * Checks what can be told from {@code signature} alone, without the file it covers. Returns null
+     * when a key jkit has for {@code tool} or {@code vendor} made it and it is a kind jkit accepts,
+     * so only checking the file can decide; otherwise returns why it can't be checked (never GOOD
+     * or BAD). An install calls this before it downloads, so that a signature it would refuse
+     * anyway doesn't cost the whole download.
      */
     public static Result precheck(byte[] signature, Tool tool, Vendor vendor) throws IOException {
         Key key = key(tool, vendor);
@@ -201,7 +204,7 @@ public final class Signatures {
         return verify((Data) null, signature, key, ring(key));
     }
 
-    /** With {@code data} null, stops where the file would be read and returns null ({@link #precheck}). */
+    /** With {@code data} null, stops before the file would be read and returns null ({@link #precheck}). */
     static Result verify(Data data, byte[] signature, Key key, PGPPublicKeyRingCollection ring) throws IOException {
         if (signature.length > MAX_SIGNATURE) {
             return new Result(Outcome.UNREADABLE, null, "the signature file is " + signature.length + " bytes");
@@ -228,7 +231,7 @@ public final class Signatures {
                 others = "made with key " + id + ", not " + key.described();
                 continue;
             }
-            // the signing key may be a subkey (sbt, Maven): name the primary key it belongs to
+            // The signing key may be a subkey (sbt, Maven), so name the primary key it belongs to.
             PGPPublicKey primary = ring.getPublicKeyRing(sig.getKeyID()).getPublicKey();
             String whose = key.owner() + "'s key " + longId(fingerprint(primary));
             if (sig.getSignatureType() != PGPSignature.BINARY_DOCUMENT || !STRONG_HASHES.contains(sig.getHashAlgorithm())) {
@@ -265,7 +268,7 @@ public final class Signatures {
     }
 
     private static PGPSignatureList signatures(byte[] signature) throws IOException {
-        // .sig files come binary (Temurin) or ASCII-armored; the decoder stream takes both
+        // .sig files come binary (Temurin) or ASCII-armored; the decoder stream reads both.
         BcPGPObjectFactory factory = new BcPGPObjectFactory(PGPUtil.getDecoderStream(new ByteArrayInputStream(signature)));
         Object first = factory.nextObject();
         if (first instanceof PGPCompressedData compressed) {

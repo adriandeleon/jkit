@@ -1,14 +1,14 @@
 # jkit shell hook (PowerShell)
 $env:JKIT_SHELL = 'pwsh'
 & {
-  # a script block of its own: the profile's $t, $bin, $dir... stay as they were
+  # in a script block of its own, so variables of the same name in the profile ($t, $bin...) are untouched
   $g = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit/global'
   $sep = [IO.Path]::PathSeparator
   foreach ($pair in @(@('sbt', 'SBT_HOME'), @('gradle', 'GRADLE_HOME'), @('maven', 'MAVEN_HOME'), @('jdk', 'JAVA_HOME'))) {
     $bin = Join-Path (Join-Path $g $pair[0]) 'bin'
     # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
     $own = [Environment]::GetEnvironmentVariable($pair[1])
-    # without a trailing slash or backslash, so its bin goes on PATH as jkit writes it
+    # drop a trailing slash or backslash, so the entry is written as jkit writes it
     if ($own) { $own = $own.TrimEnd('\', '/') }
     if ($own -and $own -ne (Join-Path $g $pair[0]) -and (Test-Path -LiteralPath (Join-Path $own 'bin'))) {
       $bin = Join-Path $own 'bin'
@@ -25,9 +25,9 @@ $env:JKIT_SHELL = 'pwsh'
 $global:__jkit_bin = '/opt/jk it''s $x/bin/jkit'
 $global:__jkit_root = '/tmp/o''brien $HOME `x` \ "q" ‘‘t’’/.jkit'
 function jkit {
-  # PowerShell drops the first bare -- from a function's arguments, and jkit exec
-  # needs it: put it back where the command line has it. Only when every word
-  # before it is one argument; otherwise the arguments go on as they came.
+  # PowerShell drops the first bare -- from a function's arguments, and jkit exec needs it,
+  # so put it back where the command line has it. That is only safe when every word before
+  # it is exactly one argument; otherwise the arguments are passed on as they came.
   $a = @($args)
   $line = $MyInvocation.Line
   $at = $MyInvocation.OffsetInLine
@@ -60,7 +60,8 @@ function jkit {
   $env:JKIT_ENV_FILE = $envFile
   try {
     if (-not ($global:__jkit_bin -and (Test-Path -LiteralPath $global:__jkit_bin))) {
-      # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin
+      # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+      # skipping folders under jkit's root, where a tool's bin could hold some other jkit
       $root = $global:__jkit_root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
       $global:__jkit_bin = Get-Command jkit -CommandType Application -All -ErrorAction SilentlyContinue |
         Where-Object { -not $_.Source.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
@@ -74,12 +75,12 @@ function jkit {
       $rc = 127
     }
   } finally {
-    # also after Ctrl-C: later jkit runs outside this function must not write to it
+    # also after Ctrl-C, so that a later jkit run outside this function doesn't write to the file
     Remove-Item Env:JKIT_ENV_FILE -ErrorAction SilentlyContinue
   }
-  # a script block, not the file: the execution policy (Restricted by default in
-  # Windows PowerShell) blocks dot-sourcing a .ps1, and jkit would have reported
-  # changes this shell never got
+  # Run the file's text as a script block rather than dot-sourcing the file: the execution
+  # policy (Restricted by default in Windows PowerShell) blocks .ps1 files, and the changes
+  # jkit reported would then silently not reach this shell.
   if ((Test-Path $envFile) -and (Get-Item $envFile).Length -gt 0) {
     . ([scriptblock]::Create([IO.File]::ReadAllText($envFile)))
   }

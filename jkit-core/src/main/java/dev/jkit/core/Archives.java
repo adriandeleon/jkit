@@ -34,11 +34,14 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 public final class Archives {
     private Archives() { }
 
-    /** Unpacked size and entry count limits: the biggest JDKs unpack to under 1 GB and 1,000 files. */
+    /**
+     * Limits on the unpacked size and the number of entries, well above what real tools need (the
+     * biggest JDKs unpack to under 1 GB), so a hostile archive can't fill the disk.
+     */
     static final long MAX_UNPACKED = 3L << 30;
     static final int MAX_ENTRIES = 50_000;
 
-    /** What an archive may still unpack. */
+    /** How many more bytes and entries the archive may unpack. */
     private static final class Budget {
         final int entryLimit;
         long bytes = MAX_UNPACKED;
@@ -54,7 +57,8 @@ public final class Archives {
                 throw unsafe("more than " + entryLimit + " entries");
             }
             if (WorkDirs.interrupted()) {
-                throw new InterruptedIOException("interrupted"); // Ctrl-C is deleting the folder
+                // Ctrl-C's handler is deleting the work folder: stop instead of writing into it
+                throw new InterruptedIOException("interrupted");
             }
         }
 
@@ -74,7 +78,10 @@ public final class Archives {
         }
     }
 
-    /** A download that is well-formed but would escape its folder or fill the disk: not a jkit bug. */
+    /**
+     * The error for an archive that would escape its folder or fill the disk. It is the download's
+     * fault, not a jkit bug, so the message says what to try instead.
+     */
     static JkitException unsafe(String detail) {
         return new JkitException("the downloaded archive is unsafe to unpack (" + detail
                 + "); nothing was installed", "the source or a mirror served a broken or hostile archive; "
@@ -85,7 +92,7 @@ public final class Archives {
         extract(archive, target, archiveType, MAX_ENTRIES);
     }
 
-    /** {@link #extract(Path, Path, String)} with another entry limit: tests don't build 50,000 entries. */
+    /** {@link #extract(Path, Path, String)} with another entry limit, so tests needn't build 50,000 entries. */
     static void extract(Path archive, Path target, String archiveType, int entryLimit) throws IOException {
         Files.createDirectories(target);
         Path root = target.toAbsolutePath().normalize();
@@ -105,8 +112,8 @@ public final class Archives {
 
     /**
      * Takes away write access for the group and other users from everything unpacked, folders
-     * included: the archive's modes are already masked, but folders follow the umask, which may be
-     * 002 or 000.
+     * included. File modes from the archive are already masked by setMode, but folders get theirs
+     * from the umask, which may be 002 or 000.
      */
     private static void closeToOthers(Path root) throws IOException {
         if (!Perms.posix()) {
@@ -127,13 +134,14 @@ public final class Archives {
 
     private static void extractTarGz(Path archive, Path target, Budget budget) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(archive));
-             // every gzip member, as ArchiveScan reads it (bgzip and pigz write several)
+             // Read every gzip member, as ArchiveScan does: bgzip and pigz write several.
              TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(raw, true))) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
                 budget.entry();
                 Path out = safe(target, entry.getName());
-                // ArchiveScan refuses these; checked again in case the two ever read an archive differently
+                // ArchiveScan already refuses these. Check again in case the two ever read an
+                // archive differently.
                 if (entry.isCharacterDevice() || entry.isBlockDevice() || entry.isFIFO() || entry.isSparse()) {
                     throw unsafe("it holds a device, pipe or sparse file: " + entry.getName());
                 }
@@ -188,11 +196,12 @@ public final class Archives {
     }
 
     /**
-     * A link whose target, resolved from where it sits, stays inside the archive's top folder (only
-     * that folder is installed), or inside the target folder for a link at the top. {@code ..} may
-     * only lead the target: after a name it would climb out of whatever that name turns out to be,
-     * and an earlier or later entry can make that name a symlink, so checking the text alone isn't
-     * enough ({@code a/b/../..} is inside on paper, outside if {@code a/b} links to {@code .}).
+     * Creates a symlink, refusing one whose target, resolved from where the link sits, leaves the
+     * archive's top folder (only that folder is installed), or the target folder for a link at the
+     * top. {@code ..} is allowed only at the start of the link target. After a name, it climbs out
+     * of whatever that name turns out to be, and another entry can make that name a symlink, so
+     * checking the text alone isn't enough: {@code a/b/../..} looks inside, but is outside if
+     * {@code a/b} links to {@code .}.
      */
     private static void symlink(Path target, Path out, String linkName, String entryName) throws IOException {
         if (linkName == null || linkName.isEmpty()) {
@@ -224,7 +233,7 @@ public final class Archives {
         Files.createSymbolicLink(out, link);
     }
 
-    /** A zip symlink's target, read only up to a path's length: ZipFile would read any size whole. */
+    /** A zip symlink's target, read only up to a path's length, since ZipFile would read any size whole. */
     private static String linkTarget(ZipFile zip, ZipArchiveEntry entry) throws IOException {
         if (entry.getSize() > ArchiveScan.MAX_NAME) {
             throw unsafe("a symlink entry holds " + entry.getSize() + " bytes: " + entry.getName());
@@ -239,9 +248,10 @@ public final class Archives {
     }
 
     /**
-     * createDirectories that refuses to go through a symlink an earlier entry made, and makes the
-     * folders below {@code target} one at a time, each in one that exists: should Ctrl-C delete the
-     * work folder halfway, the next entry fails instead of making it again, to be left behind.
+     * Like Files.createDirectories, but refuses to go through a symlink an earlier entry made, and
+     * creates the folders below {@code target} one at a time, each inside one that exists. If
+     * Ctrl-C deletes the work folder halfway through, the next entry then fails instead of
+     * creating the folder again and leaving it behind.
      */
     private static void createDirectories(Path target, Path dir) throws IOException {
         noLinksBetween(target, dir, dir.toString());
@@ -279,7 +289,7 @@ public final class Archives {
 
     /**
      * An entry name or link target as a path. A name this file system can't hold (a NUL byte, or
-     * on Windows a {@code :} or {@code *}) is the archive's fault, not a jkit bug.
+     * on Windows a {@code :} or {@code *}) is reported as the archive's fault, not a jkit bug.
      */
     private static Path path(String name, String entryName) {
         try {
@@ -293,7 +303,7 @@ public final class Archives {
         if (!Perms.posix() || mode == 0) {
             return;
         }
-        // never writable by anyone but the owner, whatever the archive says: these run from PATH
+        // Whatever the archive says, only the owner may write: these files run from PATH.
         mode &= 0755;
         Set<PosixFilePermission> perms = EnumSet.noneOf(PosixFilePermission.class);
         PosixFilePermission[] order = {

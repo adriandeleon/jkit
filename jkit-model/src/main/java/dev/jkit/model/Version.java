@@ -83,9 +83,9 @@ public final class Version implements Comparable<Version> {
     }
 
     /**
-     * Java's pre-9 numbering as later versions write it: {@code 1.8} → {@code 8},
-     * {@code 1.8.0_432} → {@code 8.0_432}. Other text is returned as is. For JDK versions only:
-     * Gradle 1.8 is a real Gradle version.
+     * Rewrites Java's pre-9 numbering the way later versions write it: {@code 1.8} → {@code 8},
+     * {@code 1.8.0_432} → {@code 8.0_432}. Other text is returned as is. Use it for JDK versions
+     * only, since Gradle 1.8 is a real Gradle version.
      */
     public static String fromLegacyJava(String text) {
         if (text.matches("1\\.[1-8](\\D.*)?")) {
@@ -109,8 +109,8 @@ public final class Version implements Comparable<Version> {
             try {
                 out.add(Integer.parseInt(piece));
             } catch (NumberFormatException e) {
-                // too large: kept as the largest number rather than dropped, so 21.99999999999999999999
-                // matches no real version instead of quietly meaning 21
+                // A number too big for an int becomes the largest int rather than being dropped, so
+                // 21.99999999999999999999 matches no real version instead of quietly meaning 21.
                 out.add(Integer.MAX_VALUE);
             }
         }
@@ -181,7 +181,7 @@ public final class Version implements Comparable<Version> {
         return c != 0 ? c : raw.compareTo(other.raw);
     }
 
-    /** Text compared run by run, numbers by value: rc-2 before rc-10, alpha before beta before rc. */
+    /** Compares text run by run, digit runs by value: rc-2 before rc-10, alpha before beta before rc. */
     static int naturalCompare(String a, String b) {
         int i = 0;
         int j = 0;

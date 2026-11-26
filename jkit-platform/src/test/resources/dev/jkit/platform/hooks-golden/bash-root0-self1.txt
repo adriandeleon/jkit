@@ -5,7 +5,7 @@ for __jkit_t in sbt gradle maven jdk; do
   # a *_HOME of your own wins over the global one, so its bin goes on PATH instead
   case $__jkit_t in sbt) __jkit_h=${SBT_HOME-} ;; gradle) __jkit_h=${GRADLE_HOME-} ;;
     maven) __jkit_h=${MAVEN_HOME-} ;; *) __jkit_h=${JAVA_HOME-} ;; esac
-  # without a trailing /, so PATH gets /x/jdk/bin as jkit writes it, not /x/jdk//bin
+  # drop a trailing /, so the entry is /x/jdk/bin as jkit writes it, not /x/jdk//bin
   __jkit_h=${__jkit_h%/}
   __jkit_b="$__jkit_g/$__jkit_t/bin"
   case "$__jkit_h" in ""|"$__jkit_g/$__jkit_t") ;; *) [ -d "$__jkit_h/bin" ] && __jkit_b="$__jkit_h/bin" ;; esac
@@ -22,8 +22,9 @@ __jkit_bin='/usr/local/bin/jkit'
 __jkit_root='/home/u/.jkit'
 __jkit_run() {
   if [ -z "$__jkit_bin" ] || [ ! -x "$__jkit_bin" ]; then
-    # gone (a package manager moved it), or unknown: jkit on PATH, never one in a tool's bin;
-    # (pattern) because bash 3.2 (macOS) ends $( ) at a case pattern's lone )
+    # No saved path, or it is gone (a package manager moved jkit): find jkit on PATH,
+    # skipping folders under jkit's root, where a tool's bin could hold some other jkit.
+    # The case patterns start with ( because bash 3.2 (macOS) ends $( ) at a pattern's lone ).
     __jkit_bin=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r __jkit_d; do
       case "$__jkit_d/" in ("$__jkit_root"/*) ;; (*) if [ -x "$__jkit_d/jkit" ]; then printf '%s\n' "$__jkit_d/jkit"; break; fi ;; esac
     done)
