@@ -34,6 +34,9 @@ public final class FoojaySource {
 
     public static final URI DEFAULT_BASE = URI.create("https://api.foojay.io/disco/v3.0/");
 
+    /** Amazon's old CloudFront host, which still serves its 2019 Corretto builds, and only those. */
+    static final String CORRETTO_2019_HOST = "d3pxv6yz143wms.cloudfront.net";
+
     /**
      * One JDK package for one platform.
      *
@@ -63,7 +66,7 @@ public final class FoojaySource {
          */
         public boolean retiredKey() {
             return pkg != null && signature != null && pkg.vendor().foojayName().equals("corretto")
-                    && "d3pxv6yz143wms.cloudfront.net".equalsIgnoreCase(signature.getHost());
+                    && CORRETTO_2019_HOST.equalsIgnoreCase(signature.getHost());
         }
     }
 
@@ -179,31 +182,44 @@ public final class FoojaySource {
 
     /**
      * Whether {@code download} is where {@code vendor} publishes its builds, for the vendors jkit
-     * has keys for: Adoptium's GitHub releases, aka.ms, and corretto.aws (with Amazon's older
+     * has keys for, in the exact shape of the vendor's links, ending in the build's own file name:
+     * a release asset of one of Adoptium's temurin&lt;N&gt;-binaries repositories, aka.ms/download-jdk/,
+     * and corretto.aws/downloads/resources/&lt;version&gt;/ (or &lt;version&gt;/ on Amazon's older
      * CloudFront host, which still serves its 2019 builds). That is every build foojay lists for
-     * them. Only the address foojay names is checked: from there the vendor's own server redirects
+     * them. The host alone isn't enough: github.com serves any commit of a fork from the original
+     * repository's path (/adoptium/&lt;repo&gt;/archive/&lt;sha&gt;.tar.gz), whoever pushed it.
+     * <p>
+     * Only the address foojay names is checked: from there the vendor's own server redirects
      * (aka.ms to download.visualstudio.microsoft.com, GitHub to its release-assets host), which
      * foojay doesn't decide, and Http checks each hop stays https.
      */
-    static boolean onVendorHost(String vendor, URI download) {
+    static boolean onVendorHost(String vendor, URI download, String fileName) {
         String host = download.getHost() == null ? "" : download.getHost().toLowerCase(Locale.ROOT);
         String path = download.getRawPath() == null ? "" : download.getRawPath();
-        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null
-                && !path.contains("..") && !path.toLowerCase(Locale.ROOT).contains("%2e");
-        return plain && switch (vendor) {
-            case "temurin" -> host.equals("github.com") && path.startsWith("/adoptium/");
-            case "microsoft" -> host.equals("aka.ms");
-            case "corretto" -> host.equals("corretto.aws") || host.equals("d3pxv6yz143wms.cloudfront.net");
-            default -> true;
+        boolean plain = download.getPort() == -1 && download.getRawUserInfo() == null && download.getRawQuery() == null
+                && download.getRawFragment() == null && !path.contains("..")
+                && !path.toLowerCase(Locale.ROOT).contains("%2e");
+        int slash = path.lastIndexOf('/');
+        if (!plain || slash < 0 || !path.substring(slash + 1).equals(fileName)) {
+            return false;
+        }
+        String folder = path.substring(0, slash);
+        return switch (vendor) {
+            case "temurin" -> host.equals("github.com")
+                    && folder.matches("/adoptium/temurin[0-9]{1,3}-binaries/releases/download/[^/]+");
+            case "microsoft" -> host.equals("aka.ms") && folder.equals("/download-jdk");
+            case "corretto" -> host.equals("corretto.aws") && folder.matches("/downloads/resources/[^/]+")
+                    || host.equals(CORRETTO_2019_HOST) && folder.matches("/[^/]+");
+            default -> false; // only asked for the vendors above
         };
     }
 
-    /** "Adoptium's GitHub releases": where {@link #onVendorHost} expects the vendor's downloads. */
+    /** Where {@link #onVendorHost} expects the vendor's downloads, for a message. */
     private static String vendorHost(String vendor) {
         return switch (vendor) {
-            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/)";
-            case "microsoft" -> "aka.ms";
-            default -> "corretto.aws";
+            case "temurin" -> "Adoptium's GitHub releases (github.com/adoptium/temurin<N>-binaries/releases/)";
+            case "microsoft" -> "aka.ms/download-jdk/";
+            default -> "corretto.aws/downloads/resources/";
         };
     }
 
@@ -226,9 +242,9 @@ public final class FoojaySource {
             return null; // what packages() skips, should a list name it otherwise
         }
         if (SIGNING_VENDORS.contains(vendor) && "https".equalsIgnoreCase(base.getScheme())
-                && !onVendorHost(vendor, download)) {
+                && !onVendorHost(vendor, download, pkg.fileName())) {
             throw new JkitException(base.getHost() + " lists the download of " + pkg.vendor() + " "
-                    + pkg.version() + " at " + Visible.of(String.valueOf(download.getHost())) + ", not "
+                    + pkg.version() + " at " + Visible.of(download.toString()) + ", not on "
                     + vendorHost(vendor) + "; refusing it",
                     "jkit downloads " + pkg.vendor() + " builds only from there: try again later, or pick another vendor");
         }

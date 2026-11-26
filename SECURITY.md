@@ -73,9 +73,12 @@ matters:
     ignored. It takes only builds foojay lists under the vendor and major version you asked for,
     so an answer can't call a Temurin build "Zulu", or a Temurin 21 build 17.0.3, to have it
     installed without the signature check. And a build of these three vendors must download from
-    the vendor's own server, or it is refused: Adoptium's GitHub releases (`github.com/adoptium/`),
-    `aka.ms`, and `corretto.aws` (or `d3pxv6yz143wms.cloudfront.net`, where Amazon still serves
-    its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
+    the vendor's own server, at a link of the vendor's own shape ending in the build's file name,
+    or it is refused: a release asset of Adoptium's `temurin<N>-binaries` repositories
+    (`github.com/adoptium/temurin<N>-binaries/releases/download/<tag>/<file>`; GitHub serves a
+    fork's commits from the original repository's other paths), `aka.ms/download-jdk/<file>`, and
+    `corretto.aws/downloads/resources/<version>/<file>` (or `d3pxv6yz143wms.cloudfront.net/<version>/<file>`,
+    where Amazon still serves its 2019 builds). That is where foojay lists every one of them; jkit checks the address foojay
     names, and the redirects the vendor's server answers with are checked only to stay on HTTPS.
     A foojay mirror (`JKIT_SOURCES_FOOJAY_URL`) must keep those links; one on this machine
     (`http://localhost`) may serve the files itself.
