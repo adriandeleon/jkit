@@ -121,6 +121,7 @@ public final class Installer {
             // published, or made with a key jkit doesn't have), which then doesn't wait for the download
             byte[] signature = signable ? fetchSignature(artifact, work, notes, signatureRequired) : null;
             Path archive = work.resolve(safeFileName(artifact.fileName(), artifact.archiveType()));
+            progress.starting();
             http.download(artifact.url(), archive, progress);
             boolean verified = false;
             if (artifact.checksum() != null && artifact.checksumAlgorithm() != null) {

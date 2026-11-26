@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
@@ -127,12 +128,28 @@ class InstallerTest {
         assertThat(home.tmp()).isEmptyDirectory();
     }
 
+    /** Progress that counts its starting() calls in {@code started}. */
+    private static Http.Progress countingStarts(AtomicInteger started) {
+        return new Http.Progress() {
+            @Override
+            public void update(long done, long total) { }
+
+            @Override
+            public void starting() {
+                started.incrementAndGet();
+            }
+        };
+    }
+
     @Test
     void allowedUnverifiedASignatureJkitCantCheckInstallsUnverifiedWithAWarning() throws Exception {
         Path archive = ArchivesTest.jdkTarGz(tmp, "jdk-21.0.13+9");
         JkitHome home = new JkitHome(tmp.resolve("home"));
+        AtomicInteger started = new AtomicInteger();
+        Http.Progress progress = countingStarts(started);
         Installer.Result result = new Installer(home, withSignature(archive, "<html>".getBytes()))
-                .install(signed(sha256(archive)), Http.Progress.NONE);
+                .install(signed(sha256(archive)), progress);
+        assertThat(started).hasValue(1);
         assertThat(result.fresh()).isTrue();
         assertThat(result.verified()).isFalse();
         assertThat(Store.verified(result.installed().home())).isFalse();
@@ -282,9 +299,12 @@ class InstallerTest {
                     http.download(uri, target, progress);
                 }
             };
-            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), Http.Progress.NONE, true))
+            AtomicInteger started = new AtomicInteger();
+            Http.Progress progress = countingStarts(started);
+            assertThatThrownBy(() -> new Installer(home, counting).install(corretto(), progress, true))
                     .isInstanceOf(Installer.SignatureRequired.class);
             assertThat(fetched).as("only the signature").containsExactly(corretto().signature());
+            assertThat(started).as("no \"downloading\" before a refusal").hasValue(0);
         }
         assertThat(home.tmp()).isEmptyDirectory();
     }

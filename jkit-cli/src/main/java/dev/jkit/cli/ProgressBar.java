@@ -13,6 +13,8 @@ final class ProgressBar implements Http.Progress {
     static final long QUIET_NANOS = 30_000_000_000L;
 
     private final PrintStream err;
+    /** Printed when the download starts, or null. */
+    private final String start;
     private final boolean terminal;
     private final LongSupplier clock;
     private int lastPercent = -1;
@@ -22,11 +24,21 @@ final class ProgressBar implements Http.Progress {
     private boolean midLine;
 
     ProgressBar(PrintStream err) {
-        this(err, System.console() != null, System::nanoTime);
+        this(err, null);
+    }
+
+    /** One that prints {@code start} when the download starts. */
+    ProgressBar(PrintStream err, String start) {
+        this(err, start, System.console() != null, System::nanoTime);
     }
 
     ProgressBar(PrintStream err, boolean terminal, LongSupplier clock) {
+        this(err, null, terminal, clock);
+    }
+
+    ProgressBar(PrintStream err, String start, boolean terminal, LongSupplier clock) {
         this.err = err;
+        this.start = start;
         this.terminal = terminal;
         this.clock = clock;
         this.lastLine = clock.getAsLong();
@@ -60,6 +72,13 @@ final class ProgressBar implements Http.Progress {
             } else {
                 err.printf("  %d MB%n", done >> 20);
             }
+        }
+    }
+
+    @Override
+    public void starting() {
+        if (start != null) {
+            err.println(start);
         }
     }
 

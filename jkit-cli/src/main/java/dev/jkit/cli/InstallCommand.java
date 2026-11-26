@@ -96,9 +96,12 @@ final class InstallCommand implements Callable<Integer> {
             ctx.err.println("warning: only a " + artifact.checksumAlgorithm() + " checksum is published for "
                     + artifact.label() + ": it catches a broken download, not a tampered one");
         }
-        ctx.err.println("downloading " + artifact.label() + " from " + artifact.url().getHost());
+        // said by the progress bar once the download starts: a signature that refuses the install
+        // is fetched and checked first, and then nothing is downloaded
+        ProgressBar progress = new ProgressBar(ctx.err,
+                "downloading " + artifact.label() + " from " + artifact.url().getHost());
         try {
-            return ctx.installer().install(artifact, new ProgressBar(ctx.err), signatureRequired);
+            return ctx.installer().install(artifact, progress, signatureRequired);
         } catch (Installer.SignatureRequired e) {
             throw new JkitException(e.getMessage(), "install it anyway: " + retry,
                     "or pick another version or vendor");
