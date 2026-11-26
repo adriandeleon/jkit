@@ -372,10 +372,12 @@ class ShellEnvTest {
     /** The same for a first install in a hooked shell: the global bin is moved to the front. */
     @Test
     void globalMovesTheGlobalBinToTheFront() {
-        String global = p("/h/.jkit/global/jdk/bin");
+        // absolute, as JkitHome makes it: D:\h\.jkit\… on Windows
+        String jdk = Path.of("/h/.jkit/global/jdk").toAbsolutePath().toString();
+        String global = Path.of(jdk, "bin").toString();
         Map<String, String> behind = Map.of("PATH", path(p("/sys"), p("/usr/bin"), global));
         assertThat(ShellEnv.global(behind, home, Tool.JDK))
-                .containsEntry("JAVA_HOME", p("/h/.jkit/global/jdk"))
+                .containsEntry("JAVA_HOME", jdk)
                 .containsEntry("PATH", path(global, p("/sys"), p("/usr/bin")));
         // first already: PATH is left as it is
         assertThat(ShellEnv.global(Map.of("PATH", path(global, p("/usr/bin"))), home, Tool.JDK)).doesNotContainKey("PATH");
