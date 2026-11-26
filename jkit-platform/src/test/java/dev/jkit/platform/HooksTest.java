@@ -218,7 +218,7 @@ class HooksTest {
                 .contains("__jkit_bin='/opt/jk it'\\''s/bin/jkit'")
                 .contains("JKIT_ENV_FILE=\"$__jkit_env\" __jkit_run \"$@\"");
         assertThat(Hooks.posix("bash", Path.of("/home/u/.jkit"))).contains("__jkit_bin=''");
-        assertThat(Hooks.autoSwitch("bash", self)).contains("eval \"$(__jkit_run hook-env bash)\"");
+        assertThat(Hooks.autoSwitch("bash")).contains("eval \"$(__jkit_run hook-env bash)\"");
         assertThat(Hooks.fish(Path.of("/home/u/.jkit"), self)).contains("set -g __jkit_bin '/opt/jk it\\'s/bin/jkit'")
                 .contains("set -lx JKIT_ENV_FILE $envfile");
         assertThat(Hooks.powershell(Path.of("/home/u/.jkit"), self)).contains("$global:__jkit_bin = '/opt/jk it''s/bin/jkit'");

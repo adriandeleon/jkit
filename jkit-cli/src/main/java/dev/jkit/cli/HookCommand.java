@@ -81,7 +81,7 @@ final class HookCommand implements Callable<Integer> {
         String self = self(ctx);
         ctx.out.print(ctx.os.hook(name, ctx.home.root(), self));
         if (ctx.config.autoSwitch()) {
-            String auto = ctx.os.autoSwitchHook(name, self);
+            String auto = ctx.os.autoSwitchHook(name);
             if (auto != null) {
                 ctx.out.print(auto);
             } else {

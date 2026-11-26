@@ -44,13 +44,10 @@ final class Hooks {
     /**
      * The part of the hook that switches to a project's versions on {@code cd}
      * ({@code shell.auto_switch}): runs {@code jkit hook-env} when the directory changes and once
-     * when the hook loads. Null for shells without it (PowerShell, for now).
+     * when the hook loads. Null for shells without it (PowerShell, for now). It calls jkit through
+     * the main hook's {@code __jkit_run}, so it needs no path of its own.
      */
     static String autoSwitch(String shell) {
-        return autoSwitch(shell, null);
-    }
-
-    static String autoSwitch(String shell, String self) {
         return switch (shell) {
             case "bash", "zsh", "fish" -> render("auto-switch." + shell, Map.of());
             default -> null;

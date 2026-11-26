@@ -28,11 +28,7 @@ public interface OsServices {
      * null when that shell doesn't support it yet.
      */
     default String autoSwitchHook(String shell) {
-        return autoSwitchHook(shell, null);
-    }
-
-    default String autoSwitchHook(String shell, String self) {
-        return Hooks.autoSwitch(shell, self);
+        return Hooks.autoSwitch(shell);
     }
 
     /**
