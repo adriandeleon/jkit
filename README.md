@@ -5,6 +5,11 @@
   </picture>
 </h1>
 
+[![CI](https://github.com/adriandeleon/jkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/adriandeleon/jkit/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/adriandeleon/jkit?sort=semver)](https://github.com/adriandeleon/jkit/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-informational)](#install)
+[![License: MIT](https://img.shields.io/github/license/adriandeleon/jkit)](LICENSE)
+
 Installs and switches JDKs from 20+ vendors, Maven, Gradle and sbt: per shell, per project or
 globally. One native binary, no JDK needed to run it.
 
