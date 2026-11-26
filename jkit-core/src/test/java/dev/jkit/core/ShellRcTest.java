@@ -68,6 +68,16 @@ class ShellRcTest {
     }
 
     @Test
+    void aStrayStartMarkerBeforeAWholeBlockIsFoundAndNothingIsRemoved() {
+        String rc = "export A=1\n" + ShellRc.START + "\nalias ll='ls -l'\n"
+                + String.join("\n", ShellRc.block("bash")) + "\nexport B=2\n";
+        assertThat(ShellRc.unterminatedStart(rc)).isEqualTo(2);
+        // removing from the stray marker to the block's end would delete the user's alias too
+        assertThat(ShellRc.remove(rc).changed()).isFalse();
+        assertThat(ShellRc.remove(rc).text()).isEqualTo(rc);
+    }
+
+    @Test
     void removesABlockInTheMiddleAndKeepsWhatFollows() {
         String rc = "a\n" + String.join("\n", ShellRc.block("zsh")) + "\nb\n";
         assertThat(ShellRc.remove(rc).text()).isEqualTo("a\nb\n");
