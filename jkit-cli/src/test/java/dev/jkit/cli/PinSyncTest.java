@@ -295,7 +295,8 @@ class PinSyncTest {
         use.global = true;
         use.json.json = true;
         assertThat(use.run(ctx())).isZero();
-        assertThat(errors()).startsWith("the global maven is already 3.9.11, unchanged\n").doesNotContain("link ");
+        assertThat(errors().lines().findFirst()).hasValue("the global maven is already 3.9.11, unchanged"); // println: \r\n on Windows
+        assertThat(errors()).doesNotContain("link ");
         JsonNode doc = new ObjectMapper().readTree(output());
         assertThat(doc.path("changed").asBoolean()).isFalse();
         assertThat(doc.path("changes")).isEmpty();
