@@ -7,6 +7,7 @@ import dev.jkit.core.ProjectFile;
 import dev.jkit.core.ShellEnv;
 import dev.jkit.model.Envs;
 import dev.jkit.model.JkitException;
+import dev.jkit.model.ProjectSpec;
 import dev.jkit.model.Tool;
 import dev.jkit.model.Visible;
 import java.io.PrintStream;
@@ -18,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -114,8 +116,23 @@ final class HookEnvCommand implements Callable<Integer> {
         Changes report = new Changes(ctx);
         report.env(changes);
         plan.notes().forEach(report::note);
+        unreadPins(plan).ifPresent(report::note);
         report.print(err);
         return ShellEnv.format(changes, shell);
+    }
+
+    /**
+     * A note for pins the project file has but jkit can't read ({@code .java-version} saying
+     * {@code system}): the cd hook doesn't repeat the file's warnings, so it points to where they are.
+     */
+    static Optional<String> unreadPins(ProjectShell.Plan plan) {
+        if (plan.project().isEmpty() || plan.project().get().skipped().isEmpty()) {
+            return Optional.empty();
+        }
+        ProjectSpec p = plan.project().get();
+        List<String> tools = p.skipped().stream().map(Tool::toString).toList();
+        return Optional.of("jkit can't read the " + String.join(", ", tools) + " pin" + (tools.size() == 1 ? "" : "s")
+                + " in " + ProjectShell.where(p) + ": jkit status says why");
     }
 
     private static boolean hasProjectState(Map<String, String> env) {
@@ -194,7 +211,9 @@ final class HookEnvCommand implements Callable<Integer> {
         for (Map.Entry<Tool, Installed> e : plan.applied().entrySet()) {
             tools.add(e.getKey() + " " + e.getValue().label());
         }
-        String none = plan.project().get().tools().isEmpty() ? " (it pins nothing)" : " (nothing it pins is installed)";
+        ProjectSpec project = plan.project().get();
+        String none = !project.tools().isEmpty() ? " (nothing it pins is installed)"
+                : project.skipped().isEmpty() ? " (it pins nothing)" : " (it pins nothing jkit can read)";
         return "using " + where + (tools.isEmpty() ? none : ": " + String.join(", ", tools));
     }
 

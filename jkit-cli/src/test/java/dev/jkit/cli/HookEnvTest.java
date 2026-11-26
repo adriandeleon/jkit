@@ -105,6 +105,15 @@ class HookEnvTest {
         assertThat(said()).contains("jkit: using " + project + " (.sdkmanrc, .tool-versions): jdk 21.0.9+10 temurin");
     }
 
+    @Test
+    void aPinItCantReadIsSaidOnCd() throws Exception {
+        Files.writeString(project.resolve(".java-version"), "system\n");
+        cd(project);
+        assertThat(said()).contains("jkit: using " + project.resolve(".java-version") + " (it pins nothing jkit can read)")
+                .contains("jkit can't read the jdk pin in " + project.resolve(".java-version") + ": jkit status says why")
+                .contains("JKIT_PROJECT="); // jkit's note of the project is still said
+    }
+
     /** JKIT_AUTO_SWITCH=0 exported in an open shell turns switching off there, from the next cd. */
     @Test
     void autoSwitchTurnedOffInThisShellChangesNothing() throws Exception {
