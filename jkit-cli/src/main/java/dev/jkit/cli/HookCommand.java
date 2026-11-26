@@ -12,8 +12,6 @@ import dev.jkit.model.Perms;
 import dev.jkit.model.ShellQuote;
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -217,7 +215,7 @@ final class HookCommand implements Callable<Integer> {
             ctx.out.println("auto_switch is already on in " + shown + "; nothing changed there");
         } else {
             createParent(ctx, config, report);
-            AtomicFile.write(config, edit.text(), StandardCharsets.UTF_8, true);
+            ProjectFile.write(config, edit.text(), true);
             report.file(config, !exists);
             ctx.out.println("turned on switching to a project's versions on cd: auto_switch = true under [shell] in "
                     + shown);
@@ -245,19 +243,15 @@ final class HookCommand implements Callable<Integer> {
     }
 
     /**
-     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent):
-     * read and written back in the same charset, so every byte jkit doesn't change stays as it was.
+     * UTF-8, or Latin-1 for a startup file that isn't valid UTF-8 (an old comment with an accent),
+     * as project files are read: read and written back in the same charset, so every byte jkit
+     * doesn't change stays as it was (a byte-order mark too, read as the text's first character).
      */
     static Charset charsetOf(Path file) throws IOException {
         if (!Files.isRegularFile(file)) {
             return StandardCharsets.UTF_8;
         }
-        try {
-            StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(file)));
-            return StandardCharsets.UTF_8;
-        } catch (CharacterCodingException e) {
-            return StandardCharsets.ISO_8859_1;
-        }
+        return ProjectFile.encoding(Files.readAllBytes(file)).charset();
     }
 
     /**

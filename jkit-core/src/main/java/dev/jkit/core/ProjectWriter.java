@@ -36,7 +36,9 @@ public final class ProjectWriter {
 
     /**
      * {@code text} with {@code pin} set: its line replaced in place, or added to {@code [tools]}.
-     * Every other line stays byte for byte as it was, line endings included.
+     * Every other line stays character for character as it was, line endings included; written
+     * back with {@link ProjectFile#write}, the file's charset and byte-order mark stay too, so
+     * every other byte does.
      */
     public static Edit set(Path file, String text, PinnedTool pin) {
         List<Lines.Line> lines = Lines.of(text);
@@ -78,7 +80,8 @@ public final class ProjectWriter {
 
     /**
      * {@code text} without the tool's line; {@code replaced} false (and the text unchanged) when it
-     * had none. Every other byte stays as it was.
+     * had none. Every other character stays as it was, and every other byte when written back
+     * with {@link ProjectFile#write}.
      */
     public static Edit remove(Path file, String text, Tool tool) {
         List<Lines.Line> lines = Lines.of(text);

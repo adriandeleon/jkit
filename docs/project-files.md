@@ -115,8 +115,9 @@ when you leave, printing every variable they change. PowerShell doesn't switch o
 ## Commands
 
 - `jkit pin <tool>[@version] [vendor] [--exact] [--here]` writes or updates one line of the nearest
-  `jkit.toml` (or creates one here with `--here`), keeping comments and order. The version must be
-  installed or downloadable. It won't edit `.sdkmanrc`, `.tool-versions` or `.java-version`.
+  `jkit.toml` (or creates one here with `--here`), keeping comments, order, line endings and the
+  file's encoding (UTF-8 with or without a byte-order mark, UTF-16 with one, or Latin-1). The version
+  must be installed or downloadable. It won't edit `.sdkmanrc`, `.tool-versions` or `.java-version`.
 - `jkit unpin <tool>` removes that line.
 - `jkit sync [--dry-run]` installs what the project asks for and switches this shell to it. A
   download with no published checksum is refused unless you add `--allow-unverified`.

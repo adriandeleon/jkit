@@ -150,6 +150,27 @@ class PinSyncTest {
     }
 
     @Test
+    void pinAndUnpinKeepTheFilesByteOrderMarkAndCharset() throws Exception {
+        Path toml = project.resolve("jkit.toml");
+        for (String charset : new String[] {"UTF-8", "UTF-16LE", "UTF-16BE"}) {
+            Files.write(toml, ("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\n").getBytes(charset));
+            pin("jdk@21", null, false, false);
+            assertThat(Files.readAllBytes(toml)).as(charset)
+                    .isEqualTo(("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\njdk = \"21\"\r\n").getBytes(charset));
+            UnpinCommand unpin = new UnpinCommand();
+            unpin.tool = Tool.JDK;
+            unpin.run(ctx(), project);
+            assertThat(Files.readAllBytes(toml)).as(charset)
+                    .isEqualTo(("﻿# café\r\n[tools]\r\nmaven = \"3.9\"\r\n").getBytes(charset));
+        }
+        // not UTF-8: Latin-1, every byte kept
+        byte[] latin1 = "# café\n[tools]\n".getBytes(StandardCharsets.ISO_8859_1);
+        Files.write(toml, latin1);
+        pin("jdk@21", null, false, false);
+        assertThat(Files.readAllBytes(toml)).startsWith(latin1);
+    }
+
+    @Test
     void pinRefusesFilesItOnlyReads() throws Exception {
         Files.writeString(project.resolve(".sdkmanrc"), "java=17.0.13-zulu\n");
         assertThatThrownBy(() -> pin("jdk@21", null, false, false))
