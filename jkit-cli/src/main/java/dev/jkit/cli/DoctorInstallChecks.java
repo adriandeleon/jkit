@@ -180,7 +180,14 @@ final class DoctorInstallChecks {
         try {
             Path userHome = HookCommand.userHome(r.ctx);
             for (String shell : List.of("bash", "zsh", "fish")) {
-                dirs.add(ShellRc.file(shell, r.ctx.env, userHome).getParent());
+                Path rc = ShellRc.file(shell, r.ctx.env, userHome);
+                dirs.add(rc.getParent());
+                try {
+                    // a startup file a dotfile manager links is written next to what it links to
+                    dirs.add(AtomicFile.resolve(rc).toAbsolutePath().getParent());
+                } catch (IOException loop) {
+                    // a link loop: nothing jkit could have written there
+                }
             }
         } catch (JkitException noHome) {
             // no startup files to look next to

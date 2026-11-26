@@ -191,7 +191,7 @@ public final class AtomicFile {
     }
 
     /** The file a link leads to, even one that doesn't exist yet; {@code file} itself when it isn't a link. */
-    static Path resolve(Path file) throws IOException {
+    public static Path resolve(Path file) throws IOException {
         if (!Files.isSymbolicLink(file)) {
             return file;
         }
