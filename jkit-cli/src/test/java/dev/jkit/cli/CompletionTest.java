@@ -28,4 +28,24 @@ class CompletionTest {
         assertThat(script.lines().filter(l -> l.contains("compopt")))
                 .allMatch(l -> l.contains("type compopt &>/dev/null && compopt"));
     }
+
+    /** With set -u (nounset), zsh stopped the hook's eval at picocli's unguarded "$BASH_VERSION". */
+    @Test
+    void theScriptLoadsWithNounset() throws Exception {
+        String script = CompletionCommand.script(new CommandLine(new Main()));
+        assertThat(script).doesNotContain("\"$BASH_VERSION\"").doesNotContain("\"$ZSH_VERSION\"");
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isExecutable(java.nio.file.Path.of("/bin/bash")));
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("jkit-completion", ".bash");
+        try {
+            java.nio.file.Files.writeString(file, script);
+            Process p = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", "-u", "-c",
+                    "unset ZSH_VERSION; source \"$0\" && complete -p jkit", file.toString())
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(p.waitFor()).as(out).isZero();
+            assertThat(out).contains("_complete_jkit");
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+    }
 }

@@ -46,7 +46,11 @@ final class CompletionCommand implements Callable<Integer> {
     static String script(CommandLine root) {
         String script = AutoComplete.bash("jkit", root);
         String comment = "  # Make alias a distinct command for completion purposes when using zsh (see [4])\n";
-        return script.replace(comment + ZSH_OPTIONS, "").replace(ZSH_OPTIONS, "");
+        // picocli tests "$BASH_VERSION" at load: with nounset (set -u) zsh stops the hook's eval there,
+        // and completion never loads; ${…-} reads an unset one as empty
+        return script.replace(comment + ZSH_OPTIONS, "").replace(ZSH_OPTIONS, "")
+                .replace("[ -n \"$BASH_VERSION\" ]", "[ -n \"${BASH_VERSION-}\" ]")
+                .replace("[ -n \"$ZSH_VERSION\" ]", "[ -n \"${ZSH_VERSION-}\" ]");
     }
 
     static final class CompletionShells implements Iterable<String> {

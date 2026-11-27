@@ -138,6 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The zsh hook loads completion with `setopt nounset`** (`set -u`): picocli's completion script
+  read `$BASH_VERSION` unguarded, and zsh stopped the hook's `eval` there, so Tab completion never
+  loaded.
 - **The hook puts the global versions first on PATH even when PATH has them further back.** On
   Windows, `jkit env --install` puts them on the user PATH, which Windows puts after the system
   one, so a hooked PowerShell ran the system's `java` with jkit's `JAVA_HOME`; macOS's
