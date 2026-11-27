@@ -526,6 +526,9 @@ jobs:
           if (Test-Path $dir) { throw "uninstalling left $dir" }
           if ((OnPath $dir) -ne 0) { throw "uninstalling left $dir on the user PATH" }
           "installed, ran and uninstalled $msi"
+          # every check above throws on failure; without this the step would exit with the last
+          # native command's status, self-update's 1 for a newest release with no .msi
+          exit 0
 
       - name: Upload
         if: runner.os != 'macOS'
