@@ -288,15 +288,10 @@ class HooksTest {
         // on Windows the same folder in another case and with a trailing backslash goes too
         String later = File.separatorChar == '\\' ? jdkBin.toUpperCase(Locale.ROOT) + "\\" : jdkBin + "/";
         String out = powershellPath(root, String.join(sep, sys, usr, later, jdkBin, machine));
-        // pwsh 7 puts its own folder first on PATH as it starts, so it comes right after what the hook moved
         String globals = String.join(sep, jdkBin, g.resolve("maven").resolve("bin").toString(),
                 g.resolve("gradle").resolve("bin").toString(), g.resolve("sbt").resolve("bin").toString());
         assertThat(out).startsWith(globals + sep);
-        String rest = out.substring(globals.length() + 1);
-        if (!rest.startsWith(sys + sep)) {
-            rest = rest.substring(rest.indexOf(sep) + 1);
-        }
-        assertThat(rest).isEqualTo(String.join(sep, sys, usr, machine));
+        assertThat(out.substring(globals.length() + 1)).isEqualTo(String.join(sep, sys, usr, machine));
     }
 
     /** PATH after the PowerShell hook loads with {@code path}, the same from each PowerShell on this machine. */
@@ -317,7 +312,19 @@ class HooksTest {
                 continue;
             }
             p.getOutputStream().close();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            String raw = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            // pwsh 7 puts its own folder first on PATH as it starts and Windows PowerShell doesn't:
+            // ahead of the test's first entry, only the hook's folders under root count
+            String first = path.split(File.pathSeparator, -1)[0];
+            java.util.List<String> entries = java.util.Arrays.asList(raw.split(File.pathSeparator, -1));
+            int at = entries.indexOf(first);
+            java.util.List<String> kept = new java.util.ArrayList<>();
+            for (int i = 0; i < entries.size(); i++) {
+                if (at < 0 || i >= at || entries.get(i).startsWith(root.toString())) {
+                    kept.add(entries.get(i));
+                }
+            }
+            String out = String.join(File.pathSeparator, kept);
             assertThat(p.waitFor(60, TimeUnit.SECONDS)).isTrue();
             String before = last;
             assertThat(before == null || before.equals(out)).as(() -> shell + ": " + out + ", stderr: " + read(err))
