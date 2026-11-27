@@ -40,7 +40,7 @@ jobs:
   version:
     # main's version must be ahead of the latest release: a build from main that says 0.4.0-SNAPSHOT
     # after v0.4.0 is "older" than 0.4.0, and self-update would replace it with 0.4.0. After a
-    # release, bump the version in every pom.xml (e.g. 0.6.0-SNAPSHOT) and this passes again.
+    # release, bump the version in every pom.xml (e.g. 0.7.0-SNAPSHOT) and this passes again.
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
