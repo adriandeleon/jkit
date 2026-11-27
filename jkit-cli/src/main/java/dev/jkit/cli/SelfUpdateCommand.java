@@ -22,7 +22,8 @@ import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 @Command(name = "self-update", description = {"Updates jkit itself to the newest release.",
-        "A jkit from Homebrew, apt, dnf or winget is updated there: this says how.",
+        "A jkit from Homebrew, apt, dnf or winget is updated there, and one from the",
+        ".msi by a newer .msi: this says how.",
         "A jkit from a release archive is replaced in place, after checking the",
         "download against the release's SHA256SUMS, signed by jkit's release key,",
         "and that the new binary runs.",
@@ -93,7 +94,7 @@ final class SelfUpdateCommand implements Callable<Integer> {
         } else if (kind != SelfUpdate.Kind.ARCHIVE) {
             status = "managed";
             say.println("jkit " + latest.version() + " is out (this is " + current + "); jkit came from " + kind.what
-                    + ", so update it there:");
+                    + (kind.isMsi() ? ", so a newer .msi updates it (in PowerShell):" : ", so update it there:"));
             say.println("  " + how);
         } else {
             status = "updated";

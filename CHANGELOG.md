@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A Windows installer, `jkit-<version>-windows-x64.msi`.** It asks whether to install jkit
+  just for you (in `%LOCALAPPDATA%\Programs\jkit`, on your user `PATH`, with no administrator
+  rights) or for all users (in `%ProgramFiles%\jkit`, on the system `PATH`), and installs the
+  same files as the `.zip`, Visual C++ runtime included. Unattended,
+  `msiexec /i jkit-<version>-windows-x64.msi /qn` installs it just for you, and `ALLUSERS=1`
+  installs it for all users. A newer `.msi` upgrades it in place, and uninstalling it in
+  Settings → Apps takes jkit's folder off `PATH` again and leaves `%USERPROFILE%\.jkit`.
+  `jkit self-update` on a jkit from the `.msi` prints a PowerShell command that downloads the
+  newer `.msi`, checks it against the release's signed `SHA256SUMS` and installs it for the same
+  users (`--json`: `installedWith` is `msi`). The `.msi` isn't Authenticode-signed, so SmartScreen
+  may warn when you open it.
+
 ## [0.5.0] - 2026-11-26
 
 ### Added

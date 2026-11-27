@@ -1,0 +1,160 @@
+<!--
+  The jkit .msi: jkit.exe with the two Visual C++ runtime DLLs it links, LICENSE and
+  THIRD-PARTY-NOTICES, the same files as the .zip, and jkit's folder on PATH.
+  build-msi.ps1 builds it with WiX Toolset 5 (the last release without a EULA to accept).
+
+  One package installs either way, and asks which (JkitScopeDlg):
+    just for you   %LOCALAPPDATA%\Programs\jkit, on your user PATH, no administrator needed
+    all users      %ProgramFiles%\jkit, on the system PATH, asks for administrator rights
+  Unattended, it installs just for you; ALLUSERS=1 installs for all users:
+    msiexec /i jkit-<version>-windows-x64.msi /qn [ALLUSERS=1]
+  A newer .msi upgrades an install of the same scope in place (Windows Installer only looks
+  for one in the scope it installs in). Uninstalling leaves %USERPROFILE%\.jkit: the JDKs and
+  tools jkit installed, and its settings.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="jkit" Manufacturer="Adrian De Leon" Version="$(ProductVersion)" Language="1033"
+           UpgradeCode="510d9e34-2ebb-489f-bf41-83fc1f51fec6" Scope="perUserOrMachine" Compressed="yes">
+    <SummaryInformation Description="jkit $(Version): installs and switches JDKs, Maven, Gradle and sbt" />
+
+    <!-- an rc and its release share 1.2.3, the most a ProductVersion holds: same-version upgrades let one replace the other -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer jkit is already installed. Uninstall it first to install this one." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="jkit.ico" SourceFile="$(Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="jkit.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://jkit-project.dev" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/adriandeleon/jkit/issues" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/adriandeleon/jkit/releases" />
+    <Property Id="ARPCOMMENTS" Value="Installs and switches JDKs from several vendors, Maven, Gradle and sbt." />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Unattended, Windows Installer itself puts a per-user install's ProgramFiles64Folder in
+         %LOCALAPPDATA%\Programs; the dialog sets the folder for the scope it chose -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="APPLICATIONFOLDER" Name="jkit" />
+    </StandardDirectory>
+
+    <Feature Id="jkit" Title="jkit" AllowAbsent="no">
+      <ComponentGroupRef Id="Files" />
+      <ComponentRef Id="UserPath" />
+      <ComponentRef Id="SystemPath" />
+    </Feature>
+
+    <ComponentGroup Id="Files" Directory="APPLICATIONFOLDER">
+      <Component><File Id="jkit.exe" Source="$(Source)\jkit.exe" KeyPath="yes" /></Component>
+      <Component><File Id="vcruntime140.dll" Source="$(Source)\vcruntime140.dll" KeyPath="yes" /></Component>
+      <Component><File Id="vcruntime140_1.dll" Source="$(Source)\vcruntime140_1.dll" KeyPath="yes" /></Component>
+      <Component><File Id="LICENSE" Source="$(Source)\LICENSE" KeyPath="yes" /></Component>
+      <Component><File Id="THIRD_PARTY_NOTICES" Source="$(Source)\THIRD-PARTY-NOTICES" KeyPath="yes" /></Component>
+      <!-- tells jkit self-update this jkit came from the .msi, so it updates it with a newer .msi -->
+      <Component><File Id="INSTALLER.txt" Source="$(Source)\INSTALLER.txt" KeyPath="yes" /></Component>
+    </ComponentGroup>
+
+    <!-- jkit's folder goes last on PATH, and uninstalling takes out only that entry. Per user or
+         per machine: ALLUSERS is 1 for all users, empty for you (as the dialog sets it), or 2
+         unattended, where MSIINSTALLPERUSER=1, the package's default, means you. Their registry
+         values (HKMU: HKCU for you, HKLM for all users) only mark each one as installed. -->
+    <Component Id="UserPath" Directory="APPLICATIONFOLDER"
+               Condition="NOT (ALLUSERS=1 OR (ALLUSERS=2 AND MSIINSTALLPERUSER&lt;&gt;1))">
+      <Environment Id="UserPath" Name="PATH" Value="[APPLICATIONFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
+      <RegistryValue Root="HKMU" Key="Software\jkit" Name="UserPath" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="SystemPath" Directory="APPLICATIONFOLDER"
+               Condition="ALLUSERS=1 OR (ALLUSERS=2 AND MSIINSTALLPERUSER&lt;&gt;1)">
+      <Environment Id="SystemPath" Name="PATH" Value="[APPLICATIONFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+      <RegistryValue Root="HKMU" Key="Software\jkit" Name="SystemPath" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- the two folders the dialog offers, as it shows them and (with the "\" a folder needs) as it
+         sets them; %ProgramW6432%, not ProgramFiles64Folder, which a per-user default has already
+         moved to %LOCALAPPDATA%\Programs by the time it shows -->
+    <SetProperty Id="JkitPerUserPath" Value="[LocalAppDataFolder]Programs\jkit" Before="CostFinalize" Sequence="ui" />
+    <SetProperty Id="JkitPerMachinePath" Value="[%ProgramW6432]\jkit" After="SetJkitPerUserPath" Sequence="ui" />
+    <SetProperty Id="JkitPerUserFolder" Value="[JkitPerUserPath]\" After="SetJkitPerMachinePath" Sequence="ui" />
+    <SetProperty Id="JkitPerMachineFolder" Value="[JkitPerMachinePath]\" After="SetJkitPerUserFolder" Sequence="ui" />
+
+    <!-- jkit's own banner and side images (build-msi.ps1 draws them from branding/), not WiX's -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(Banner)" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(Dialog)" />
+    <Property Id="JkitScope" Value="user" />
+    <!-- the folder Settings > Apps and the Windows Installer API report for jkit -->
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[APPLICATIONFOLDER]" After="CostFinalize" Sequence="execute" />
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="Open a new terminal to use jkit: programs started before now have the old PATH. Your JDKs and settings go in %USERPROFILE%\.jkit, which uninstalling jkit leaves." />
+    <UIRef Id="JkitUI" />
+  </Package>
+
+  <Fragment>
+    <UI Id="JkitUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <TextStyle Id="WixUI_Font_Emphasized" FaceName="Tahoma" Size="8" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="DiskCostDlg" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <!-- Welcome → scope → ready to install; no license to accept (MIT asks for none) -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="JkitScopeDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="JkitScopeDlg" Order="1" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <!-- Both choices always show: WixUI's InstallScopeDlg hides them unless Privileged, which a
+           per-user default leaves unset. "All users" asks for administrator rights on Install. -->
+      <Dialog Id="JkitScopeDlg" Width="370" Height="270" Title="!(loc.InstallScopeDlg_Title)" KeepModeless="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallScopeDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Who is jkit for?" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="20" Transparent="yes" NoPrefix="yes" Text="Install jkit for your account only, or for everyone on this computer." />
+        <Control Id="Scope" Type="RadioButtonGroup" X="20" Y="55" Width="330" Height="120" Property="JkitScope">
+          <RadioButtonGroup Property="JkitScope">
+            <RadioButton Value="user" X="0" Y="0" Width="320" Height="16" Text="{\WixUI_Font_Emphasized}Just for &amp;you ([LogonUser])" />
+            <RadioButton Value="machine" X="0" Y="60" Width="320" Height="16" Text="{\WixUI_Font_Emphasized}For &amp;all users of this computer" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="UserText" Type="Text" X="33" Y="72" Width="310" Height="40" NoPrefix="yes"
+                 Text="In [JkitPerUserPath], on your PATH. Needs no administrator rights, and jkit is yours to update." />
+        <Control Id="MachineText" Type="Text" X="33" Y="132" Width="310" Height="40" NoPrefix="yes"
+                 Text="In [JkitPerMachinePath], on the system PATH. Needs administrator rights, now and to update it. Each user's JDKs stay in their own %USERPROFILE%\.jkit." />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="WelcomeDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Property="ALLUSERS" Value="{}" Order="1" Condition="JkitScope = &quot;user&quot;" />
+          <Publish Property="ALLUSERS" Value="1" Order="2" Condition="JkitScope = &quot;machine&quot;" />
+          <Publish Property="APPLICATIONFOLDER" Value="[JkitPerUserFolder]" Order="3" Condition="JkitScope = &quot;user&quot;" />
+          <Publish Property="APPLICATIONFOLDER" Value="[JkitPerMachineFolder]" Order="4" Condition="JkitScope = &quot;machine&quot;" />
+          <Publish Event="SetTargetPath" Value="APPLICATIONFOLDER" Order="5" />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Order="6" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>

@@ -4,7 +4,7 @@ name: Release
 # Community Edition (Liberica NIK, also GPLv2 with the Classpath Exception, on macOS x64, which
 # Community Edition doesn't ship for) and runs the tests, then packs it with LICENSE and
 # THIRD-PARTY-NOTICES (and on Windows the Visual C++ runtime DLLs it links) as a .zip and (Linux, macOS) a .tar.gz; Linux also packages a .deb and an
-# .rpm and makes the CycloneDX SBOM, and builds a second, static binary against musl for Alpine
+# .rpm and makes the CycloneDX SBOM, Windows an .msi (installed and uninstalled once to check it), and builds a second, static binary against musl for Alpine
 # (linux-x64-musl: archives only; native-image supports musl on x64 only), and the macOS binaries (arm64 and x64) are signed and
 # notarized (macos-sign: tag runs only, in a job that runs no build code). The release job
 # signs the .deb and .rpm with the Linux release key shared with Vitrina, then
@@ -456,6 +456,80 @@ jobs:
           fi
           ls -l dist
 
+      # The .msi holds the .zip's files and puts jkit on PATH, just for the user or for all users
+      # (packaging/windows/jkit.wxs). WiX Toolset 5.0.2, the last release with no EULA to accept:
+      # the tool and its UI extension come from nuget.org, checked against their SHA-256 (bump the
+      # version and both hashes together), and install from that folder alone.
+      - name: Build the .msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WIX_VERSION: 5.0.2
+          WIX_SHA256: f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173
+          WIX_UI_SHA256: 5ef2c707614b9f70b6bbadd2d4abcb4124efee215e9b16bfbc80113079a604c7
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $feed = New-Item -ItemType Directory "$env:RUNNER_TEMP\wix-feed"
+          $packages = @{ "wix.$env:WIX_VERSION.nupkg" = "https://api.nuget.org/v3-flatcontainer/wix/$env:WIX_VERSION/wix.$env:WIX_VERSION.nupkg"
+                         "wixtoolset.ui.wixext.$env:WIX_VERSION.nupkg" = "https://api.nuget.org/v3-flatcontainer/wixtoolset.ui.wixext/$env:WIX_VERSION/wixtoolset.ui.wixext.$env:WIX_VERSION.nupkg" }
+          $expected = @{ "wix.$env:WIX_VERSION.nupkg" = $env:WIX_SHA256; "wixtoolset.ui.wixext.$env:WIX_VERSION.nupkg" = $env:WIX_UI_SHA256 }
+          foreach ($name in $packages.Keys) {
+            $file = Join-Path $feed $name
+            Invoke-WebRequest -UseBasicParsing -OutFile $file $packages[$name]
+            $actual = (Get-FileHash $file -Algorithm SHA256).Hash
+            if ($actual -ne $expected[$name]) { throw "$name has SHA-256 $actual, expected $($expected[$name])" }
+          }
+          # nuget.org stays out: the tool installs from the checked package or not at all
+          Set-Content "$env:RUNNER_TEMP\wix-nuget.config" @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration><packageSources><clear /><add key="checked" value="$feed" /></packageSources></configuration>
+          "@
+          dotnet tool install wix --version $env:WIX_VERSION --tool-path "$env:RUNNER_TEMP\wix" --configfile "$env:RUNNER_TEMP\wix-nuget.config"
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install wix failed' }
+          $ui = Join-Path $env:RUNNER_TEMP 'wix-ui'
+          Copy-Item (Join-Path $feed "wixtoolset.ui.wixext.$env:WIX_VERSION.nupkg") "$ui.zip"
+          Expand-Archive "$ui.zip" $ui
+          packaging\windows\build-msi.ps1 -Version $env:VERSION -Source stage -Output "dist\jkit-$env:VERSION-windows-x64.msi" `
+            -Wix "$env:RUNNER_TEMP\wix\wix.exe" -UiExtension "$ui\wixext5\WixToolset.UI.wixext.dll"
+
+      # Installs the .msi the way a user would, unattended, then uninstalls it: jkit runs from the
+      # folder it installs to, its folder is on the user's PATH and self-update knows it came from
+      # the .msi; after, both are gone. Just for the user: the runner's user is an administrator,
+      # and the all-users install differs only in the folder and the PATH it writes to.
+      - name: Install and uninstall the .msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Resolve-Path "dist\jkit-$env:VERSION-windows-x64.msi").Path
+          function Msi($verb, $log) {
+            $p = Start-Process msiexec -ArgumentList "$verb `"$msi`" /qn /l*v `"$env:RUNNER_TEMP\$log`"" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\$log" -Tail 60; throw "msiexec $verb exited with $($p.ExitCode)" }
+          }
+          function OnPath($dir) { @(([Environment]::GetEnvironmentVariable('Path', 'User') ?? '') -split ';' | Where-Object { $_.TrimEnd('\') -eq $dir }).Count }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\jkit'
+          Msi '/i' msi-install.log
+          $out = & "$dir\jkit.exe" --version
+          if (@($out) -notcontains "jkit $env:VERSION") { throw "the installed jkit says '$out'" }
+          if ((OnPath $dir) -ne 1) { throw "$dir isn't on the user PATH once" }
+          if (Test-Path "$env:ProgramW6432\jkit") { throw 'a just-for-you install wrote to Program Files' }
+          # (until a release has an .msi, the newest has none to update to, which says so)
+          $doc = & "$dir\jkit.exe" self-update --check --json 2> "$env:RUNNER_TEMP\self-update.err"
+          $err = Get-Content -Raw "$env:RUNNER_TEMP\self-update.err"
+          if ($LASTEXITCODE -eq 0) {
+            $with = ($doc | ConvertFrom-Json).installedWith
+            if ($with -ne 'msi') { throw "self-update says jkit came from '$with', not the .msi" }
+          } elseif ($err -notmatch 'windows-x64\.msi in its SHA256SUMS') {
+            "::warning::jkit self-update --check failed (network?): $err"
+          }
+          Msi '/x' msi-uninstall.log
+          if (Test-Path $dir) { throw "uninstalling left $dir" }
+          if ((OnPath $dir) -ne 0) { throw "uninstalling left $dir on the user PATH" }
+          "installed, ran and uninstalled $msi"
+          # every check above throws on failure; without this the step would exit with the last
+          # native command's status, self-update's 1 for a newest release with no .msi
+          exit 0
+
       - name: Upload
         if: runner.os != 'macOS'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -734,6 +808,7 @@ jobs:
             compgen -G "dist/jkit-*-$platform.zip" > /dev/null \
               || { echo "::error::no $platform archives were downloaded, even after a retry"; exit 1; }
           done
+          compgen -G "dist/jkit-*-windows-x64.msi" > /dev/null || { echo "::error::no Windows .msi was downloaded"; exit 1; }
           (cd dist && sha256sum * > "$RUNNER_TEMP/SHA256SUMS")
           case "$version" in
             *-*) echo "a pre-release: Homebrew and winget skip it, but the files are still checked" ;;
