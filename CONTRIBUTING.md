@@ -76,7 +76,7 @@ GitHub Actions are pinned by commit SHA with the version in a comment, and workf
 ## Releases
 
 Pushing a `v*` tag publishes a release (see `.github/workflows/release.yml`). Afterwards, bump the
-version in every `pom.xml` to the next `-SNAPSHOT` (after v0.5.0, `0.6.0-SNAPSHOT`): CI fails until
+version in every `pom.xml` to the next `-SNAPSHOT` (after v0.6.0, `0.7.0-SNAPSHOT`): CI fails until
 main's version is ahead of the latest release.
 
 ## Security issues
