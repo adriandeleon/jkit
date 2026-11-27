@@ -79,8 +79,8 @@ printf '%s\n\n## Install\n\n' "$notes"
 case "$version" in
   *-*)
     cat <<EOF
-A pre-release: Homebrew, apt and winget skip it. Download the \`.tar.gz\`, \`.zip\`, \`.deb\` or
-\`.rpm\` for your platform below.
+A pre-release: Homebrew, apt and winget skip it. Download the \`.tar.gz\`, \`.zip\`, \`.deb\`,
+\`.rpm\` or \`.msi\` for your platform below.
 EOF
     ;;
   *)
@@ -90,11 +90,12 @@ EOF
 | macOS, Linux | \`brew install adriandeleon/tap/jkit\` (\`brew upgrade jkit\` to update) |
 | Debian, Ubuntu | \`sudo apt install jkit\` from the [Vitrina](https://vitrina-project.dev) apt repository ([setup](https://jkit-project.dev/install/#apt)), or the \`.deb\` below |
 | Fedora, RHEL, Rocky, Alma 9+ | the \`.rpm\` below: \`sudo dnf install ./jkit-*.x86_64.rpm\` (\`.aarch64.rpm\` on ARM) |
-| Windows x64 (preview) | \`winget install AdrianDeLeon.jkit\` (once winget-pkgs has merged this release; until then, the \`.zip\`) |
+| Windows x64 (preview) | the \`.msi\` below, just for you or for all users; or \`winget install AdrianDeLeon.jkit\` (once winget-pkgs has merged this release) |
 | Alpine and other musl Linux (x64) | the \`-linux-x64-musl\` \`.tar.gz\` below |
 | Anything else | a \`.tar.gz\` or \`.zip\` below |
 
-A jkit from a \`.tar.gz\` or \`.zip\` updates itself with \`jkit self-update\`.
+A jkit from a \`.tar.gz\` or \`.zip\` updates itself with \`jkit self-update\`; for the others,
+\`jkit self-update\` prints the command that updates it.
 EOF
     ;;
 esac

@@ -490,8 +490,8 @@ space freed (or, in a dry run, that would be). `changes` is empty in a dry run.
 
 `status`: `up-to-date`, `available` (with `--check`), `updated` (a release-archive install,
 replaced in place: `changes` names the binary), or `managed` (installed with a package manager,
-left alone: `command` is what updates it). `installedWith`: `homebrew`, `deb`, `rpm`, `winget` or
-`archive`. `latest` is the newest stable release; pre-releases are on the releases page only.
+left alone: `command` is what updates it). `installedWith`: `homebrew`, `deb`, `rpm`, `winget`,
+`msi` (the Windows `.msi`, either scope) or `archive`. `latest` is the newest stable release; pre-releases are on the releases page only.
 
 ## `jkit remove <tool>@<version> [vendor] --json`
 

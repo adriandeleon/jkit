@@ -73,7 +73,7 @@ JBang, Scala, Node, …); SDKMAN, mise and asdf cover far more tools. Windows su
 | macOS (Apple Silicon, Intel), Linux | `brew install adriandeleon/tap/jkit` |
 | Debian, Ubuntu (x64, arm64) | `sudo apt install jkit` from the [Vitrina](https://vitrina-project.dev) apt repository ([setup](https://jkit-project.dev/install/#apt)), or the `.deb` from the [releases](https://github.com/adriandeleon/jkit/releases): `sudo apt install ./jkit_*_amd64.deb` (`_arm64.deb` on ARM) |
 | Fedora, RHEL, Rocky, Alma 9+ | the `.rpm`: `sudo dnf install ./jkit-*.x86_64.rpm` (`.aarch64.rpm` on ARM) |
-| Windows x64 (preview) | `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`). See [docs/windows.md](docs/windows.md) |
+| Windows x64 (preview) | the `.msi` from the releases (from 0.6.0), just for you or for all users; or `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the `.zip`). See [docs/windows.md](docs/windows.md) |
 | Alpine and other musl Linux (x64) | the `-linux-x64-musl` `.tar.gz` from the releases (from 0.5.0; GraalVM can't build a musl binary for arm64 yet) |
 | Anything else | a `.tar.gz` or `.zip` from the releases; put `jkit` anywhere on your `PATH` |
 
@@ -85,7 +85,8 @@ To verify a download (`SHA256SUMS` and its signature, build attestations, the si
 `.rpm`), see [SECURITY.md](SECURITY.md#verifying-a-download).
 
 `jkit self-update` replaces a jkit from a `.tar.gz` or `.zip` after checking it against the
-release's signed `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that tool's upgrade command.
+release's signed `SHA256SUMS`; for Homebrew, apt, dnf and winget it prints that tool's upgrade command,
+and for the `.msi` a command that installs the newer `.msi`.
 
 ## How it works
 
@@ -161,7 +162,8 @@ brew uninstall jkit            # or: sudo apt remove jkit, sudo dnf remove jkit,
 
 On Windows, first run `jkit env --uninstall` if you ran `jkit env --install`, and take the
 `jkit hook pwsh | Out-String | Invoke-Expression` line out of your `$PROFILE`; then delete
-`%USERPROFILE%\.jkit` and run `winget uninstall AdrianDeLeon.jkit`.
+`%USERPROFILE%\.jkit` and uninstall jkit in Settings → Apps (the `.msi`) or run
+`winget uninstall AdrianDeLeon.jkit`.
 
 ## Not yet
 

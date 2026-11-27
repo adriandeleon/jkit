@@ -4,11 +4,32 @@ jkit runs on Windows x64, but this part is less tested than macOS and Linux.
 
 ## Install
 
-`winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release; until then, the
-`.zip` from the [releases](https://github.com/adriandeleon/jkit/releases)). Put `jkit.exe`
-anywhere on your `PATH`.
+Three ways, all with the same `jkit.exe`:
 
-`jkit.exe` needs the Microsoft Visual C++ runtime. winget installs the Visual C++
+- **The `.msi`** (from 0.6.0), `jkit-<version>-windows-x64.msi` from the
+  [releases](https://github.com/adriandeleon/jkit/releases). It asks who jkit is for:
+  - *just for you*: `%LOCALAPPDATA%\Programs\jkit`, on your user `PATH`; needs no
+    administrator rights.
+  - *all users*: `%ProgramFiles%\jkit`, on the system `PATH`; asks for administrator rights.
+    Each user's JDKs and settings still go in their own `%USERPROFILE%\.jkit`.
+
+  Open a new terminal afterwards: programs started before the install have the old `PATH`.
+  Unattended, `msiexec /i jkit-<version>-windows-x64.msi /qn` installs it just for you, and
+  `ALLUSERS=1` for all users. The `.msi` isn't Authenticode-signed, so SmartScreen may say
+  "Windows protected your PC": check the file against `SHA256SUMS` ([below](#verifying-a-download)),
+  then choose *More info* → *Run anyway*.
+- **winget**: `winget install AdrianDeLeon.jkit` (once winget-pkgs has merged the release).
+- **The `.zip`** from the releases. Put `jkit.exe` anywhere on your `PATH`.
+
+To update a jkit from the `.msi`, run a newer `.msi` and make the same choice as before (Windows
+Installer upgrades an install only for the same users; the other choice installs a second copy).
+`jkit self-update` prints a PowerShell command that does it for you: it downloads the newer
+`.msi`, checks it against the release's signed `SHA256SUMS`, and installs it for the same users
+without asking. To remove it, uninstall jkit in Settings → Apps: that takes its folder off `PATH`
+again and leaves `%USERPROFILE%\.jkit` (see [Uninstall](../README.md#uninstall)).
+
+`jkit.exe` needs the Microsoft Visual C++ runtime. The `.msi` installs the runtime's two DLLs
+next to it. winget installs the Visual C++
 Redistributable (2015 or newer, x64) with jkit. From 0.5.0 the `.zip` carries the runtime's two
 DLLs, `vcruntime140.dll` and `vcruntime140_1.dll`, next to `jkit.exe`: keep them next to it, in a
 folder of its own. `jkit self-update` keeps them up to date. With 0.4.0 and earlier, install the

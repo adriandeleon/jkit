@@ -19,6 +19,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -37,6 +38,7 @@ class SelfUpdateTest {
             2222222222222222222222222222222222222222222222222222222222222222  jkit-0.4.0-linux-x64.tar.gz
             3333333333333333333333333333333333333333333333333333333333333333  jkit-0.4.0-linux-x64.zip
             4444444444444444444444444444444444444444444444444444444444444444  jkit-0.4.0-macos-aarch64.tar.gz
+            8888888888888888888888888888888888888888888888888888888888888888  jkit-0.4.0-windows-x64.msi
             5555555555555555555555555555555555555555555555555555555555555555  jkit-0.4.0-windows-x64.zip
             6666666666666666666666666666666666666666666666666666666666666666  jkit_0.4.0_amd64.deb
             """;
@@ -111,6 +113,16 @@ class SelfUpdateTest {
                 .isEqualTo(SelfUpdate.Kind.RPM);
         assertThat(SelfUpdate.detect(Path.of("C:/Users/me/AppData/Local/Microsoft/WinGet/Packages/AdrianDeLeon.jkit_x/jkit.exe"),
                 Platform.WINDOWS_X64, p -> false)).isEqualTo(SelfUpdate.Kind.WINGET);
+        // the .msi: the file it installs beside jkit.exe, and the folder says for whom
+        Predicate<Path> marker = p -> p.getFileName().toString().equals(SelfUpdate.MSI_MARKER);
+        assertThat(SelfUpdate.detect(Path.of("C:/Users/me/AppData/Local/Programs/jkit/jkit.exe"), Platform.WINDOWS_X64,
+                marker)).isEqualTo(SelfUpdate.Kind.MSI_USER);
+        assertThat(SelfUpdate.detect(Path.of("C:/Program Files/jkit/jkit.exe"), Platform.WINDOWS_X64, marker))
+                .isEqualTo(SelfUpdate.Kind.MSI_MACHINE);
+        assertThat(SelfUpdate.Kind.MSI_MACHINE.id()).isEqualTo("msi");
+        // the same folder without it: a .zip someone unpacked there, which jkit replaces itself
+        assertThat(SelfUpdate.detect(Path.of("C:/Program Files/jkit/jkit.exe"), Platform.WINDOWS_X64, p -> false))
+                .isEqualTo(SelfUpdate.Kind.ARCHIVE);
         assertThat(SelfUpdate.detect(Path.of("/home/me/bin/jkit"), Platform.LINUX_X64, dpkg::contains))
                 .isEqualTo(SelfUpdate.Kind.ARCHIVE);
     }
@@ -133,6 +145,16 @@ class SelfUpdateTest {
                         + "download/v0.4.0/jkit_0.4.0_amd64.deb && echo '" + "6".repeat(64) + "  '\"$d/jkit_0.4.0_amd64.deb\""
                         + " | sha256sum -c - && sudo apt install \"$d/jkit_0.4.0_amd64.deb\"");
         assertThat(SelfUpdate.Kind.ARCHIVE.command(r, Platform.LINUX_X64, SUMS)).isNull();
+        // the .msi checks its download the same way, in PowerShell, and keeps the scope it was installed in
+        SelfUpdate.Release win = SelfUpdate.parse(SUMS, Platform.WINDOWS_X64);
+        assertThat(SelfUpdate.Kind.MSI_USER.command(win, Platform.WINDOWS_X64, SUMS)).isEqualTo(
+                "$f = \"$env:TEMP\\jkit-0.4.0-windows-x64.msi\"; Invoke-WebRequest -UseBasicParsing -OutFile $f"
+                        + " https://github.com/adriandeleon/jkit/releases/download/v0.4.0/jkit-0.4.0-windows-x64.msi;"
+                        + " if ((Get-FileHash $f).Hash -eq '" + "8".repeat(64) + "') { msiexec /i $f /passive | Out-Null }"
+                        + " else { Write-Error \"$f doesn't match the release's SHA256SUMS\" }");
+        assertThat(SelfUpdate.Kind.MSI_MACHINE.command(win, Platform.WINDOWS_X64, SUMS))
+                .contains("msiexec /i $f /passive ALLUSERS=1 | Out-Null");
+        assertThat(SelfUpdate.Kind.MSI_USER.needsSignedSums()).isTrue();
         assertThat(SelfUpdate.Kind.RPM.needsSignedSums()).isTrue();
         assertThat(SelfUpdate.Kind.DEB_FILE.needsSignedSums()).isTrue();
         assertThat(SelfUpdate.Kind.DEB.needsSignedSums()).isFalse();

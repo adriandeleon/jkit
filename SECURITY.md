@@ -137,7 +137,10 @@ matters:
   matches the SHA-256 the signed `SHA256SUMS` lists. A pre-release replaces only a pre-release,
   even if it is marked as the latest release. Each release also
   has a build attestation (`gh attestation verify <file> --repo adriandeleon/jkit`). A jkit
-  installed with Homebrew, apt, dnf or winget is left to that tool. On Windows, the Visual C++
+  installed with Homebrew, apt, dnf or winget is left to that tool. For one from the Windows `.msi`,
+  self-update checks `SHA256SUMS.asc` first and prints a PowerShell command that downloads the
+  newer `.msi` into your `%TEMP%` and runs it only if `Get-FileHash` matches the SHA-256 the
+  signed `SHA256SUMS` lists. On Windows, the Visual C++
   runtime DLLs next to `jkit.exe` are replaced from the same checked archive; a folder without
   them doesn't get them.
 - From 0.5.0, the `.deb` and `.rpm` are signed with the Linux release key the
@@ -152,6 +155,10 @@ matters:
   Visual Studio and checks they are signed by Microsoft. Windows Update doesn't patch a copy next to
   a program, so a fix to them reaches you with the next jkit release and `jkit self-update`; with
   the Visual C++ Redistributable installed, deleting the two DLLs leaves the runtime to Windows Update.
+  The `.msi` (from 0.6.0) installs the same two DLLs next to `jkit.exe`, and a newer `.msi` replaces them.
+- jkit's Windows files, `jkit.exe` and the `.msi`, aren't Authenticode-signed, so Windows
+  SmartScreen may warn when you open a downloaded `.msi` ("Windows protected your PC"). Check the
+  `.msi` against `SHA256SUMS` (below) before choosing "Run anyway".
 
 ## Project files
 

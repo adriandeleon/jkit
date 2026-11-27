@@ -88,7 +88,8 @@ parts of the Java runtime: the OpenJDK class library and GraalVM's Substrate VM,
 the GNU General Public License version 2 with the Classpath Exception (full text near the end),
 with the third-party code they carry (XML parser, Unicode data, zlib and others; see "Java
 runtime"). The Windows .zip also holds Microsoft's Visual C++ runtime DLLs, under Microsoft's
-terms (see "Microsoft Visual C++ runtime"). The static musl Linux binary (linux-x64-musl)
+terms (see "Microsoft Visual C++ runtime"), and the Windows .msi images from WiX Toolset (see
+"WiX Toolset"). The static musl Linux binary (linux-x64-musl)
 also contains musl libc and zlib (see "musl Linux binaries").
 
 The binaries are built with GraalVM Community Edition 25.0.5
@@ -152,6 +153,12 @@ EOF
     "==============================================================================" \
     "=============================================================================="
   tr -d '\r' < "$root/packaging/third-party/msvc-runtime.txt"
+
+  # the setup dialogs' images the Windows .msi carries (packaging/windows/jkit.wxs)
+  printf '\n%s\nWiX Toolset (the Windows .msi only)\n%s\n\n' \
+    "==============================================================================" \
+    "=============================================================================="
+  tr -d '\r' < "$root/packaging/third-party/wix-MS-RL.txt"
 
   # the C library and zlib linked statically into the musl binaries (release.yml builds them)
   printf '\n%s\nmusl Linux binaries\n%s\n\n' \

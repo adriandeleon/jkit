@@ -39,6 +39,13 @@ public final class SelfUpdate {
      */
     public static final List<String> WINDOWS_RUNTIME = List.of("vcruntime140.dll", "vcruntime140_1.dll");
 
+    /**
+     * The file the Windows .msi installs next to jkit.exe, which says it came from the .msi (and
+     * how to update and remove it): a copy from the .zip is replaced in place, but the .msi's files
+     * are Windows Installer's, and a newer .msi replaces them.
+     */
+    public static final String MSI_MARKER = "INSTALLER.txt";
+
     private static final Pattern SUM_LINE = Pattern.compile("^([0-9a-fA-F]{64}) [ *](\\S+)$");
 
     private SelfUpdate() { }
@@ -52,6 +59,10 @@ public final class SelfUpdate {
         DEB_FILE("a .deb package", null),
         RPM("an .rpm package", null),
         WINGET("winget", "winget upgrade AdrianDeLeon.jkit"),
+        /** The .msi, installed just for this user: in %LOCALAPPDATA%\Programs\jkit. */
+        MSI_USER("the .msi, just for you", null),
+        /** The .msi, installed for all users: in %ProgramFiles%\jkit; updating it needs an administrator. */
+        MSI_MACHINE("the .msi, for all users", null),
         ARCHIVE("a release archive", null);
 
         public final String what;
@@ -68,10 +79,15 @@ public final class SelfUpdate {
          * default, and apt checks only its repositories), so the command checks the file's hash.
          */
         public boolean needsSignedSums() {
-            return this == RPM || this == DEB_FILE;
+            return this == RPM || this == DEB_FILE || isMsi();
         }
 
-        /** The .rpm or .deb this kind of install updates from, as the release publishes it; null for the others. */
+        /** Whether the Windows .msi installed this copy, for either scope. */
+        public boolean isMsi() {
+            return this == MSI_USER || this == MSI_MACHINE;
+        }
+
+        /** The .rpm, .deb or .msi this kind of install updates from, as the release publishes it; null for the others. */
         public String packageFile(Release release, Platform platform) {
             // the packages' versions have "~" for "-" (1.2.0~rc.1), which GitHub's asset names turn into "."
             String pkgVersion = release.version().raw().replace('-', '.');
@@ -79,6 +95,7 @@ public final class SelfUpdate {
             return switch (this) {
                 case RPM -> "jkit-" + pkgVersion + "-1." + (arm ? "aarch64" : "x86_64") + ".rpm";
                 case DEB_FILE -> "jkit_" + pkgVersion + "_" + (arm ? "arm64" : "amd64") + ".deb";
+                case MSI_USER, MSI_MACHINE -> "jkit-" + release.version().raw() + "-" + platform.id() + ".msi";
                 default -> null;
             };
         }
@@ -90,7 +107,10 @@ public final class SelfUpdate {
          * command downloads the package into a new folder of the user's own and installs it only if
          * its SHA-256 is the one listed there. A new folder, not a fixed name in /tmp: another user
          * could create that file first, writable by them, and swap in their own package before sudo
-         * reads it.
+         * reads it. For the .msi, a PowerShell command that downloads it into the user's own TEMP
+         * folder, checks it the same way, and runs it for the scope it was installed in, with a
+         * progress bar and no questions (/passive): Windows Installer upgrades an install only in the
+         * scope it installs in, and the dialog would offer the other one too.
          */
         public String command(Release release, Platform platform, String sums) {
             String file = packageFile(release, platform);
@@ -102,6 +122,12 @@ public final class SelfUpdate {
                 throw new JkitException("jkit " + release.version() + " has no " + file + " in its SHA256SUMS",
                         "see " + DEFAULT_BASE);
             }
+            if (isMsi()) {
+                return "$f = \"$env:TEMP\\" + file + "\"; Invoke-WebRequest -UseBasicParsing -OutFile $f "
+                        + release.url(DEFAULT_BASE, file) + "; if ((Get-FileHash $f).Hash -eq '" + sha256 + "') { msiexec /i $f /passive"
+                        + (this == MSI_MACHINE ? " ALLUSERS=1" : "") + " | Out-Null } else { Write-Error \"$f doesn't match"
+                        + " the release's SHA256SUMS\" }";
+            }
             String path = "\"$d/" + file + "\"";
             return "d=$(mktemp -d) && curl -fLo " + path + " " + release.url(DEFAULT_BASE, file)
                     + " && echo '" + sha256 + "  '" + path + " | sha256sum -c -"
@@ -109,7 +135,7 @@ public final class SelfUpdate {
         }
 
         public String id() {
-            return this == DEB_FILE ? "deb" : name().toLowerCase(Locale.ROOT);
+            return this == DEB_FILE ? "deb" : isMsi() ? "msi" : name().toLowerCase(Locale.ROOT);
         }
     }
 
@@ -201,7 +227,9 @@ public final class SelfUpdate {
 
     /**
      * How the binary at {@code binary} (its real path, links resolved) was installed: Homebrew's
-     * Cellar, winget's package folder, a Linux package (dpkg or rpm owns /usr/bin), else an archive.
+     * Cellar, winget's package folder, the Windows .msi (its {@link #MSI_MARKER} beside jkit.exe;
+     * just for you if that's in the user's AppData, else for all users), a Linux package (dpkg or
+     * rpm owns /usr/bin), else an archive.
      */
     public static Kind detect(Path binary, Platform platform, Predicate<Path> exists) {
         String path = binary.toString().replace('\\', '/');
@@ -211,6 +239,9 @@ public final class SelfUpdate {
         }
         if (platform.isWindows() && lower.contains("/winget/packages/")) {
             return Kind.WINGET;
+        }
+        if (platform.isWindows() && exists.test(binary.resolveSibling(MSI_MARKER))) {
+            return lower.contains("/appdata/") ? Kind.MSI_USER : Kind.MSI_MACHINE;
         }
         if (platform.isLinux() && (path.startsWith("/usr/bin/") || path.startsWith("/usr/lib/"))) {
             if (exists.test(Path.of("/var/lib/dpkg/info/jkit.list"))) {
